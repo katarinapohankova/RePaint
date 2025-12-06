@@ -6,12 +6,16 @@ import numpy as np
 
 from .layers import Layer, LayerRole
 
+from .history import UndoAction, GlobalUndoManager
+
+from .warnings import UserWarning
+
 
 class Project:
     """
     Reprezentuje jeden otvorený projekt
     Zatiaľ:
-      - nemá undo, warningy ani IO
+      - nemá warningy ani IO
       - vie držať vrstvy a urobiť jednoduchú kompozíciu
     """
 
@@ -27,6 +31,13 @@ class Project:
 
         #záznamy pre neskorší PDF report
         self.history_for_report: List[dict] = []
+
+        #undo/redo manažér 
+        self.undo_manager: GlobalUndoManager = GlobalUndoManager()
+
+        #warningy a logy
+        self.log_manager: LogManager = LogManager()
+
 
     #---------Správa vrstiev---------
 
@@ -77,3 +88,20 @@ class Project:
 
         #výsledok pretypujeme na uint8
         return np.clip(base, 0, 255).astype(np.uint8)
+    
+    #---------Undo/redo rozhranie---------
+
+    def undo_global(self) -> Optional[UndoAction]:
+        """Vykoná globálne undo
+        Vráti UndoAction alebo None"""
+        return self.undo_manager.undo_global(self)
+
+    def redo_global(self) -> Optional[UndoAction]:
+        """Vykoná globálne redo
+        Vráti UndoAction alebo None"""
+        return self.undo_manager.redo_global(self)
+
+    def undo_on_layer(self, layer_id: str) -> Optional[UndoAction]:
+        """Vykoná undo na konkrétnej vrstve (zatiaľ jednoduchá verzia)"""
+        return self.undo_manager.undo_on_layer(self, layer_id)
+
