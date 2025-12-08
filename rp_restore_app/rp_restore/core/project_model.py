@@ -9,6 +9,7 @@ from .layers import Layer, LayerRole
 from .history import UndoAction, GlobalUndoManager
 
 from .warnings import UserWarning
+from .warnings import LogManager
 
 
 class Project:
