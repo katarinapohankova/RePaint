@@ -24,6 +24,8 @@ class ImageCanvasWidget(QWidget):
         self.pan_offset_x: int = 0
         self.pan_offset_y: int = 0
 
+        self.controller = None
+        
         self.setMinimumSize(400, 300)
         self.setAutoFillBackground(True)
 
@@ -31,6 +33,10 @@ class ImageCanvasWidget(QWidget):
         """Nastaví nový obraz a prekreslí widget."""
         self.current_image = image
         self.update()
+
+    def set_controller(self, controller) -> None:
+        """nastaví controller, ktorému budeme posielať udalosti myši"""
+        self.controller = controller
 
     def paintEvent(self, event: QPaintEvent) -> None: 
         painter = QPainter(self)
@@ -44,3 +50,70 @@ class ImageCanvasWidget(QWidget):
         #zatiaľ bez zoomu 
         #nakreslíme obraz do ľavého horného rohu
         painter.drawImage(0, 0, self.current_image)
+
+    #--------myš--------
+    def _map_widget_to_image(self, x: int, y: int) -> tuple[int, int] | None:
+        """
+        prepočet súradníc z widgetu na obrázok
+        zatiaľ:
+          - žiadny zoom
+          - obraz je v ľavom hornom rohu
+          - ak klikne mimo obrázok, vráti None
+        """
+        if self.current_image is None:
+            return None
+
+        img_w = self.current_image.width()
+        img_h = self.current_image.height()
+
+        if x < 0 or y < 0 or x >= img_w or y >= img_h:
+            return None
+
+        return int(x), int(y)
+
+    def mousePressEvent(self, event):  
+        if self.controller is None or self.current_image is None:
+            return
+
+        pos = event.position()
+        mapped = self._map_widget_to_image(int(pos.x()), int(pos.y()))
+        if mapped is None:
+            return
+
+        img_x, img_y = mapped
+        self.controller.on_canvas_mouse_press(img_x, img_y, event.buttons(), event.modifiers())
+
+    def mouseMoveEvent(self, event): 
+        if self.controller is None or self.current_image is None:
+            return
+
+        pos = event.position()
+        mapped = self._map_widget_to_image(int(pos.x()), int(pos.y()))
+        if mapped is None:
+            return
+
+        img_x, img_y = mapped
+        self.controller.on_canvas_mouse_move(
+            img_x,
+            img_y,
+            event.buttons(),
+            event.modifiers(),
+        )
+
+    def mouseReleaseEvent(self, event):  
+        if self.controller is None or self.current_image is None:
+            return
+
+        pos = event.position()
+        mapped = self._map_widget_to_image(int(pos.x()), int(pos.y()))
+        if mapped is None:
+            return
+
+        img_x, img_y = mapped
+        self.controller.on_canvas_mouse_release(
+            img_x,
+            img_y,
+            event.buttons(),
+            event.modifiers(),
+        )
+

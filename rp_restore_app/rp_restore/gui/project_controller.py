@@ -5,9 +5,15 @@ from typing import Optional
 import numpy as np
 from PySide6.QtGui import QImage
 
+from PySide6.QtCore import Qt
+
 from rp_restore.core.project_model import Project
 from rp_restore.config.settings import AppSettings
 from rp_restore.gui.canvas.image_canvas_widget import ImageCanvasWidget
+from rp_restore.gui.panels.layers_panel import LayersPanel
+from rp_restore.gui.tools.base_tool import BaseTool
+from rp_restore.gui.tools.brush_tool import BrushTool
+from rp_restore.gui.tools.eraser_tool import EraserTool
 
 
 class ProjectController:
@@ -24,6 +30,9 @@ class ProjectController:
 
         self.canvas: Optional[ImageCanvasWidget] = None
         #neskôr pribudnú ďalšie ako layers_panel, log_panel, tools_panel...
+        self.active_layer_id: Optional[str] = None
+        self.layers_panel: Optional[LayersPanel] = None
+        self.current_tool: Optional[BaseTool] = None
 
 
     def set_canvas(self, canvas: ImageCanvasWidget) -> None:
@@ -32,8 +41,36 @@ class ProjectController:
     def set_project(self, project: Project) -> None:
         """nastaví aktuálny Project a refreshne GUI"""
         self.project = project
+
+        #default aktívna vrstva bude preferovaná BACKGROUND, inak prvú vrstvu v zozname
+        self.active_layer_id = None
+        if self.project.layers:
+            bg = self.project.get_background_layer()
+            if bg is not None:
+                self.active_layer_id = bg.meta.id
+            else:
+                self.active_layer_id = self.project.layers[0].meta.id
         self.refresh_canvas()
+        self.refresh_layers_panel()
         #neskôr refreshne všetko (refresh_layers_panel(), refresh_log_panel()...)
+
+    def set_layers_panel(self, panel: LayersPanel) -> None:
+        """prepojí controller s panelom vrstiev"""
+        self.layers_panel = panel
+        panel.set_controller(self)
+
+    def set_current_tool(self, tool_type: str) -> None:
+        """
+        nastaví aktuálny nástroj podľa typu (brush, eraser, ...)
+        """
+        if self.canvas is None:
+            return
+        if tool_type == "brush":
+            self.current_tool = BrushTool(self, self.canvas)
+        elif tool_type == "eraser":
+            self.current_tool = EraserTool(self, self.canvas)
+        else:
+            self.current_tool = None
 
     #refresh metódy
 
@@ -46,14 +83,51 @@ class ProjectController:
         qimage = self._numpy_rgb_to_qimage(image_rgb)
         self.canvas.set_image(qimage)
 
+    def set_active_layer(self, layer_id: str) -> None:
+        """
+        nastaví aktívnu vrstvu podľa jej id
+        zatiaľ len uloží ID a refreshne LayersPanel
+        -neskôr o tom budú vedieť aj nástroje (brush, fill, ...)
+        """
+        if self.project is None:
+            return
+
+        if self.active_layer_id == layer_id:
+            return
+
+        #overíme, či vrstva s takým ID existuje
+        if not any(layer.meta.id == layer_id for layer in self.project.layers):
+            return
+
+        self.active_layer_id = layer_id
+        self.refresh_layers_panel()
+        #neskôr informujeme nástroje
+
     def refresh_layers_panel(self) -> None:
-        #treba dorobiť
-        pass
+        if self.project is None or self.layers_panel is None:
+            return
+
+        self.layers_panel.refresh_from_project(self.project, self.active_layer_id)
+
 
     def refresh_log_panel(self) -> None:
         #treba dorobiť
         pass
 
+    def on_canvas_mouse_press(self, img_x: int, img_y: int, buttons: Qt.MouseButtons, modifiers: Qt.KeyboardModifier) -> None:
+        if self.current_tool is None:
+            return
+        self.current_tool.on_mouse_press(img_x, img_y, buttons, modifiers)
+
+    def on_canvas_mouse_move(self, img_x: int, img_y: int, buttons: Qt.MouseButton, modifiers: Qt.KeyboardModifier) -> None:
+        if self.current_tool is None:
+            return
+        self.current_tool.on_mouse_move(img_x, img_y, buttons, modifiers)
+
+    def on_canvas_mouse_release(self, img_x: int, img_y: int, buttons: Qt.MouseButton, modifiers: Qt.KeyboardModifier) -> None:
+        if self.current_tool is None:
+            return
+        self.current_tool.on_mouse_release(img_x, img_y, buttons, modifiers)
 
     def _numpy_rgb_to_qimage(self, arr: np.ndarray) -> QImage:
         """
