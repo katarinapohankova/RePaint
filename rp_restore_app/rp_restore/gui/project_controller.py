@@ -41,6 +41,8 @@ class ProjectController:
         self.layers_panel: Optional[LayersPanel] = None
         self.current_tool: Optional[BaseTool] = None
         self.active_selection: Optional[Selection] = None
+        #vizualizácia damage masky v canvase
+        self.show_damage_overlay: bool = True
 
         self.current_project_path: Optional[str] = None
 
@@ -93,6 +95,13 @@ class ProjectController:
         """
         self.active_selection = selection
 
+    def set_show_damage_overlay(self, show: bool) -> None:
+        """
+        Zapne / vypne vizualizáciu damage_remaining_mask na canvase
+        """
+        self.show_damage_overlay = show
+        self.refresh_canvas()
+
 
     #refresh metódy
 
@@ -102,6 +111,25 @@ class ProjectController:
 
         #numpy (H, W, 3, uint8)
         image_rgb = self.project.composited_image()
+
+        #overlay poškodených oblastí (damage_remaining_mask)
+        if self.show_damage_overlay:
+            remaining = self.project.get_damage_remaining_mask()
+            if remaining is not None:
+                h_img, w_img, _ = image_rgb.shape
+                h_mask, w_mask = remaining.shape
+
+                #len ak sedí veľkosť – aby to nespadlo, keby maska bola zlá
+                if h_mask == h_img and w_mask == w_img:
+                    #vybielený náhľad poškodených oblastí
+                    overlay_color = np.array([255, 255, 255], dtype=np.float32)
+                    alpha = 0.6  # 0 = nič, 1 = úplne biele
+
+                    region = remaining
+                    orig = image_rgb[region].astype(np.float32)
+                    blended = orig * (1.0 - alpha) + overlay_color * alpha
+                    image_rgb[region] = blended.clip(0, 255).astype(np.uint8)
+                #inak overlay ignorujeme -maska nesedí
         qimage = self._numpy_rgb_to_qimage(image_rgb)
         self.canvas.set_image(qimage)
 

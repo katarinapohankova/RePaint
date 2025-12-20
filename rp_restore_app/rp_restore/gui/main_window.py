@@ -123,6 +123,13 @@ class MainWindow(QMainWindow):
         redo_action.triggered.connect(self.on_redo_triggered)
         edit_menu.addAction(redo_action)
 
+        view_menu = menu_bar.addMenu("&View")
+
+        self.toggle_damage_overlay_action = QAction("Zobraziť poškodené oblasti", self)
+        self.toggle_damage_overlay_action.setCheckable(True)
+        self.toggle_damage_overlay_action.setChecked(True)
+        self.toggle_damage_overlay_action.triggered.connect(self.on_toggle_damage_overlay)
+        view_menu.addAction(self.toggle_damage_overlay_action)
 
     def _create_toolbars(self) -> None:
         tools_toolbar = QToolBar("Nástroje", self)
@@ -323,6 +330,13 @@ class MainWindow(QMainWindow):
 
         #self.start_screen.set_recent_projects(self.app_settings.get_recent_projects())
         self.statusBar().showMessage("Projekt uložený", 3000)
+
+    def on_toggle_damage_overlay(self, checked: bool) -> None:
+        """
+        zapne/vypne vizualizáciu damage masky na canvase
+        """
+        self.controller.set_show_damage_overlay(checked)
+
     #----------helper metódy-----------
 
     def on_new_project_beta(self) -> None:
