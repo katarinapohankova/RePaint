@@ -1,19 +1,26 @@
 from __future__ import annotations
 
 from typing import Optional
+from pathlib import Path
 
 import numpy as np
 from PySide6.QtGui import QImage
 
 from PySide6.QtCore import Qt
 
+from rp_restore.core.layers import Layer, LayerMeta, LayerRole
 from rp_restore.core.project_model import Project
 from rp_restore.config.settings import AppSettings
+from rp_restore.core.selection import Selection
 from rp_restore.gui.canvas.image_canvas_widget import ImageCanvasWidget
 from rp_restore.gui.panels.layers_panel import LayersPanel
 from rp_restore.gui.tools.base_tool import BaseTool
 from rp_restore.gui.tools.brush_tool import BrushTool
 from rp_restore.gui.tools.eraser_tool import EraserTool
+from rp_restore.gui.tools.fill_tool import FillTool
+from rp_restore.gui.tools.selection_tool import SelectionTool
+from rp_restore.io import image_io
+from rp_restore.io.project_storage import ProjectLoader, ProjectSerializer
 
 
 class ProjectController:
@@ -33,6 +40,9 @@ class ProjectController:
         self.active_layer_id: Optional[str] = None
         self.layers_panel: Optional[LayersPanel] = None
         self.current_tool: Optional[BaseTool] = None
+        self.active_selection: Optional[Selection] = None
+
+        self.current_project_path: Optional[str] = None
 
 
     def set_canvas(self, canvas: ImageCanvasWidget) -> None:
@@ -69,8 +79,20 @@ class ProjectController:
             self.current_tool = BrushTool(self, self.canvas)
         elif tool_type == "eraser":
             self.current_tool = EraserTool(self, self.canvas)
+        elif tool_type == "fill":
+            self.current_tool = FillTool(self, self.canvas)
+        elif tool_type == "selection":
+            self.current_tool = SelectionTool(self, self.canvas)
         else:
             self.current_tool = None
+
+    def set_active_selection(self, selection: Selection | None) -> None:
+        """
+        nastaví aktuálnu selection
+        zatiaľ len uložíme do atribútu, neskôr pridáme highlight na canvase a info AlgorithmPanelu
+        """
+        self.active_selection = selection
+
 
     #refresh metódy
 
@@ -141,3 +163,69 @@ class ProjectController:
         bytes_per_line = ch * w
         qimage = QImage(arr.data, w, h, bytes_per_line, QImage.Format_RGB888)
         return qimage.copy()
+    
+    #load /save projektu
+    def create_project_from_files(self, image_path: str, mask_path: Optional[str] = None) -> Project:
+        """
+        Vytvorí nový Project zo zadaného obrázka (a voliteľne damage masky)
+        """
+        img_rgba = image_io.load_image(image_path)
+        h, w, _ = img_rgba.shape
+
+        bg_meta = LayerMeta(id="background", name="Background", role=LayerRole.BACKGROUND)
+        bg_layer = Layer(bg_meta, img_rgba)
+
+        paint_img = np.zeros_like(img_rgba, dtype=np.uint8)
+        paint_meta = LayerMeta(id="paint_1", name="Paint 1", role=LayerRole.PAINT)
+        paint_layer = Layer(paint_meta, paint_img)
+
+        project_name = Path(image_path).stem
+        project = Project(project_name)
+        project.add_layer(bg_layer)
+        project.add_layer(paint_layer)
+
+        if mask_path:
+            mask = image_io.load_mask(mask_path)
+            project.set_damage_masks(mask)
+
+        self.set_project(project)
+        self.current_project_path = None
+        return project
+
+    def open_project(self, zip_path: str) -> Project:
+        """
+        Načíta projekt zo .zip súboru a nastaví ho ako aktuálny
+        """
+        project = ProjectLoader.load_from_zip(zip_path)
+        self.set_project(project)
+        self.current_project_path = zip_path
+        self.app_settings.add_recent_project(zip_path)
+        return project
+
+    def save_project_as(self, zip_path: str) -> None:
+        """
+        Uloží projekt do nového .zip súboru a aktualizuje current_project_path
+        """
+        if self.project is None:
+            return
+
+        ProjectSerializer.save_to_zip(self.project, zip_path)
+        self.current_project_path = zip_path
+        self.app_settings.add_recent_project(zip_path)
+
+    def save_project(self) -> bool:
+        """
+        Uloží projekt na aktuálnu cestu
+
+        vráti True, ak sa uložil, False ak nemá nastavenú cestu
+        """
+        if self.project is None:
+            return False
+
+        if not self.current_project_path:
+            return False
+
+        ProjectSerializer.save_to_zip(self.project, self.current_project_path)
+        self.app_settings.add_recent_project(self.current_project_path)
+        return True
+

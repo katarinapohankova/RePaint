@@ -10,6 +10,7 @@ from .history import UndoAction, GlobalUndoManager
 
 from .warnings import UserWarning
 from .warnings import LogManager
+from .selection import Selection
 
 
 class Project:
@@ -105,4 +106,94 @@ class Project:
     def undo_on_layer(self, layer_id: str) -> Optional[UndoAction]:
         """Vykoná undo na konkrétnej vrstve (zatiaľ jednoduchá verzia)"""
         return self.undo_manager.undo_on_layer(self, layer_id)
+    
+
+    #---------damage masky--------
+    def set_damage_masks(self, original_mask: np.ndarray) -> None:
+        """
+        Nastaví masku poškodenia
+        original_mask -2D pole (H, W), kde true je poškodené miesto
+        """
+        if original_mask.ndim != 2:
+            raise ValueError("Damage mask must be 2D (H, W)")
+
+        self.damage_original_mask = original_mask.astype(bool)
+        self.damage_filled_mask = np.zeros_like(self.damage_original_mask, dtype=bool)
+
+    def get_damage_remaining_mask(self) -> np.ndarray | None:
+        """
+        vráti masku zostávajúcich (nevyplnených) poškodených miest
+        """
+        if self.damage_original_mask is None or self.damage_filled_mask is None:
+            return None
+
+        return self.damage_original_mask & ~self.damage_filled_mask
+
+    def mark_region_as_filled(self, region_mask: np.ndarray) -> None:
+        """
+        označí daný region v damage maske ako vyplnený
+        """
+        if self.damage_filled_mask is None:
+            return
+
+        if region_mask.shape != self.damage_filled_mask.shape:
+            raise ValueError("region_mask must have same shape as damage mask")
+
+        self.damage_filled_mask |= region_mask.astype(bool)
+
+    def get_selection_from_click(self, x: int, y: int) -> Selection | None:
+        """
+        ak v bode (x, y) je pixel poškodený (true), spraví flood-fill a vráti Selection (region_mask + bbox)
+        """
+        remaining = self.get_damage_remaining_mask()
+        if remaining is None:
+            return None
+
+        h, w = remaining.shape
+        if x < 0 or y < 0 or x >= w or y >= h:
+            return None
+
+        if not remaining[y, x]:
+            #klik mimo poškodenej oblasti
+            return None
+
+        #flood-fill cez stack iteratívne
+        region_mask = np.zeros_like(remaining, dtype=bool)
+
+        stack: list[tuple[int, int]] = [(x, y)]
+        region_mask[y, x] = True
+
+        while stack:
+            cx, cy = stack.pop()
+
+            #susedia
+            for nx, ny in (
+                (cx - 1, cy),
+                (cx + 1, cy),
+                (cx, cy - 1),
+                (cx, cy + 1),
+            ):
+                if 0 <= nx < w and 0 <= ny < h:
+                    if remaining[ny, nx] and not region_mask[ny, nx]:
+                        region_mask[ny, nx] = True
+                        stack.append((nx, ny))
+
+        #bbox
+        ys, xs = np.where(region_mask)
+        if ys.size == 0:
+            return None
+
+        y_min = int(ys.min())
+        y_max = int(ys.max())
+        x_min = int(xs.min())
+        x_max = int(xs.max())
+
+        bbox = (x_min, y_min, x_max - x_min + 1, y_max - y_min + 1)
+
+        return Selection(
+            region_mask=region_mask,
+            bbox=bbox,
+            seed_point=(x, y),
+        )
+
 

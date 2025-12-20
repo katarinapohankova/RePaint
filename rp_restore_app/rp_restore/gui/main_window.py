@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import numpy as np
+from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QMainWindow, QStatusBar, QMessageBox, QDockWidget, QToolBar
+from PySide6.QtWidgets import QMainWindow, QStatusBar, QMessageBox, QDockWidget, QToolBar, QFileDialog
 
 from rp_restore.config.settings import AppSettings
 from rp_restore.core.layers import Layer, LayerMeta, LayerRole
@@ -52,11 +53,12 @@ class MainWindow(QMainWindow):
         self.layers_dock.hide()
 
         #start screen
-        self.start_screen = StartScreenWidget(self)
-        self.start_screen.set_recent_projects(self.app_settings.get_recent_projects())
-        self.start_screen.new_project_requested.connect(self.on_new_project_requested)
-        self.start_screen.open_project_requested.connect(self.on_open_project_requested)
-        self.start_screen.open_recent_requested.connect(self.on_open_recent_requested)
+        self.start_screen = None
+        # self.start_screen = StartScreenWidget(self)
+        # self.start_screen.set_recent_projects(self.app_settings.get_recent_projects())
+        # self.start_screen.new_project_requested.connect(self.on_new_project_from_image)
+        # self.start_screen.open_project_requested.connect(self.on_open_project_requested)
+        # self.start_screen.open_recent_requested.connect(self.on_open_recent_requested)
 
         #začíname na start screene
         self.show_start_screen()
@@ -73,10 +75,34 @@ class MainWindow(QMainWindow):
 
         file_menu = menu_bar.addMenu("&File")
 
-        new_action = QAction("Nový projekt", self)
-        new_action.setShortcut("Ctrl+N")
-        new_action.triggered.connect(self.on_new_project_requested)
-        file_menu.addAction(new_action)
+        new_beta_action = QAction("Nový projekt (beta)", self)
+        new_beta_action.setShortcut("Ctrl+Shift+N")
+        new_beta_action.triggered.connect(self.on_new_project_beta)
+        file_menu.addAction(new_beta_action)
+
+        new_from_image_action = QAction("Nový projekt z obrázku...", self)
+        new_from_image_action.setShortcut("Ctrl+N")
+        new_from_image_action.triggered.connect(self.on_new_project_from_image)
+        file_menu.addAction(new_from_image_action)
+
+        open_action = QAction("Otvoriť projekt...", self)
+        open_action.setShortcut("Ctrl+O")
+        open_action.triggered.connect(self.on_open_project_requested)
+        file_menu.addAction(open_action)
+
+        file_menu.addSeparator()
+
+        save_action = QAction("Uložiť projekt", self)
+        save_action.setShortcut("Ctrl+S")
+        save_action.triggered.connect(self.on_save_project)
+        file_menu.addAction(save_action)
+
+        save_as_action = QAction("Uložiť projekt ako...", self)
+        save_as_action.setShortcut("Ctrl+Shift+S")
+        save_as_action.triggered.connect(self.on_save_project_as)
+        file_menu.addAction(save_as_action)
+
+        file_menu.addSeparator()
 
         #neskôr -Open/Save/Exit
         exit_action = QAction("Ukončiť", self)
@@ -112,10 +138,32 @@ class MainWindow(QMainWindow):
         eraser_action.triggered.connect(lambda: self.controller.set_current_tool("eraser"))
         tools_toolbar.addAction(eraser_action)
 
+        fill_action = QAction("Fill", self)
+        fill_action.setShortcut("F")
+        fill_action.triggered.connect(lambda: self.controller.set_current_tool("fill"))
+        tools_toolbar.addAction(fill_action)
+
+        selection_action = QAction("Select", self)
+        selection_action.setShortcut("S")
+        selection_action.triggered.connect(lambda: self.controller.set_current_tool("selection"))
+        tools_toolbar.addAction(selection_action)
+
     #----------prepínanie obrazoviek-----------
 
     def show_start_screen(self) -> None:
         """zobrazí úvodnú obrazovku"""
+        if self.start_screen is not None:
+            self.start_screen.deleteLater()
+            self.start_screen = None
+        self.setCentralWidget(self.start_screen)
+
+        start_screen = StartScreenWidget(self)
+        start_screen.set_recent_projects(self.app_settings.get_recent_projects())
+        start_screen.new_project_requested.connect(self.on_new_project_from_image)
+        start_screen.open_project_requested.connect(self.on_open_project_requested)
+        start_screen.open_recent_requested.connect(self.on_open_recent_requested)
+
+        self.start_screen = start_screen
         self.setCentralWidget(self.start_screen)
 
         #schováme dock panely (kým nie je otvorený projekt)
@@ -141,23 +189,37 @@ class MainWindow(QMainWindow):
         Bude otvárať existujúci projekt (zo .zip)
         Zatiaľ nič
         """
-        QMessageBox.information(
+        zip_path, _ = QFileDialog.getOpenFileName(
             self,
-            "ešte nie je",
-            "otváranie existujúceho projektu zatiaľ nie je implementované\n"
-            "použi Nový projekt",
+            "Otvoriť projekt",
+            "",
+            "RP projekty (*.zip);;Všetky súbory (*.*)",
         )
+        if not zip_path:
+            return
+
+        try:
+            self.controller.open_project(zip_path)
+        except Exception as e:
+            QMessageBox.critical(self, "Chyba pri otváraní projektu", str(e))
+            return
+
+        # aktualizujeme zoznam recent projektov na start screene
+        #self.start_screen.set_recent_projects(self.app_settings.get_recent_projects())
+        self.show_workspace()
 
     def on_open_recent_requested(self, path: str) -> None:
         """
         bude otvárať projekt zo zoznamu naposledy otvorené
         zatiaľ len info
         """
-        QMessageBox.information(
-            self,
-            "ešte nie je",
-            f"otváranie recent projektu zatiaľ nie je implementované.\nPath: {path}",
-        )
+        try:
+            self.controller.open_project(path)
+        except Exception as e:
+            QMessageBox.critical(self, "Chyba pri otváraní projektu", str(e))
+            return
+
+        self.show_workspace()
 
     def on_undo_triggered(self) -> None:
         project = self.controller.project
@@ -187,8 +249,88 @@ class MainWindow(QMainWindow):
         self.controller.refresh_canvas()
         self.controller.refresh_layers_panel()
 
+    def on_new_project_from_image(self) -> None:
+        """
+        Vytvorí nový projekt z obrázka (a voliteľne masky)
+        """
+        img_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Vyber základný obrázok",
+            "",
+            "Obrázky (*.png *.jpg *.jpeg *.tif *.tiff);;Všetky súbory (*.*)",
+        )
+        if not img_path:
+            return
 
+        mask_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Vyber masku poškodenia (voliteľné)",
+            "",
+            "Obrázky (*.png *.jpg *.jpeg *.tif *.tiff);;Všetky súbory (*.*)",
+        )
+        if not mask_path:
+            mask_path = None
+
+        try:
+            self.controller.create_project_from_files(img_path, mask_path)
+        except Exception as e:
+            QMessageBox.critical(self, "Chyba pri vytváraní projektu", str(e))
+            return
+
+        self.show_workspace()
+
+    def on_save_project(self) -> None:
+        """
+        Uloží projekt na existujúcu cestu, alebo spustí Uložiť ako...
+        """
+        if self.controller.project is None:
+            QMessageBox.information(self, "Žiadny projekt", "Nie je otvorený žiadny projekt")
+            return
+
+        if not self.controller.save_project():
+            # nemáme current_project_path → Save As
+            self.on_save_project_as()
+            return
+
+        #self.start_screen.set_recent_projects(self.app_settings.get_recent_projects())
+        self.statusBar().showMessage("Projekt uložený", 3000)
+
+    def on_save_project_as(self) -> None:
+        """
+        Uloží projekt do nového .zip súboru
+        """
+        if self.controller.project is None:
+            QMessageBox.information(self, "Žiadny projekt", "Nie je otvorený žiadny projekt")
+            return
+
+        zip_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Uložiť projekt ako",
+            "",
+            "RP projekty (*.zip);;Všetky súbory (*.*)",
+        )
+        if not zip_path:
+            return
+
+        if not zip_path.lower().endswith(".zip"):
+            zip_path += ".zip"
+
+        try:
+            self.controller.save_project_as(zip_path)
+        except Exception as e:
+            QMessageBox.critical(self, "Chyba pri ukladaní projektu", str(e))
+            return
+
+        #self.start_screen.set_recent_projects(self.app_settings.get_recent_projects())
+        self.statusBar().showMessage("Projekt uložený", 3000)
     #----------helper metódy-----------
+
+    def on_new_project_beta(self) -> None:
+        """Vytvorí jednoduchý beta projekt (na testovanie)"""
+        project = self._create_beta_project()
+        self.controller.set_project(project)
+        self.controller.current_project_path = None
+        self.show_workspace()
 
     def _create_beta_project(self) -> Project:
         """
@@ -215,6 +357,10 @@ class MainWindow(QMainWindow):
         project = Project("beta project")
         project.add_layer(bg_layer)
         project.add_layer(paint_layer)
+
+        #na skúšku je demage maska celý obraz
+        damage_mask = np.ones((height, width), dtype=bool)
+        project.set_damage_masks(damage_mask)
 
         return project
 
