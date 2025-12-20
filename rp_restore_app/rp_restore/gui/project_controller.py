@@ -257,3 +257,16 @@ class ProjectController:
         self.app_settings.add_recent_project(self.current_project_path)
         return True
 
+    def close_project(self) -> None:
+        """
+        Zavrie aktuálny projekt v controlleri
+
+        - zabudne referenciu na Project
+        - zruší aktívnu vrstvu, selection, nástroj
+        -vyčistí canvas (obraz)
+        """
+        self.project = None
+        self.active_layer_id = None
+        self.active_selection = None
+        self.current_tool = None
+        self.current_project_path = None

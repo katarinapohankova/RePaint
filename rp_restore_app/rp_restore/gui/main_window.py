@@ -35,9 +35,10 @@ class MainWindow(QMainWindow):
         self.controller = ProjectController(app_settings=self.app_settings)
 
         #workspace canvas
-        self.canvas = ImageCanvasWidget(self)
-        self.controller.set_canvas(self.canvas)
-        self.canvas.set_controller(self.controller)
+        # self.canvas = ImageCanvasWidget(self)
+        # self.controller.set_canvas(self.canvas)
+        # self.canvas.set_controller(self.controller)
+        self.canvas = None
 
         #layers panel
         self.layers_panel = LayersPanel(self)
@@ -102,6 +103,11 @@ class MainWindow(QMainWindow):
         save_as_action.triggered.connect(self.on_save_project_as)
         file_menu.addAction(save_as_action)
 
+        close_project_action = QAction("Zavrieť projekt", self)
+        close_project_action.setShortcut("Ctrl+W")
+        close_project_action.triggered.connect(self.on_close_project)
+        file_menu.addAction(close_project_action)
+
         file_menu.addSeparator()
 
         #neskôr -Open/Save/Exit
@@ -159,10 +165,10 @@ class MainWindow(QMainWindow):
 
     def show_start_screen(self) -> None:
         """zobrazí úvodnú obrazovku"""
-        if self.start_screen is not None:
-            self.start_screen.deleteLater()
-            self.start_screen = None
-        self.setCentralWidget(self.start_screen)
+        # if self.start_screen is not None:
+        #     self.start_screen.deleteLater()
+        #     self.start_screen = None
+        # self.setCentralWidget(self.start_screen)
 
         start_screen = StartScreenWidget(self)
         start_screen.set_recent_projects(self.app_settings.get_recent_projects())
@@ -179,6 +185,13 @@ class MainWindow(QMainWindow):
 
     def show_workspace(self) -> None:
         """zobrazí pracovnú plochu (canvas, neskôr aj dock panely)"""
+        #vytvoríme nový canvas vždy, keď ideme do workspace
+        canvas = ImageCanvasWidget(self)
+        self.canvas = canvas
+
+        self.controller.set_canvas(canvas)
+        canvas.set_controller(self.controller)
+
         self.setCentralWidget(self.canvas)
         if hasattr(self, "layers_dock"):
             self.layers_dock.show()
@@ -204,29 +217,32 @@ class MainWindow(QMainWindow):
         )
         if not zip_path:
             return
+        self.show_workspace()
 
         try:
             self.controller.open_project(zip_path)
         except Exception as e:
             QMessageBox.critical(self, "Chyba pri otváraní projektu", str(e))
+            self.show_start_screen()
             return
 
         # aktualizujeme zoznam recent projektov na start screene
         #self.start_screen.set_recent_projects(self.app_settings.get_recent_projects())
-        self.show_workspace()
 
     def on_open_recent_requested(self, path: str) -> None:
         """
         bude otvárať projekt zo zoznamu naposledy otvorené
         zatiaľ len info
         """
+        self.show_workspace()
+
         try:
             self.controller.open_project(path)
         except Exception as e:
             QMessageBox.critical(self, "Chyba pri otváraní projektu", str(e))
+            self.show_start_screen()
             return
 
-        self.show_workspace()
 
     def on_undo_triggered(self) -> None:
         project = self.controller.project
@@ -278,13 +294,16 @@ class MainWindow(QMainWindow):
         if not mask_path:
             mask_path = None
 
+        self.show_workspace()
+
         try:
             self.controller.create_project_from_files(img_path, mask_path)
         except Exception as e:
             QMessageBox.critical(self, "Chyba pri vytváraní projektu", str(e))
+            self.controller.close_project()
+            self.show_start_screen()
             return
 
-        self.show_workspace()
 
     def on_save_project(self) -> None:
         """
@@ -337,14 +356,27 @@ class MainWindow(QMainWindow):
         """
         self.controller.set_show_damage_overlay(checked)
 
+    def on_close_project(self) -> None:
+        """
+        Zavrie aktuálny projekt a vráti sa na úvodnú obrazovku
+        """
+        if self.controller.project is None:
+            # nič nie je otvorené, tak len ukážeme start screen 
+            self.show_start_screen()
+            return
+
+        # neskôr sa spýtame na uloženie (Save)
+        self.show_start_screen()
+
+
     #----------helper metódy-----------
 
     def on_new_project_beta(self) -> None:
         """Vytvorí jednoduchý beta projekt (na testovanie)"""
+        self.show_workspace()
         project = self._create_beta_project()
         self.controller.set_project(project)
         self.controller.current_project_path = None
-        self.show_workspace()
 
     def _create_beta_project(self) -> Project:
         """
