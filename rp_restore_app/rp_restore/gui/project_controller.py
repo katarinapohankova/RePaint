@@ -21,7 +21,7 @@ from rp_restore.gui.tools.fill_tool import FillTool
 from rp_restore.gui.tools.selection_tool import SelectionTool
 from rp_restore.io import image_io
 from rp_restore.io.project_storage import ProjectLoader, ProjectSerializer
-
+from rp_restore.core.auto_fill import auto_fill_small_regions
 
 class ProjectController:
     """
@@ -270,3 +270,39 @@ class ProjectController:
         self.active_selection = None
         self.current_tool = None
         self.current_project_path = None
+
+    def run_auto_fill_small_regions(self, area_threshold: int = 200) -> int:
+        """
+        spustí auto-fill malých oblastí na aktívnej PAINT vrstve
+        (alebo na prvej paint vrstve, ak aktívna nie je paint)
+
+        vráti počet vyplnených oblastí
+        """
+        if self.project is None:
+            return 0
+
+        #cieľová vrstva – preferujeme aktívnu, ak je PAINT
+        target_layer: Layer | None = None
+
+        if self.active_layer_id is not None:
+            for layer in self.project.layers:
+                if layer.meta.id == self.active_layer_id and layer.meta.role == LayerRole.PAINT:
+                    target_layer = layer
+                    break
+
+        if target_layer is None:
+            #fallback na prvú PAINT vrstvu
+            for layer in self.project.layers:
+                if layer.meta.role == LayerRole.PAINT:
+                    target_layer = layer
+                    break
+
+        if target_layer is None:
+            return 0
+
+        count = auto_fill_small_regions(self.project, target_layer, area_threshold)
+
+        if count > 0:
+            self.refresh_canvas()
+
+        return count

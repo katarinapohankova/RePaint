@@ -161,6 +161,11 @@ class MainWindow(QMainWindow):
         selection_action.triggered.connect(lambda: self.controller.set_current_tool("selection"))
         tools_toolbar.addAction(selection_action)
 
+        auto_fill_action = QAction("Auto-fill small", self)
+        auto_fill_action.triggered.connect(self.on_auto_fill_small_regions)
+        tools_toolbar.addAction(auto_fill_action)
+
+
     #----------prepínanie obrazoviek-----------
 
     def show_start_screen(self) -> None:
@@ -367,6 +372,28 @@ class MainWindow(QMainWindow):
 
         # neskôr sa spýtame na uloženie (Save)
         self.show_start_screen()
+
+    def on_auto_fill_small_regions(self) -> None:
+        """
+        Spustí automatické vyplnenie malých poškodených oblastí
+        """
+        if self.controller.project is None:
+            QMessageBox.information(self, "Žiadny projekt", "Nie je otvorený žiadny projekt")
+            return
+
+        count = self.controller.run_auto_fill_small_regions()
+        if count == 0:
+            QMessageBox.information(
+                self,
+                "Auto-fill",
+                "Nenašli sa žiadne malé oblasti na vyplnenie",
+            )
+        else:
+            self.statusBar().showMessage(
+                f"automaticky vyplnených oblastí: {count}",
+                5000,
+            )
+
 
 
     #----------helper metódy-----------
