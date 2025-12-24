@@ -13,6 +13,7 @@ from rp_restore.gui.canvas.image_canvas_widget import ImageCanvasWidget
 from rp_restore.gui.project_controller import ProjectController
 from rp_restore.gui.start_screen_widget import StartScreenWidget
 from rp_restore.gui.panels.layers_panel import LayersPanel
+from rp_restore.gui.panels.log_panel import LogPanel
 
 
 class MainWindow(QMainWindow):
@@ -47,11 +48,20 @@ class MainWindow(QMainWindow):
         self.layers_dock.setWidget(self.layers_panel)
         self.addDockWidget(Qt.RightDockWidgetArea, self.layers_dock)
 
-        #prepojenie controller - layers_panel
+        #Log panel 
+        self.log_panel = LogPanel(self)
+        self.log_dock = QDockWidget("Log", self)
+        self.log_dock.setObjectName("LogDock")
+        self.log_dock.setWidget(self.log_panel)
+        self.addDockWidget(Qt.BottomDockWidgetArea, self.log_dock)
+
+        #prepojenie controller - layers_panel, log_panel
         self.controller.set_layers_panel(self.layers_panel)
+        self.controller.set_log_panel(self.log_panel)
 
         #na začiatku (start screen) dock schováme
         self.layers_dock.hide()
+        self.log_dock.hide()
 
         #start screen
         self.start_screen = None
@@ -165,6 +175,10 @@ class MainWindow(QMainWindow):
         auto_fill_action.triggered.connect(self.on_auto_fill_small_regions)
         tools_toolbar.addAction(auto_fill_action)
 
+        edge_action = QAction("Edge", self)
+        edge_action.setShortcut("G")  #G-graphics
+        edge_action.triggered.connect(lambda: self.controller.set_current_tool("edge"))
+        tools_toolbar.addAction(edge_action)
 
     #----------prepínanie obrazoviek-----------
 
@@ -187,6 +201,8 @@ class MainWindow(QMainWindow):
         #schováme dock panely (kým nie je otvorený projekt)
         if hasattr(self, "layers_dock"):
             self.layers_dock.hide()
+        if hasattr(self, "log_dock"):
+            self.log_dock.hide()
 
     def show_workspace(self) -> None:
         """zobrazí pracovnú plochu (canvas, neskôr aj dock panely)"""
@@ -200,6 +216,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.canvas)
         if hasattr(self, "layers_dock"):
             self.layers_dock.show()
+        if hasattr(self, "log_dock"):
+            self.log_dock.show()
 
     #----------akcie StartScreen-----------
 
@@ -408,6 +426,7 @@ class MainWindow(QMainWindow):
     def _create_beta_project(self) -> Project:
         """
         vytvorí testovací Project s jednou background vrstvou –sivý obrázok 800x600
+        pridali sme 1 PAINT a 1 EDGE vrstvu
         """
         width, height = 800, 600
 
@@ -427,9 +446,14 @@ class MainWindow(QMainWindow):
         paint_meta = LayerMeta(id="paint_1", name="Paint 1", role=LayerRole.PAINT)
         paint_layer = Layer(paint_meta, paint_image)
 
+        edge_image = np.zeros((height, width, 4), dtype=np.uint8)
+        edge_meta = LayerMeta(id="edge_1", name="Edges 1", role=LayerRole.EDGE)
+        edge_layer = Layer(edge_meta, edge_image)
+
         project = Project("beta project")
         project.add_layer(bg_layer)
         project.add_layer(paint_layer)
+        project.add_layer(edge_layer)
 
         #na skúšku je demage maska celý obraz
         damage_mask = np.ones((height, width), dtype=bool)

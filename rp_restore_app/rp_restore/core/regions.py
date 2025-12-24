@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Set
 
 import numpy as np
 
@@ -35,6 +35,17 @@ class RegionMap:
         """Vráti zoznam oblastí, ktorých area < threshold (v počte pixelov)"""
         return [r for r in self.regions.values() if r.area < threshold]
 
+@dataclass
+class RegionMapChanges:
+    """
+    rozdiely medzi dvoma RegionMap
+    changed_mask -pixely, kde sa zmenilo ID oblasti
+    merged_regions -zoznam (old_ids, new_id, bbox)
+        - old_ids: množina pôvodných ID, ktoré sa zlúčili do new_id
+        - bbox: obálka novej zlúčenej oblasti
+    """
+    changed_mask: np.ndarray
+    merged_regions: List[Tuple[Set[int], int, Tuple[int, int, int, int]]]
 
 def build_region_map(damage_mask: np.ndarray, edge_layers: List[Layer]) -> RegionMap:
     """
@@ -103,3 +114,56 @@ def build_region_map(damage_mask: np.ndarray, edge_layers: List[Layer]) -> Regio
             current_id += 1
 
     return RegionMap(label_image, regions)
+
+def compare_region_maps(old: RegionMap, new: RegionMap) -> RegionMapChanges:
+    """
+    Porovná dve region mapy
+
+    - changed_mask -kde sa ID oblasti zmenilo
+    - merged_regions -nové oblasti, ktoré vznikli zlúčením viacerých starých
+    """
+    old_labels = old.label_image
+    new_labels = new.label_image
+
+    if old_labels.shape != new_labels.shape:
+        raise ValueError("Region maps must have the same shape for comparison")
+
+    h, w = old_labels.shape
+    changed_mask = old_labels != new_labels
+
+    #zistíme, ktoré staré ID sa zlúčili do ktorých nových ID
+    new_to_old: Dict[int, Set[int]] = {}
+
+    for y in range(h):
+        for x in range(w):
+            old_id = int(old_labels[y, x])
+            new_id = int(new_labels[y, x])
+            if new_id <= 0:
+                continue
+            if old_id <= 0:
+                continue
+            if old_id == new_id:
+                continue
+
+            if new_id not in new_to_old:
+                new_to_old[new_id] = set()
+            new_to_old[new_id].add(old_id)
+
+    merged_regions: List[Tuple[Set[int], int, Tuple[int, int, int, int]]] = []
+
+    for new_id, old_ids in new_to_old.items():
+        if len(old_ids) <= 1:
+            continue
+
+        ys, xs = np.where(new_labels == new_id)
+        if ys.size == 0:
+            continue
+        y_min = int(ys.min())
+        y_max = int(ys.max())
+        x_min = int(xs.min())
+        x_max = int(xs.max())
+        bbox = (x_min, y_min, x_max - x_min + 1, y_max - y_min + 1)
+
+        merged_regions.append((old_ids, new_id, bbox))
+
+    return RegionMapChanges(changed_mask=changed_mask, merged_regions=merged_regions)

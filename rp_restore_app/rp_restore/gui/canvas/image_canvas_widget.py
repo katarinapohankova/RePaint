@@ -4,6 +4,13 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPainter, QPaintEvent
 from PySide6.QtWidgets import QWidget
 
+from typing import List, Optional, TYPE_CHECKING
+
+from .overlay_highlight import draw_region_highlights
+
+if TYPE_CHECKING:
+    from rp_restore.core.warnings import RegionReference
+
 
 class ImageCanvasWidget(QWidget):
     """
@@ -25,7 +32,9 @@ class ImageCanvasWidget(QWidget):
         self.pan_offset_y: int = 0
 
         self.controller = None
-        
+
+        self._highlight_regions: List["RegionReference"] = []
+
         self.setMinimumSize(400, 300)
         self.setAutoFillBackground(True)
 
@@ -37,6 +46,13 @@ class ImageCanvasWidget(QWidget):
     def set_controller(self, controller) -> None:
         """nastaví controller, ktorému budeme posielať udalosti myši"""
         self.controller = controller
+
+    def set_highlight_for_regions(self, regions: Optional[List["RegionReference"]]) -> None:
+        """
+        Nastaví zoznam regionov na zvýraznenie -podľa warningu...
+        """
+        self._highlight_regions = regions or []
+        self.update()
 
     def paintEvent(self, event: QPaintEvent) -> None: 
         painter = QPainter(self)
@@ -50,6 +66,10 @@ class ImageCanvasWidget(QWidget):
         #zatiaľ bez zoomu 
         #nakreslíme obraz do ľavého horného rohu
         painter.drawImage(0, 0, self.current_image)
+        
+        #overlay highlight (warningy / selection)
+        if self._highlight_regions:
+            draw_region_highlights(painter, self._highlight_regions)
 
     #--------myš--------
     def _map_widget_to_image(self, x: int, y: int) -> tuple[int, int] | None:

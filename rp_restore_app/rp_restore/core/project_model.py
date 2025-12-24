@@ -9,8 +9,9 @@ from .layers import Layer, LayerRole
 from .history import UndoAction, GlobalUndoManager
 
 from .warnings import UserWarning
-from .warnings import LogManager
+from .warnings import LogManager, WarningType, RegionReference
 from .selection import Selection
+from .regions import RegionMap, build_region_map, compare_region_maps
 
 
 class Project:
@@ -39,6 +40,9 @@ class Project:
 
         #warningy a logy
         self.log_manager: LogManager = LogManager()
+
+        #cace pre poslednú region mapu -pre porovnanie pri zmene hrán
+        self._cached_region_map: RegionMap | None = None
 
 
     #---------Správa vrstiev---------
@@ -78,6 +82,7 @@ class Project:
 
         #začneme s RGB z backgroundu
         base = bg_layer.image[..., :3].astype(np.float32)
+        h, w, _ = base.shape
 
         #zoberieme všetky paint vrstvy v poradí, v akom sú v zozname
         for layer in self.get_paint_layers():
@@ -88,6 +93,14 @@ class Project:
             #alpha blending: out = rgb * a + base * (1 - a)
             base = rgb * alpha + base * (1.0 - alpha)
 
+        for layer in self.get_edge_layers():
+            rgba = layer.image.astype(np.float32)
+
+            if rgba.shape[0] != h or rgba.shape[1] != w:
+                continue
+            rgb = rgba[..., :3]
+            alpha = rgba[..., 3:4] / 255.0
+            base = rgb * alpha + base * (1.0 - alpha)
         #výsledok pretypujeme na uint8
         return np.clip(base, 0, 255).astype(np.uint8)
     
@@ -127,7 +140,16 @@ class Project:
         if self.damage_original_mask is None or self.damage_filled_mask is None:
             return None
 
-        return self.damage_original_mask & ~self.damage_filled_mask
+        filled = self._compute_filled_mask_from_layers()
+        if filled is None:
+            #žiadne paint vrstvy –všetko pôvodné poškodenie je remaining
+            return self.damage_original_mask.copy()
+
+        remaining = self.damage_original_mask & ~filled
+
+        #synchronizácia damage_filled_mask (nech je aktuálna)
+        self.damage_filled_mask = filled.copy()
+        return remaining
 
     def mark_region_as_filled(self, region_mask: np.ndarray) -> None:
         """
@@ -157,43 +179,106 @@ class Project:
             #klik mimo poškodenej oblasti
             return None
 
-        #flood-fill cez stack iteratívne
-        region_mask = np.zeros_like(remaining, dtype=bool)
+        edge_layers = self.get_edge_layers()
+        region_map = build_region_map(remaining, edge_layers)
 
-        stack: list[tuple[int, int]] = [(x, y)]
-        region_mask[y, x] = True
+        label_image = region_map.label_image
+        region_id = int(label_image[y, x])
+        if region_id == 0:
+            return None
+        
+        info = region_map.regions.get(region_id)
+        if info is None:
+            return None
+        
+        region_mask = region_map.get_region_mask(region_id)
+        bbox = info.bbox
 
-        while stack:
-            cx, cy = stack.pop()
+        return Selection(region_mask=region_mask, bbox=bbox, seed_point=(x, y), region_id=region_id)
 
-            #susedia
-            for nx, ny in (
-                (cx - 1, cy),
-                (cx + 1, cy),
-                (cx, cy - 1),
-                (cx, cy + 1),
-            ):
-                if 0 <= nx < w and 0 <= ny < h:
-                    if remaining[ny, nx] and not region_mask[ny, nx]:
-                        region_mask[ny, nx] = True
-                        stack.append((nx, ny))
+    #---------zmeny hrán ---------
+    def on_edge_layer_modified(self, edge_layer_id: str) -> None:
+        """
+        Zavolá sa po úprave EDGE vrstvy 
+        -prepočíta RegionMap na damage_remaining_mask
+        -porovná s predchádzajúcou verziou
+        -podľa rozdielov vytvorí warningy
+        """
+        damage_rem = self.get_damage_remaining_mask()
+        if damage_rem is None:
+            return
 
-        #bbox
-        ys, xs = np.where(region_mask)
-        if ys.size == 0:
+        edge_layers = self.get_edge_layers()
+        if not edge_layers:
+            return
+
+        new_map = build_region_map(damage_rem, edge_layers)
+
+        #prvýkrát len nastavíme cache
+        if self._cached_region_map is None:
+            self._cached_region_map = new_map
+            return
+
+        old_map = self._cached_region_map
+        changes = compare_region_maps(old_map, new_map)
+        self._cached_region_map = new_map
+
+        if not changes.changed_mask.any():
+            return
+
+        #zmena hrán zasahuje už vyplnené oblasti
+        filled = self._compute_filled_mask_from_layers()
+        if filled is not None:
+            affected_mask = changes.changed_mask & filled
+            if affected_mask.any():
+                ys, xs = np.where(affected_mask)
+                y_min = int(ys.min())
+                y_max = int(ys.max())
+                x_min = int(xs.min())
+                x_max = int(xs.max())
+                bbox = (x_min, y_min, x_max - x_min + 1, y_max - y_min + 1)
+
+                region_refs: list[RegionReference] = []
+                for layer in self.get_paint_layers():
+                    region_refs.append(RegionReference(layer_id=layer.meta.id, bbox=bbox, region_id=None, seed_point=None))
+
+                self.log_manager.add_warning(
+                    warning_type=WarningType.EDGE_MODIFIED_TOUCHING_FILLS,
+                    message="zmena hrán zasiahla už vyplnené oblasti",
+                    details="Upravili ste hrany v blízkosti už vyplnených poškodených častí",
+                    affected_regions=region_refs,
+                )
+
+        #zlúčené oblasti
+        for old_ids, new_id, bbox in changes.merged_regions:
+            region_refs: list[RegionReference] = []
+            for layer in self.get_paint_layers():
+                region_refs.append(RegionReference(layer_id=layer.meta.id, bbox=bbox, region_id=new_id, seed_point=None))
+
+            self.log_manager.add_warning(
+                warning_type=WarningType.EDGE_DELETED_REGIONS_MERGED,
+                message="Úprava hrán zlúčila viac poškodených oblastí do jednej",
+                details=f"Oblasti {sorted(old_ids)} boli zlúčené do oblasti {new_id}.",
+                affected_regions=region_refs,
+            )
+
+    def _compute_filled_mask_from_layers(self) -> np.ndarray | None:
+        """
+        Vypočíta, ktoré pixely poškodenia sú aktuálne vyplnené
+        podľa PAINT vrstiev (alfa > 0)
+        """
+        if self.damage_original_mask is None:
             return None
 
-        y_min = int(ys.min())
-        y_max = int(ys.max())
-        x_min = int(xs.min())
-        x_max = int(xs.max())
+        h, w = self.damage_original_mask.shape
+        filled = np.zeros((h, w), dtype=bool)
 
-        bbox = (x_min, y_min, x_max - x_min + 1, y_max - y_min + 1)
+        for layer in self.get_paint_layers():
+            if layer.image.shape[0] != h or layer.image.shape[1] != w:
+                continue
+            alpha = layer.image[..., 3] > 0
+            filled |= alpha
 
-        return Selection(
-            region_mask=region_mask,
-            bbox=bbox,
-            seed_point=(x, y),
-        )
+        return filled
 
 

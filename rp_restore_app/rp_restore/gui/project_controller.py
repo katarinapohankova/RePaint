@@ -12,13 +12,16 @@ from rp_restore.core.layers import Layer, LayerMeta, LayerRole
 from rp_restore.core.project_model import Project
 from rp_restore.config.settings import AppSettings
 from rp_restore.core.selection import Selection
+from rp_restore.core.warnings import UserWarning
 from rp_restore.gui.canvas.image_canvas_widget import ImageCanvasWidget
 from rp_restore.gui.panels.layers_panel import LayersPanel
+from rp_restore.gui.panels.log_panel import LogPanel
 from rp_restore.gui.tools.base_tool import BaseTool
 from rp_restore.gui.tools.brush_tool import BrushTool
 from rp_restore.gui.tools.eraser_tool import EraserTool
 from rp_restore.gui.tools.fill_tool import FillTool
 from rp_restore.gui.tools.selection_tool import SelectionTool
+from rp_restore.gui.tools.edge_tool import EdgeTool
 from rp_restore.io import image_io
 from rp_restore.io.project_storage import ProjectLoader, ProjectSerializer
 from rp_restore.core.auto_fill import auto_fill_small_regions
@@ -39,6 +42,7 @@ class ProjectController:
         #neskôr pribudnú ďalšie ako layers_panel, log_panel, tools_panel...
         self.active_layer_id: Optional[str] = None
         self.layers_panel: Optional[LayersPanel] = None
+        self.log_panel: Optional[LogPanel] = None
         self.current_tool: Optional[BaseTool] = None
         self.active_selection: Optional[Selection] = None
         #vizualizácia damage masky v canvase
@@ -64,6 +68,7 @@ class ProjectController:
                 self.active_layer_id = self.project.layers[0].meta.id
         self.refresh_canvas()
         self.refresh_layers_panel()
+        self.refresh_log_panel()
         #neskôr refreshne všetko (refresh_layers_panel(), refresh_log_panel()...)
 
     def set_layers_panel(self, panel: LayersPanel) -> None:
@@ -85,6 +90,8 @@ class ProjectController:
             self.current_tool = FillTool(self, self.canvas)
         elif tool_type == "selection":
             self.current_tool = SelectionTool(self, self.canvas)
+        elif tool_type == "edge":
+            self.current_tool = EdgeTool(self, self.canvas)
         else:
             self.current_tool = None
 
@@ -102,6 +109,9 @@ class ProjectController:
         self.show_damage_overlay = show
         self.refresh_canvas()
 
+    def set_log_panel(self, panel: LogPanel) -> None:
+        self.log_panel = panel
+        panel.set_controller(self)
 
     #refresh metódy
 
@@ -161,8 +171,9 @@ class ProjectController:
 
 
     def refresh_log_panel(self) -> None:
-        #treba dorobiť
-        pass
+        if self.project is None or self.log_panel is None:
+            return
+        self.log_panel.refresh_from_project(self.project)
 
     def on_canvas_mouse_press(self, img_x: int, img_y: int, buttons: Qt.MouseButtons, modifiers: Qt.KeyboardModifier) -> None:
         if self.current_tool is None:
@@ -207,10 +218,15 @@ class ProjectController:
         paint_meta = LayerMeta(id="paint_1", name="Paint 1", role=LayerRole.PAINT)
         paint_layer = Layer(paint_meta, paint_img)
 
+        edge_img = np.zeros_like(img_rgba, dtype=np.uint8)
+        edge_meta = LayerMeta(id="edge_1", name="Edges 1", role=LayerRole.EDGE)
+        edge_layer = Layer(edge_meta, edge_img)
+
         project_name = Path(image_path).stem
         project = Project(project_name)
         project.add_layer(bg_layer)
         project.add_layer(paint_layer)
+        project.add_layer(edge_layer)
 
         if mask_path:
             mask = image_io.load_mask(mask_path)
@@ -306,3 +322,25 @@ class ProjectController:
             self.refresh_canvas()
 
         return count
+
+    def focus_warning(self, warning_id: int) -> None:
+        """
+        Reaguje na klik na warning v LogPaneli
+        - nastaví aktívnu vrstvu podľa prvého RegionReference a nastaví highlight v canvase
+        """
+        if self.project is None or self.canvas is None:
+            return
+
+        w = self.project.log_manager.find_by_id(warning_id)
+        if w is None:
+            return
+
+        regions = w.affected_regions
+
+        if regions:
+            #nastavíme aktívnu vrstvu podľa prvého odkazu
+            first = regions[0]
+            self.set_active_layer(first.layer_id)
+
+        #highlight v canvase
+        self.canvas.set_highlight_for_regions(regions)
