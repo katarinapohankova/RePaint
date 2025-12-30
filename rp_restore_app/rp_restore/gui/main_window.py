@@ -14,6 +14,7 @@ from rp_restore.gui.project_controller import ProjectController
 from rp_restore.gui.start_screen_widget import StartScreenWidget
 from rp_restore.gui.panels.layers_panel import LayersPanel
 from rp_restore.gui.panels.log_panel import LogPanel
+from rp_restore.gui.panels.algorithm_panel import AlgorithmPanel
 
 
 class MainWindow(QMainWindow):
@@ -55,13 +56,22 @@ class MainWindow(QMainWindow):
         self.log_dock.setWidget(self.log_panel)
         self.addDockWidget(Qt.BottomDockWidgetArea, self.log_dock)
 
+        #algorithm panel 
+        self.algorithm_panel = AlgorithmPanel(self)
+        self.algorithm_dock = QDockWidget("Algoritmy", self)
+        self.algorithm_dock.setObjectName("AlgorithmDock")
+        self.algorithm_dock.setWidget(self.algorithm_panel)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.algorithm_dock)
+
         #prepojenie controller - layers_panel, log_panel
         self.controller.set_layers_panel(self.layers_panel)
         self.controller.set_log_panel(self.log_panel)
+        self.controller.set_algorithm_panel(self.algorithm_panel)
 
         #na začiatku (start screen) dock schováme
         self.layers_dock.hide()
         self.log_dock.hide()
+        self.algorithm_dock.hide()
 
         #start screen
         self.start_screen = None
@@ -203,6 +213,8 @@ class MainWindow(QMainWindow):
             self.layers_dock.hide()
         if hasattr(self, "log_dock"):
             self.log_dock.hide()
+        if hasattr(self, "algorithm_dock"):
+            self.algorithm_dock.hide()
 
     def show_workspace(self) -> None:
         """zobrazí pracovnú plochu (canvas, neskôr aj dock panely)"""
@@ -218,6 +230,8 @@ class MainWindow(QMainWindow):
             self.layers_dock.show()
         if hasattr(self, "log_dock"):
             self.log_dock.show()
+        if hasattr(self, "algorithm_dock"):
+            self.algorithm_dock.show()
 
     #----------akcie StartScreen-----------
 

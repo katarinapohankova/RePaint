@@ -281,4 +281,19 @@ class Project:
 
         return filled
 
+    #---------metódy pre externé algoritmy---------
+    def get_original_image(self) -> np.ndarray | None:
+        """
+        Vráti pôvodný obraz – zatiaľ berieme ako background vrstvu
+        """
+        bg = self.get_background_layer()
+        if bg is None:
+            return None
+        return bg.image.copy()
+
+    def get_current_composited_image(self) -> np.ndarray:
+        """
+        Vráti aktuálny zložený obraz (background + paint vrstvy)
+        """
+        return self.composited_image()
 

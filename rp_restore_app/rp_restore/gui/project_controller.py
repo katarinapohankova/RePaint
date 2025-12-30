@@ -13,6 +13,8 @@ from rp_restore.core.project_model import Project
 from rp_restore.config.settings import AppSettings
 from rp_restore.core.selection import Selection
 from rp_restore.core.warnings import UserWarning
+from rp_restore.core.algorithm_runner import AlgorithmType, AlgorithmRequest, AlgorithmRunner
+from rp_restore.core.history import UndoAction
 from rp_restore.gui.canvas.image_canvas_widget import ImageCanvasWidget
 from rp_restore.gui.panels.layers_panel import LayersPanel
 from rp_restore.gui.panels.log_panel import LogPanel
@@ -47,6 +49,7 @@ class ProjectController:
         self.active_selection: Optional[Selection] = None
         #vizualizácia damage masky v canvase
         self.show_damage_overlay: bool = True
+        self.algorithm_panel = None
 
         self.current_project_path: Optional[str] = None
 
@@ -101,6 +104,9 @@ class ProjectController:
         zatiaľ len uložíme do atribútu, neskôr pridáme highlight na canvase a info AlgorithmPanelu
         """
         self.active_selection = selection
+        if self.algorithm_panel is not None and hasattr(self.algorithm_panel, "refresh_from_selection"):
+            self.algorithm_panel.refresh_from_selection(selection)
+        #neskôr aj highlight selection v canvase
 
     def set_show_damage_overlay(self, show: bool) -> None:
         """
@@ -112,6 +118,15 @@ class ProjectController:
     def set_log_panel(self, panel: LogPanel) -> None:
         self.log_panel = panel
         panel.set_controller(self)
+    
+    def set_algorithm_panel(self, panel: object) -> None:
+        """
+        Prepojí controller s AlgorithmPanelom
+        """
+        self.algorithm_panel = panel
+        if hasattr(panel, "set_controller"):
+            panel.set_controller(self)
+
 
     #refresh metódy
 
@@ -322,6 +337,103 @@ class ProjectController:
             self.refresh_canvas()
 
         return count
+    
+    def run_algorithm_on_selection(self, algorithm_type: AlgorithmType, use_mock: bool = True) -> None:
+        """
+        Spustí externý algoritmus na aktuálnej selection
+        - pripraví AlgorithmRequest, zavolá AlgorithmRunner.run
+        - výsledný patch vloží do aktívnej (alebo prvej) PAINT vrstvy
+        - pridá UndoAction a označí oblasť v damage maske ako vyplnenú
+        """
+        project = self.project
+        if project is None or self.active_selection is None:
+            return
+
+        selection = self.active_selection
+
+        original = project.get_original_image()
+        current = project.get_current_composited_image()
+        damage_rem = project.get_damage_remaining_mask()
+
+        if original is None or damage_rem is None:
+            return
+
+        #zabezpečíme tvar masiek
+        selected_mask = selection.region_mask.astype(bool)
+        remaining_mask = damage_rem.astype(bool)
+
+        #device – zatiaľ natvrdo cpu, neskôr z konfigurácie
+        device = "cpu"
+
+        request = AlgorithmRequest(original_image=original, current_image=current, selected_mask=selected_mask, remaining_mask=remaining_mask, algorithm_type=algorithm_type, device=device, mock=use_mock)
+
+        try:
+            result = AlgorithmRunner.run(request)
+        except Exception as e:
+            #zatia+ to aspoň vypíšeme do konzoly
+            print("Algorithm error:", e)
+            return
+
+        #nájdeme cieľovú PAINT vrstvu
+        target_layer: Layer | None = None
+
+        if self.active_layer_id is not None:
+            for layer in project.layers:
+                if layer.meta.id == self.active_layer_id and layer.meta.role == LayerRole.PAINT:
+                    target_layer = layer
+                    break
+
+        if target_layer is None:
+            for layer in project.layers:
+                if layer.meta.role == LayerRole.PAINT:
+                    target_layer = layer
+                    break
+
+        if target_layer is None:
+            return
+
+        x, y, w, h = result.bbox
+        patch = result.output_patch
+
+        #zarovnanie patch na RGBA
+        if patch.ndim != 3:
+            return
+        if patch.shape[2] == 3:
+            patch_rgba = np.zeros((h, w, 4), dtype=np.uint8)
+            patch_rgba[..., :3] = patch
+            patch_rgba[..., 3] = 255
+        else:
+            patch_rgba = patch
+
+        #before
+        before = target_layer.clone_subregion(x, y, w, h)
+
+        #vložíme patch do vrstvy
+        sub_img = target_layer.image[y : y + h, x : x + w, :]
+        sub_img[...] = patch_rgba
+
+        #after
+        after = target_layer.clone_subregion(x, y, w, h)
+
+        action = UndoAction(description=f"Algorithm {algorithm_type.value} fill", layer_id=target_layer.meta.id, layer_role=target_layer.meta.role, bbox=(x, y, w, h), before=before, after=after)
+
+        project.undo_manager.push_action(action)
+
+        #označíme selection ako vyplnenú v damage maske
+        project.mark_region_as_filled(selection.region_mask)
+
+        #pridáme info do history_for_report
+        project.history_for_report.append(
+            {
+                "type": "algorithm_fill",
+                "algorithm": algorithm_type.value,
+                "bbox": (x, y, w, h),
+                "log": result.log_messages,
+            }
+        )
+
+        self.refresh_canvas()
+
 
     def focus_warning(self, warning_id: int) -> None:
         """
