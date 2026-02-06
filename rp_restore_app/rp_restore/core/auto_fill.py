@@ -47,6 +47,9 @@ def auto_fill_small_regions(project: Project, target_layer: Layer, area_threshol
 
     filled_count = 0
 
+    #o koľko rozšírime bbox pri hľadaní okolia
+    margin = 3
+
     for region in small_regions:
         region_mask = region_map.get_region_mask(region.id)
         if not region_mask.any():
@@ -63,13 +66,23 @@ def auto_fill_small_regions(project: Project, target_layer: Layer, area_threshol
         if not local_mask.any():
             continue
 
-        sub_composited = composited[y : y + rh, x : x + rw, :]
+        #definujeme širšie okolie pre výpočet farby
+        sx0 = max(0, x - margin)
+        sy0 = max(0, y - margin)
+        sx1 = min(w, x + rw + margin)
+        sy1 = min(h, y + rh + margin)
 
-        #farba okolia -pixely v bboxe, ktoré nie sú poškodené
-        sub_damage = damage_rem[y : y + rh, x : x + rw]
-        good_mask = ~sub_damage & True  # explicitne bool
+        sub_composited = composited[sy0:sy1, sx0:sx1, :]
+        sub_damage = damage_rem[sy0:sy1, sx0:sx1]
 
+        #pixely, ktoré nie sú poškodené
+        good_mask = ~sub_damage
         good_pixels = sub_composited[good_mask]
+
+        #ak ani v širšom okolí nie sú čisté pixely, použijeme všetky pixely v okolí
+        if good_pixels.size == 0:
+            good_pixels = sub_composited.reshape(-1, 3)
+
         if good_pixels.size == 0:
             #nemáme dobré okolité pixely – preskočíme oblasť
             continue

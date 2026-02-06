@@ -49,6 +49,12 @@ class BrushTool(BaseTool):
         h, w, _ = layer.image.shape
         r = self.brush_size
 
+        #damage mask z projektu
+        project = self.controller.project
+        damage_mask = None
+        if project is not None:
+            damage_mask = project.damage_original_mask  #alebo get_damage_remaining_mask()
+
         y_min = max(0, y - r)
         y_max = min(h, y + r)
         x_min = max(0, x - r)
@@ -58,6 +64,14 @@ class BrushTool(BaseTool):
             for xx in range(x_min, x_max):
                 #kruhová maska
                 if (xx - x) ** 2 + (yy - y) ** 2 <= r * r:
+                    #ak máme damage masku, nekreslíme mimo nej
+                    if damage_mask is not None:
+                        mh, mw = damage_mask.shape
+                        if yy >= mh or xx >= mw:
+                            continue
+                        if not damage_mask[yy, xx]:
+                            continue
+
                     layer.image[yy, xx, :] = self.color_rgba
 
     def _draw_line(self, layer, x0: int, y0: int, x1: int, y1: int) -> None:
@@ -82,6 +96,7 @@ class BrushTool(BaseTool):
         layer = self._get_active_paint_layer()
 
         if layer is None:
+            self.controller.show_tool_message("Brush sa dá použiť len na PAINT vrstvách")
             return
         
         self.is_drawing = True

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QListWidget, QListWidgetItem
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton, QHBoxLayout, QInputDialog
 
 from rp_restore.core.project_model import Project
 
@@ -27,9 +27,21 @@ class LayersPanel(QWidget):
         label = QLabel("Vrstvy")
         layout.addWidget(label)
 
+        #self.list_widget.setSelectionMode(QListWidget.SingleSelection)
+        buttons_row = QHBoxLayout()
+        self.btn_add_paint = QPushButton("Nová paint vrstva")
+        self.btn_rename = QPushButton("Premenovať vrstvu")
+        buttons_row.addWidget(self.btn_add_paint)
+        buttons_row.addWidget(self.btn_rename)
+        layout.addLayout(buttons_row)
+
         self.list_widget = QListWidget()
         self.list_widget.setSelectionMode(QListWidget.SingleSelection)
         layout.addWidget(self.list_widget)
+
+        self.list_widget.itemSelectionChanged.connect(self._on_selection_changed)
+        self.btn_add_paint.clicked.connect(self._on_add_paint_clicked)
+        self.btn_rename.clicked.connect(self._on_rename_clicked)
 
         #keď sa zmení výber, zavoláme callback
         self.list_widget.itemSelectionChanged.connect(self._on_selection_changed)
@@ -77,3 +89,41 @@ class LayersPanel(QWidget):
 
         if hasattr(self._controller, "set_active_layer"):
             self._controller.set_active_layer(layer_id)
+
+    def _on_add_paint_clicked(self) -> None:
+        if self._controller is None:
+            return
+        if hasattr(self._controller, "add_paint_layer"):
+            self._controller.add_paint_layer()
+
+    def _on_rename_clicked(self) -> None:
+        if self._controller is None:
+            return
+
+        items = self.list_widget.selectedItems()
+        if not items:
+            return
+
+        item = items[0]
+        layer_id = item.data(Qt.UserRole)
+
+        # starý názov – vezmeme text pred " ("
+        full_text = item.text()
+        if " (" in full_text:
+            old_name = full_text.split(" (", 1)[0]
+        else:
+            old_name = full_text
+
+        new_name, ok = QInputDialog.getText(
+            self,
+            "Premenovať vrstvu",
+            "Nový názov vrstvy:",
+            text=old_name,
+        )
+        if not ok or not new_name.strip():
+            return
+
+        if hasattr(self._controller, "rename_layer"):
+            self._controller.rename_layer(layer_id, new_name.strip())
+
+

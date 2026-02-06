@@ -72,6 +72,7 @@ class EdgeTool(BaseTool):
 
         layer = self._get_active_edge_layer()
         if layer is None:
+            self.controller.show_tool_message("Edge tool sa dá použiť len na EDGE vrstve")
             return
 
         self.is_drawing = True

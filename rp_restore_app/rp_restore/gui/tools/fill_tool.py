@@ -48,6 +48,7 @@ class FillTool(BaseTool):
         layer = self._get_active_paint_layer()
         if layer is None:
             #aktívna vrstva nie je PAINT 
+            self.controller.show_tool_message("Fill sa dá použiť len na PAINT vrstvách")
             return
 
         #z projektu si vypýtame selection (podľa damage_remaining_mask)

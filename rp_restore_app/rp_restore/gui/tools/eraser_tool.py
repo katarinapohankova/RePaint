@@ -73,6 +73,7 @@ class EraserTool(BaseTool):
 
         layer = self._get_active_paint_layer()
         if layer is None:
+            self.controller.show_tool_message("Eraser sa dá použiť len na PAINT vrstvách")
             return
 
         self.is_erasing = True

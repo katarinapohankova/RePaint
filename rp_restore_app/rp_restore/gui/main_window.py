@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import numpy as np
 from pathlib import Path
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QMainWindow, QStatusBar, QMessageBox, QDockWidget, QToolBar, QFileDialog
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QAction, QActionGroup
+from PySide6.QtWidgets import QMainWindow, QStatusBar, QMessageBox, QDockWidget, QToolBar, QFileDialog, QLabel
 
 from rp_restore.config.settings import AppSettings
 from rp_restore.core.layers import Layer, LayerMeta, LayerRole
@@ -41,6 +41,7 @@ class MainWindow(QMainWindow):
         # self.controller.set_canvas(self.canvas)
         # self.canvas.set_controller(self.controller)
         self.canvas = None
+        self.controller.set_message_callback(self._show_tool_message)
 
         #layers panel
         self.layers_panel = LayersPanel(self)
@@ -81,6 +82,7 @@ class MainWindow(QMainWindow):
         # self.start_screen.open_project_requested.connect(self.on_open_project_requested)
         # self.start_screen.open_recent_requested.connect(self.on_open_recent_requested)
 
+        self.current_tool_name: str | None = None
         #začíname na start screene
         self.show_start_screen()
 
@@ -88,6 +90,17 @@ class MainWindow(QMainWindow):
         self._create_menus()
         self._create_toolbars()
         self.setStatusBar(QStatusBar(self))
+
+        #overlay na krátke hlášky v strede okna
+        self._toast_label = QLabel(self)
+        self._toast_label.setVisible(False)
+        self._toast_label.setAlignment(Qt.AlignCenter)
+        self._toast_label.setStyleSheet("""background-color: rgba(0, 0, 0, 180); color: white; padding: 8px 16px; border-radius: 8px; font-size: 12pt""")
+
+        self._toast_timer = QTimer(self)
+        self._toast_timer.setSingleShot(True)
+        self._toast_timer.timeout.connect(self._toast_label.hide)
+
 
     #----------GUI setup-----------
 
@@ -161,34 +174,107 @@ class MainWindow(QMainWindow):
         tools_toolbar = QToolBar("Nástroje", self)
         self.addToolBar(Qt.LeftToolBarArea, tools_toolbar)
 
-        brush_action = QAction("Brush", self)
-        brush_action.setShortcut("B")
-        brush_action.triggered.connect(lambda: self.controller.set_current_tool("brush"))
-        tools_toolbar.addAction(brush_action)
+        #skupina na exkluzívne checkovanie
+        self.tool_action_group = QActionGroup(self)
+        self.tool_action_group.setExclusive(True)
+        self.tool_action_group.triggered.connect(self._on_tool_action_triggered)
 
-        eraser_action = QAction("Eraser", self)
-        eraser_action.setShortcut("E")
-        eraser_action.triggered.connect(lambda: self.controller.set_current_tool("eraser"))
-        tools_toolbar.addAction(eraser_action)
+        self.tool_actions: dict[QAction, str] = {}
 
-        fill_action = QAction("Fill", self)
-        fill_action.setShortcut("F")
-        fill_action.triggered.connect(lambda: self.controller.set_current_tool("fill"))
-        tools_toolbar.addAction(fill_action)
+        self.brush_action = QAction("Brush", self)
+        self.brush_action.setShortcut("B")
+        self.brush_action.setCheckable(True)
+        tools_toolbar.addAction(self.brush_action)
+        self.tool_action_group.addAction(self.brush_action)
+        self.tool_actions[self.brush_action] = "brush"
 
-        selection_action = QAction("Select", self)
-        selection_action.setShortcut("S")
-        selection_action.triggered.connect(lambda: self.controller.set_current_tool("selection"))
-        tools_toolbar.addAction(selection_action)
+        self.eraser_action = QAction("Eraser", self)
+        self.eraser_action.setShortcut("E")
+        self.eraser_action.setCheckable(True)
+        tools_toolbar.addAction(self.eraser_action)
+        self.tool_action_group.addAction(self.eraser_action)
+        self.tool_actions[self.eraser_action] = "eraser"
 
-        auto_fill_action = QAction("Auto-fill small", self)
-        auto_fill_action.triggered.connect(self.on_auto_fill_small_regions)
-        tools_toolbar.addAction(auto_fill_action)
+        self.fill_action = QAction("Fill", self)
+        self.fill_action.setShortcut("F")
+        self.fill_action.setCheckable(True)
+        tools_toolbar.addAction(self.fill_action)
+        self.tool_action_group.addAction(self.fill_action)
+        self.tool_actions[self.fill_action] = "fill"
 
-        edge_action = QAction("Edge", self)
-        edge_action.setShortcut("G")  #G-graphics
-        edge_action.triggered.connect(lambda: self.controller.set_current_tool("edge"))
-        tools_toolbar.addAction(edge_action)
+
+        self.selection_action = QAction("Select", self)
+        self.selection_action.setShortcut("S")
+        self.selection_action.setCheckable(True)
+        tools_toolbar.addAction(self.selection_action)
+        self.tool_action_group.addAction(self.selection_action)
+        self.tool_actions[self.selection_action] = "selection"
+
+        self.edge_action = QAction("Edge", self)
+        self.edge_action.setShortcut("G")  #G-graphics
+        self.edge_action.setCheckable(True)
+        tools_toolbar.addAction(self.edge_action)
+        self.tool_action_group.addAction(self.edge_action)
+        self.tool_actions[self.edge_action] = "edge"
+
+        self.auto_fill_action = QAction("Auto-fill small", self)
+        self.auto_fill_action.triggered.connect(self.on_auto_fill_small_regions)
+        tools_toolbar.addAction(self.auto_fill_action)
+
+
+    def _show_tool_message(self, text: str) -> None:
+        """
+        Zobrazí krátke upozornenie v status bar
+        """
+        self.statusBar().showMessage(text, 4000)
+        self._show_toast_message(text, 2500)
+
+    def _show_toast_message(self, text: str, msec: int = 2500) -> None:
+        """
+        Zobrazí krátku hlášku uprostred pracovnej plochy a po chvíli zmizne
+        """
+        if not text:
+            return
+
+        #použijeme central widget, aby sme boli nad plátnom 
+        parent = self.centralWidget() or self
+        self._toast_label.setParent(parent)
+
+        self._toast_label.setText(text)
+        self._toast_label.adjustSize()
+
+        parent_rect = parent.rect()
+        label_size = self._toast_label.sizeHint()
+
+        x = (parent_rect.width() - label_size.width()) // 2
+        y = (parent_rect.height() - label_size.height()) // 2
+
+        self._toast_label.setGeometry(x, y, label_size.width(), label_size.height())
+
+        self._toast_label.raise_()
+        self._toast_label.show()
+
+        self._toast_timer.stop()
+        self._toast_timer.start(msec)
+
+
+    def set_current_tool(self, tool_name: str) -> None:
+        """
+        Nastaví aktuálny nástroj v controllery a vizuálne ho zvýrazní v toolbar
+        """
+        self.controller.set_current_tool(tool_name)
+        self.current_tool_name = tool_name
+
+        #reset flagov
+        for name, action in (
+            ("brush", getattr(self, "action_brush", None)),
+            ("eraser", getattr(self, "action_eraser", None)),
+            ("fill", getattr(self, "action_fill", None)),
+            ("selection", getattr(self, "action_selection", None)),
+            ("edge", getattr(self, "action_edge", None)),
+        ):
+            if action is not None:
+                action.setChecked(name == tool_name)
 
     #----------prepínanie obrazoviek-----------
 
@@ -232,8 +318,23 @@ class MainWindow(QMainWindow):
             self.log_dock.show()
         if hasattr(self, "algorithm_dock"):
             self.algorithm_dock.show()
+        if hasattr(self, "action_brush") and not self.action_brush.isChecked(): 
+            self.brush_action.setChecked(True)  # spustí _on_tool_action_triggered
 
     #----------akcie StartScreen-----------
+
+    def _on_tool_action_triggered(self, action: QAction) -> None:
+        """
+        Reaguje na zmenu checknutého tool action v QActionGroup
+        """
+        tool_name = self.tool_actions.get(action)
+        if not tool_name:
+            return
+
+        self.current_tool_name = tool_name
+        self.controller.set_current_tool(tool_name)
+        #QActionGroup sa postará o check/uncheck
+
 
     def on_new_project_requested(self) -> None:
         """vytvorí jednoduchý projekt a prepne do workspace"""

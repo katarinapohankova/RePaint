@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Callable
 from pathlib import Path
 
 import numpy as np
@@ -53,6 +53,7 @@ class ProjectController:
 
         self.current_project_path: Optional[str] = None
 
+        self._message_callback: Optional[Callable[[str], None]] = None
 
     def set_canvas(self, canvas: ImageCanvasWidget) -> None:
         self.canvas = canvas
@@ -127,6 +128,21 @@ class ProjectController:
         if hasattr(panel, "set_controller"):
             panel.set_controller(self)
 
+    def set_message_callback(self, callback: Callable[[str], None]) -> None:
+        """
+        nastaví callback na zobrazovanie krátkych hlášok pre užívateľa
+        (tool warnings a pod.)
+        """
+        self._message_callback = callback
+
+    def show_tool_message(self, text: str) -> None:
+        """
+        zobrazí krátku hlášku o používaní nástrojov
+        """
+        if self._message_callback is not None:
+            self._message_callback(text)
+        else:
+            print(text)
 
     #refresh metódy
 
@@ -177,6 +193,50 @@ class ProjectController:
         self.active_layer_id = layer_id
         self.refresh_layers_panel()
         #neskôr informujeme nástroje
+
+    def add_paint_layer(self) -> None:
+        """
+        Vytvorí novú prázdnu PAINT vrstvu nad existujúcimi vrstvami
+        a nastaví ju ako aktívnu
+        """
+        if self.project is None:
+            return
+
+        bg = self.project.get_background_layer()
+        if bg is None:
+            return
+
+        h, w, c = bg.image.shape
+        new_image = np.zeros((h, w, c), dtype=np.uint8)
+
+        #index novej paint vrstvy
+        paint_count = sum(1 for layer in self.project.layers if layer.meta.role == LayerRole.PAINT)
+        index = paint_count + 1
+
+        layer_id = f"paint_{index}"
+        meta = LayerMeta(id=layer_id, name=f"Paint {index}", role=LayerRole.PAINT)
+        new_layer = Layer(meta, new_image)
+
+        self.project.add_layer(new_layer)
+        self.active_layer_id = layer_id
+
+        self.refresh_layers_panel()
+        self.refresh_canvas()
+
+    def rename_layer(self, layer_id: str, new_name: str) -> None:
+        """
+        Premenuje vrstvu s daným id
+        """
+        if self.project is None:
+            return
+
+        for layer in self.project.layers:
+            if layer.meta.id == layer_id:
+                layer.meta.name = new_name
+                break
+
+        self.refresh_layers_panel()
+
 
     def refresh_layers_panel(self) -> None:
         if self.project is None or self.layers_panel is None:
