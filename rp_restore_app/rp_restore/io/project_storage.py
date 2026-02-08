@@ -115,6 +115,11 @@ class ProjectSerializer:
                 "damage_original_mask_path": damage_original_path,
                 "damage_filled_mask_path": damage_filled_path,
                 "history_for_report": project.history_for_report,
+
+                "palette": [
+                    list(color) for color in getattr(project, "palette_colors", [])
+                ],
+                "current_color": list(getattr(project, "current_color_rgba", (0, 0, 0, 255))),
             }
 
             zf.writestr("project.json", json.dumps(meta, indent=2, ensure_ascii=False))
@@ -186,5 +191,18 @@ class ProjectLoader:
 
             #história pre report
             project.history_for_report = meta.get("history_for_report", [])
+            #paleta a aktuálna farba
+            palette = meta.get("palette")
+            if palette is not None:
+                project.palette_colors = [
+                    tuple(int(c) for c in rgba)
+                    for rgba in palette
+                    if isinstance(rgba, (list, tuple)) and len(rgba) == 4
+                ]
+
+            current_color = meta.get("current_color")
+            if isinstance(current_color, (list, tuple)) and len(current_color) == 4:
+                project.current_color_rgba = tuple(int(c) for c in current_color)
+
 
             return project

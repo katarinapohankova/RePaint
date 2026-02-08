@@ -15,7 +15,8 @@ from rp_restore.gui.start_screen_widget import StartScreenWidget
 from rp_restore.gui.panels.layers_panel import LayersPanel
 from rp_restore.gui.panels.log_panel import LogPanel
 from rp_restore.gui.panels.algorithm_panel import AlgorithmPanel
-
+from rp_restore.gui.panels.color_panel import ColorPanel
+from rp_restore.gui.panels.edge_settings_panel import EdgeSettingsPanel
 
 class MainWindow(QMainWindow):
     """
@@ -63,16 +64,34 @@ class MainWindow(QMainWindow):
         self.algorithm_dock.setObjectName("AlgorithmDock")
         self.algorithm_dock.setWidget(self.algorithm_panel)
         self.addDockWidget(Qt.RightDockWidgetArea, self.algorithm_dock)
+     
+        #color panel
+        self.color_panel = ColorPanel(self)
+        self.color_dock = QDockWidget("Barvy", self)
+        self.color_dock.setObjectName("ColorDock")
+        self.color_dock.setWidget(self.color_panel)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.color_dock)
+
+        #edge nastavenia panel
+        self.edge_settings_panel = EdgeSettingsPanel(self)
+        self.edge_settings_dock = QDockWidget("Hrany", self)
+        self.edge_settings_dock.setObjectName("EdgeSettingsDock")
+        self.edge_settings_dock.setWidget(self.edge_settings_panel)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.edge_settings_dock)
 
         #prepojenie controller - layers_panel, log_panel
         self.controller.set_layers_panel(self.layers_panel)
         self.controller.set_log_panel(self.log_panel)
         self.controller.set_algorithm_panel(self.algorithm_panel)
+        self.controller.set_color_panel(self.color_panel)
+        self.controller.set_edge_settings_panel(self.edge_settings_panel)
 
         #na začiatku (start screen) dock schováme
         self.layers_dock.hide()
         self.log_dock.hide()
         self.algorithm_dock.hide()
+        self.color_dock.hide()
+        self.edge_settings_dock.hide()
 
         #start screen
         self.start_screen = None
@@ -217,6 +236,14 @@ class MainWindow(QMainWindow):
         self.tool_action_group.addAction(self.edge_action)
         self.tool_actions[self.edge_action] = "edge"
 
+        self.pipette_action = QAction("Pipette", self)
+        self.pipette_action.setShortcut("I")    #eyedropper
+        self.pipette_action.setCheckable(True)
+        self.pipette_action.setToolTip("pipeta -vyber barvu z obrazu")
+        tools_toolbar.addAction(self.pipette_action)
+        self.tool_action_group.addAction(self.pipette_action)
+        self.tool_actions[self.pipette_action] = "pipette"
+
         self.auto_fill_action = QAction("Auto-fill small", self)
         self.auto_fill_action.triggered.connect(self.on_auto_fill_small_regions)
         tools_toolbar.addAction(self.auto_fill_action)
@@ -236,18 +263,18 @@ class MainWindow(QMainWindow):
         if not text:
             return
 
-        #použijeme central widget, aby sme boli nad plátnom 
-        parent = self.centralWidget() or self
-        self._toast_label.setParent(parent)
+        # #použijeme central widget, aby sme boli nad plátnom 
+        # parent = self.centralWidget() or self
+        # self._toast_label.setParent(parent)
 
         self._toast_label.setText(text)
         self._toast_label.adjustSize()
 
-        parent_rect = parent.rect()
+        rect = self.rect()
         label_size = self._toast_label.sizeHint()
 
-        x = (parent_rect.width() - label_size.width()) // 2
-        y = (parent_rect.height() - label_size.height()) // 2
+        x = (rect.width() - label_size.width()) // 2
+        y = (rect.height() - label_size.height()) // 2
 
         self._toast_label.setGeometry(x, y, label_size.width(), label_size.height())
 
@@ -272,6 +299,7 @@ class MainWindow(QMainWindow):
             ("fill", getattr(self, "action_fill", None)),
             ("selection", getattr(self, "action_selection", None)),
             ("edge", getattr(self, "action_edge", None)),
+            ("pipette", getattr(self, "action_pipette", None)),
         ):
             if action is not None:
                 action.setChecked(name == tool_name)
@@ -301,6 +329,12 @@ class MainWindow(QMainWindow):
             self.log_dock.hide()
         if hasattr(self, "algorithm_dock"):
             self.algorithm_dock.hide()
+        if hasattr(self, "color_dock"): 
+            self.color_dock.hide()
+        if hasattr(self, "color_panel"):
+            self.color_panel.show()
+        if hasattr(self, "edge_settings_dock"):
+            self.edge_settings_dock.hide()
 
     def show_workspace(self) -> None:
         """zobrazí pracovnú plochu (canvas, neskôr aj dock panely)"""
@@ -318,8 +352,12 @@ class MainWindow(QMainWindow):
             self.log_dock.show()
         if hasattr(self, "algorithm_dock"):
             self.algorithm_dock.show()
-        if hasattr(self, "action_brush") and not self.action_brush.isChecked(): 
+        if hasattr(self, "color_dock"):
+            self.color_dock.show()
+        if hasattr(self, "brush_action") and not self.brush_action.isChecked(): 
             self.brush_action.setChecked(True)  # spustí _on_tool_action_triggered
+        if hasattr(self, "edge_settings_dock"):
+            self.edge_settings_dock.show()
 
     #----------akcie StartScreen-----------
 

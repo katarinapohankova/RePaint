@@ -44,6 +44,9 @@ class Project:
         #cace pre poslednú region mapu -pre porovnanie pri zmene hrán
         self._cached_region_map: RegionMap | None = None
 
+        #paleta farieb a aktuálna farba (RGBA)
+        self.palette_colors: list[tuple[int, int, int, int]] = []
+        self.current_color_rgba: tuple[int, int, int, int] = (0, 0, 0, 255)  #default bude čierna
 
     #---------Správa vrstiev---------
 
@@ -297,3 +300,26 @@ class Project:
         """
         return self.composited_image()
 
+    #---------farby, paleta---------
+
+    def get_current_color_rgba(self) -> tuple[int, int, int, int]:
+        return self.current_color_rgba
+
+    def set_current_color_rgba(self, color: tuple[int, int, int, int]) -> None:
+        r, g, b, a = [int(max(0, min(255, c))) for c in color]
+        self.current_color_rgba = (r, g, b, a)
+
+    def add_palette_color(self, color: tuple[int, int, int, int]) -> None:
+        """
+        Pridá farbu do palety (ak tam ešte nie je)
+        """
+        r, g, b, a = [int(max(0, min(255, c))) for c in color]
+        rgba = (r, g, b, a)
+        if rgba not in self.palette_colors:
+            self.palette_colors.append(rgba)
+
+    def get_palette_colors(self) -> list[tuple[int, int, int, int]]:
+        return list(self.palette_colors)
+
+    def clear_palette(self) -> None:
+        self.palette_colors.clear()

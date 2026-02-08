@@ -21,8 +21,9 @@ class EdgeTool(BaseTool):
         super().__init__(controller, canvas)
 
         self.is_drawing: bool = False
-        self.brush_size: int = 2
-        self.edge_color = np.array([0, 0, 0, 255], dtype=np.uint8)
+        self.brush_size: int = controller.get_edge_brush_size()
+        self.edge_color: np.ndarray = controller.get_edge_color_rgba()
+        #self._reset_stroke_state()
 
         self._before_image: Optional[np.ndarray] = None
         self._last_x: Optional[int] = None
@@ -45,6 +46,11 @@ class EdgeTool(BaseTool):
         h, w, _ = layer.image.shape
         r = self.brush_size
 
+        project = self.controller.project
+        damage_mask = None
+        if project is not None:
+            damage_mask = getattr(project, "damage_original_mask", None)
+
         y_min = max(0, y - r)
         y_max = min(h, y + r)
         x_min = max(0, x - r)
@@ -53,6 +59,13 @@ class EdgeTool(BaseTool):
         for yy in range(y_min, y_max):
             for xx in range(x_min, x_max):
                 if (xx - x) ** 2 + (yy - y) ** 2 <= r * r:
+                    #orežeme na damage masku
+                    if damage_mask is not None:
+                        mh, mw = damage_mask.shape
+                        if yy >= mh or xx >= mw:
+                            continue
+                        if not damage_mask[yy, xx]:
+                            continue
                     layer.image[yy, xx, :] = self.edge_color
 
     def _draw_line(self, layer, x0: int, y0: int, x1: int, y1: int) -> None:
@@ -66,9 +79,15 @@ class EdgeTool(BaseTool):
             yy = int(round(y0 + t * dy))
             self._draw_dot(layer, xx, yy)
 
+    def _update_settings_from_controller(self) -> None:
+        self.brush_size = self.controller.get_edge_brush_size()
+        self.edge_color = self.controller.get_edge_color_rgba()
+
     def on_mouse_press(self, img_x: int, img_y: int, buttons: Qt.MouseButtons, modifiers: Qt.KeyboardModifiers) -> None:
         if not (buttons & Qt.LeftButton):
             return
+        #pri začiatku ťahu natiahneme aktuálnu hrúbku a farbu
+        self._update_settings_from_controller()
 
         layer = self._get_active_edge_layer()
         if layer is None:

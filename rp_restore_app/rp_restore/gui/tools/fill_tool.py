@@ -21,8 +21,7 @@ class FillTool(BaseTool):
     def __init__(self, controller, canvas) -> None:
         super().__init__(controller, canvas)
 
-        #zatiaľ natvrdo farba – modrá
-        self.fill_color_rgba = np.array([0, 0, 255, 255], dtype=np.uint8)
+        self.fill_color_rgba = self.controller.get_current_color_rgba()     #np.array([0, 0, 255, 255], dtype=np.uint8)
 
     def _get_active_paint_layer(self):
         project = self.controller.project
@@ -37,10 +36,14 @@ class FillTool(BaseTool):
                     return None
         return None
 
+    def _update_color_from_controller(self) -> None:
+        self.fill_color_rgba = self.controller.get_current_color_rgba()
+
     def on_mouse_press(self, img_x: int, img_y: int, buttons: Qt.MouseButtons, modifiers: Qt.KeyboardModifiers) -> None:
         if not (buttons & Qt.LeftButton):
             return
 
+        self._update_color_from_controller()
         project = self.controller.project
         if project is None:
             return

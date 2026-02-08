@@ -21,7 +21,7 @@ class BrushTool(BaseTool):
 
         #nastavenia štetca
         self.brush_size: int = 10
-        self.color_rgba = np.array([255, 0, 0, 255], dtype=np.uint8)
+        self.color_rgba = self.controller.get_current_color_rgba()  #np.array([255, 0, 0, 255], dtype=np.uint8)
 
         #undo
         self._before_image: Optional[np.ndarray] = None
@@ -89,6 +89,9 @@ class BrushTool(BaseTool):
             yy = int(round(y0 + t * dy))
             self._draw_dot(layer, xx, yy)
 
+    def _update_color_from_controller(self) -> None:
+        self.color_rgba = self.controller.get_current_color_rgba()
+
     #--------udalosti myši--------
     def on_mouse_press(self, img_x: int, img_y: int, buttons: Qt.MouseButton, modifiers: Qt.KeyboardModifier) -> None:
         if not (buttons & Qt.LeftButton):
@@ -98,7 +101,8 @@ class BrushTool(BaseTool):
         if layer is None:
             self.controller.show_tool_message("Brush sa dá použiť len na PAINT vrstvách")
             return
-        
+        #vždy pri začiatku ťahu si vezmeme aktuálnu farbu z panelu
+        self._update_color_from_controller()
         self.is_drawing = True
         self._last_x = img_x
         self._last_y = img_y

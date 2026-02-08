@@ -24,6 +24,7 @@ from rp_restore.gui.tools.eraser_tool import EraserTool
 from rp_restore.gui.tools.fill_tool import FillTool
 from rp_restore.gui.tools.selection_tool import SelectionTool
 from rp_restore.gui.tools.edge_tool import EdgeTool
+from rp_restore.gui.tools.pipette_tool import PipetteTool
 from rp_restore.io import image_io
 from rp_restore.io.project_storage import ProjectLoader, ProjectSerializer
 from rp_restore.core.auto_fill import auto_fill_small_regions
@@ -41,6 +42,11 @@ class ProjectController:
         self.project: Optional[Project] = None
 
         self.canvas: Optional[ImageCanvasWidget] = None
+        self.color_panel = None
+        
+        self.edge_settings_panel: Optional[object] = None
+        self._edge_brush_size: int = 2
+        self._edge_color_rgba: np.ndarray = np.array([0, 0, 0, 255], dtype=np.uint8)
         #neskôr pribudnú ďalšie ako layers_panel, log_panel, tools_panel...
         self.active_layer_id: Optional[str] = None
         self.layers_panel: Optional[LayersPanel] = None
@@ -73,7 +79,70 @@ class ProjectController:
         self.refresh_canvas()
         self.refresh_layers_panel()
         self.refresh_log_panel()
+        if self.color_panel is not None and hasattr(self.color_panel, "refresh_from_project"):
+            self.color_panel.refresh_from_project(project)
+        if self.edge_settings_panel is not None and hasattr(self.edge_settings_panel, "refresh_from_controller"):
+            self.edge_settings_panel.refresh_from_controller(self)
         #neskôr refreshne všetko (refresh_layers_panel(), refresh_log_panel()...)
+
+    def set_color_panel(self, panel: object) -> None:
+        """
+        prepojí controller s ColorPanelom
+        """
+        self.color_panel = panel
+        if hasattr(panel, "set_controller"):
+            panel.set_controller(self)
+    
+    def set_edge_settings_panel(self, panel: object) -> None:
+        """
+        Prepojí controller s EdgeSettingsPanelom
+        """
+        self.edge_settings_panel = panel
+        if hasattr(panel, "set_controller"):
+            panel.set_controller(self)
+
+    def get_current_color_rgba(self) -> np.ndarray:
+        """
+        vráti aktuálnu farbu ako numpy RGBA 
+        """
+        if self.project is None:
+            return np.array([0, 0, 0, 255], dtype=np.uint8)
+        r, g, b, a = self.project.get_current_color_rgba()
+        return np.array([r, g, b, a], dtype=np.uint8)
+
+    def set_current_color_rgba(self, color: tuple[int, int, int, int]) -> None:
+        if self.project is None:
+            return
+        self.project.set_current_color_rgba(color)
+        #refresh panel
+        if self.color_panel is not None and hasattr(self.color_panel, "refresh_from_project"):
+            self.color_panel.refresh_from_project(self.project)
+
+    def add_current_color_to_palette(self) -> None:
+        if self.project is None:
+            return
+        self.project.add_palette_color(self.project.get_current_color_rgba())
+        if self.color_panel is not None and hasattr(self.color_panel, "refresh_from_project"):
+            self.color_panel.refresh_from_project(self.project)
+   
+    #-Edge -hrúbka a farba
+    def get_edge_brush_size(self) -> int:
+        return int(self._edge_brush_size)
+
+    def set_edge_brush_size(self, size: int) -> None:
+        self._edge_brush_size = max(1, int(size))
+        if self.edge_settings_panel is not None and hasattr(self.edge_settings_panel, "refresh_from_controller"):
+            self.edge_settings_panel.refresh_from_controller(self)
+
+    def get_edge_color_rgba(self) -> np.ndarray:
+        return self._edge_color_rgba.copy()
+
+    def set_edge_color_rgba(self, color: tuple[int, int, int, int]) -> None:
+        arr = np.array(color, dtype=np.int32)
+        arr = np.clip(arr, 0, 255).astype(np.uint8)
+        self._edge_color_rgba = arr
+        if self.edge_settings_panel is not None and hasattr(self.edge_settings_panel, "refresh_from_controller"):
+            self.edge_settings_panel.refresh_from_controller(self)
 
     def set_layers_panel(self, panel: LayersPanel) -> None:
         """prepojí controller s panelom vrstiev"""
@@ -96,6 +165,8 @@ class ProjectController:
             self.current_tool = SelectionTool(self, self.canvas)
         elif tool_type == "edge":
             self.current_tool = EdgeTool(self, self.canvas)
+        elif tool_type == "pipette":
+            self.current_tool = PipetteTool(self, self.canvas)
         else:
             self.current_tool = None
 
