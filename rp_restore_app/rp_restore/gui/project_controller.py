@@ -43,6 +43,7 @@ class ProjectController:
 
         self.canvas: Optional[ImageCanvasWidget] = None
         self.color_panel = None
+        self._brush_size: int = 10
         
         self.edge_settings_panel: Optional[object] = None
         self._edge_brush_size: int = 2
@@ -143,6 +144,14 @@ class ProjectController:
         self._edge_color_rgba = arr
         if self.edge_settings_panel is not None and hasattr(self.edge_settings_panel, "refresh_from_controller"):
             self.edge_settings_panel.refresh_from_controller(self)
+
+    def get_brush_size(self) -> int:
+        return int(self._brush_size)
+
+    def set_brush_size(self, size: int) -> None:
+        self._brush_size = max(1, int(size))
+        if self.color_panel is not None and hasattr(self.color_panel, "set_brush_size_value"):
+            self.color_panel.set_brush_size_value(self._brush_size)
 
     def set_layers_panel(self, panel: LayersPanel) -> None:
         """prepojí controller s panelom vrstiev"""

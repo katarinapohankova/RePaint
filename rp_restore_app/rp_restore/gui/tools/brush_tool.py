@@ -20,7 +20,7 @@ class BrushTool(BaseTool):
         self._active_layer_index: Optional[int] = None
 
         #nastavenia štetca
-        self.brush_size: int = 10
+        self.brush_size: int = self.controller.get_brush_size()
         self.color_rgba = self.controller.get_current_color_rgba()  #np.array([255, 0, 0, 255], dtype=np.uint8)
 
         #undo
@@ -29,6 +29,10 @@ class BrushTool(BaseTool):
         #posledná pozícia
         self._last_x: Optional[int] = None
         self._last_y: Optional[int] = None
+
+    def _update_from_controller(self) -> None:
+        self.brush_size = self.controller.get_brush_size()
+        self.color_rgba = self.controller.get_current_color_rgba()
 
     def _get_active_paint_layer(self):
         """nájde aktívnu PAINT vrstvu podľa active_layer_id v controlleri"""
@@ -97,6 +101,7 @@ class BrushTool(BaseTool):
         if not (buttons & Qt.LeftButton):
             return
         layer = self._get_active_paint_layer()
+        self._update_from_controller()
 
         if layer is None:
             self.controller.show_tool_message("Brush sa dá použiť len na PAINT vrstvách")

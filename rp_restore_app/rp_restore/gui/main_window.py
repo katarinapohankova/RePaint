@@ -49,7 +49,7 @@ class MainWindow(QMainWindow):
         self.layers_dock = QDockWidget("Vrstvy", self)
         self.layers_dock.setObjectName("LayersDock")
         self.layers_dock.setWidget(self.layers_panel)
-        self.addDockWidget(Qt.RightDockWidgetArea, self.layers_dock)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.layers_dock)
 
         #Log panel 
         self.log_panel = LogPanel(self)

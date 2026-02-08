@@ -19,11 +19,14 @@ class EraserTool(BaseTool):
         super().__init__(controller, canvas)
 
         self.is_erasing: bool = False
-        self.brush_size: int = 10
+        self.brush_size: int = self.controller.get_brush_size()
 
         self._before_image: Optional[np.ndarray] = None
         self._last_x: Optional[int] = None
         self._last_y: Optional[int] = None
+
+    def _update_from_controller(self) -> None:
+        self.brush_size = self.controller.get_brush_size()
 
     def _get_active_paint_layer(self):
         project = self.controller.project
@@ -72,6 +75,7 @@ class EraserTool(BaseTool):
             return
 
         layer = self._get_active_paint_layer()
+        self._update_from_controller()
         if layer is None:
             self.controller.show_tool_message("Eraser sa dá použiť len na PAINT vrstvách")
             return

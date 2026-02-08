@@ -4,7 +4,7 @@ from typing import Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton,QHBoxLayout, QGridLayout, QColorDialog
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton,QHBoxLayout, QGridLayout, QColorDialog, QSpinBox
 
 from rp_restore.core.project_model import Project
 
@@ -57,13 +57,26 @@ class ColorPanel(QWidget):
         self.palette_layout.setSpacing(4)
         layout.addLayout(self.palette_layout)
 
+        #veľkosť Brush/Eraser
+        brush_row = QHBoxLayout()
+        brush_label = QLabel("Velikost štětce:")
+        self.brush_spin = QSpinBox()
+        self.brush_spin.setRange(1, 200)
+        self.brush_spin.setToolTip("Velikost štětce pro nástroje Brush a Eraser")
+        brush_row.addWidget(brush_label)
+        brush_row.addWidget(self.brush_spin)
+        layout.addLayout(brush_row)
+
         layout.addStretch(1)
 
         self.btn_change_color.clicked.connect(self._on_change_color_clicked)
         self.btn_add_to_palette.clicked.connect(self._on_add_to_palette_clicked)
+        self.brush_spin.valueChanged.connect(self._on_brush_size_changed)
 
     def set_controller(self, controller: object) -> None:
         self._controller = controller
+        if hasattr(controller, "get_brush_size") and hasattr(self, "brush_spin"):
+            self.set_brush_size_value(controller.get_brush_size())
 
     def refresh_from_project(self, project: Project) -> None:
         """
@@ -141,3 +154,22 @@ class ColorPanel(QWidget):
         self._set_swatch_color(color)
         if hasattr(self._controller, "set_current_color_rgba"):
             self._controller.set_current_color_rgba(rgba)
+
+    def _on_brush_size_changed(self, value: int) -> None:
+        """
+        Užívateľ zmenil veľkosť štetca v spinboxe
+        """
+        if self._controller is None:
+            return
+        if hasattr(self._controller, "set_brush_size"):
+            self._controller.set_brush_size(value)
+
+    def set_brush_size_value(self, value: int) -> None:
+        """
+        Nastaví hodnotu spinboxu z controlleru
+        """
+        if not hasattr(self, "brush_spin"):
+            return
+        self.brush_spin.blockSignals(True)
+        self.brush_spin.setValue(int(value))
+        self.brush_spin.blockSignals(False)
