@@ -79,6 +79,7 @@ class FillTool(BaseTool):
 
         project.undo_manager.push_action(action)
 
-        #označíme region v damage maske ako vyplnený
-        #project.mark_region_as_filled(region_mask)
-        self.controller.refresh_canvas()
+        if hasattr(self.controller, "refresh_canvas_region"):
+            self.controller.refresh_canvas_region((x, y, w, h))
+        else:
+            self.controller.refresh_canvas()

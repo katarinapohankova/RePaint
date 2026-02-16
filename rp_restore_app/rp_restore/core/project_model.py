@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
+from pathlib import Path
 import numpy as np
 
 from .layers import Layer, LayerRole
@@ -12,6 +13,7 @@ from .warnings import UserWarning
 from .warnings import LogManager, WarningType, RegionReference
 from .selection import Selection
 from .regions import RegionMap, build_region_map, compare_region_maps
+from rp_restore.io.image_io import load_image
 
 
 class Project:
@@ -24,6 +26,11 @@ class Project:
 
     def __init__(self, project_name: str) -> None:
         self.project_name: str = project_name
+
+        #info o pôvodnom obraze / working image
+        self.base_image_path: Path | None = None
+        self.base_image_scale: float = 1.0  #working_size / original_size
+        self.base_image_working: np.ndarray | None = None  #to, čo sa reálne používa
 
         #všetky vrstvy v projekte (BACKGROUND, EDGE, PAINT)
         self.layers: List[Layer] = []
@@ -105,6 +112,57 @@ class Project:
             alpha = rgba[..., 3:4] / 255.0
             base = rgb * alpha + base * (1.0 - alpha)
         #výsledok pretypujeme na uint8
+        return np.clip(base, 0, 255).astype(np.uint8)
+    
+    def composited_region(self, bbox: tuple[int, int, int, int]) -> np.ndarray:
+        """
+        Zloží výsledný RGB obraz iba v danej oblasti bbox = (x, y, w, h)
+        -rovnaké ako composited_image(), ale len pre slice
+        """
+        bg_layer = self.get_background_layer()
+        if bg_layer is None:
+            raise RuntimeError("Project has no BACKGROUND layer")
+
+        x, y, w, h = bbox
+        if w <= 0 or h <= 0:
+            #vrátime aspoň nejaké 1x1, aby to nepadlo
+            return np.zeros((1, 1, 3), dtype=np.uint8)
+
+        H, W, _ = bg_layer.image.shape
+
+        #orezanie bboxu do hraníc obrázka
+        x0 = max(0, min(x, W))
+        y0 = max(0, min(y, H))
+        x1 = max(x0, min(x + w, W))
+        y1 = max(y0, min(y + h, H))
+
+        if x1 <= x0 or y1 <= y0:
+            return np.zeros((1, 1, 3), dtype=np.uint8)
+
+        #začneme s RGB z background v danom výseku
+        base = bg_layer.image[y0:y1, x0:x1, :3].astype(np.float32)
+
+        #PAINT vrstvy
+        for layer in self.get_paint_layers():
+            rgba = layer.image[y0:y1, x0:x1, :].astype(np.float32)
+            if rgba.size == 0:
+                continue
+            rgb = rgba[..., :3]
+            alpha = rgba[..., 3:4] / 255.0  #(h, w, 1)
+            base = rgb * alpha + base * (1.0 - alpha)
+
+        #EDGE vrstvy
+        for layer in self.get_edge_layers():
+            rgba = layer.image
+            if rgba.shape[0] != H or rgba.shape[1] != W:
+                continue
+            sub = rgba[y0:y1, x0:x1, :].astype(np.float32)
+            if sub.size == 0:
+                continue
+            rgb = sub[..., :3]
+            alpha = sub[..., 3:4] / 255.0
+            base = rgb * alpha + base * (1.0 - alpha)
+
         return np.clip(base, 0, 255).astype(np.uint8)
     
     #---------Undo/redo rozhranie---------
@@ -289,6 +347,18 @@ class Project:
         """
         Vráti pôvodný obraz – zatiaľ berieme ako background vrstvu
         """
+        if self.base_image_path is not None and self.base_image_scale == 1.0:
+            #bezpečné načítanie full-res -pre report
+            try:
+                arr = load_image(self.base_image_path)
+                return arr
+            except Exception:
+                #fallback na working image
+                pass
+
+        if self.base_image_working is not None:
+            return self.base_image_working.copy()
+        
         bg = self.get_background_layer()
         if bg is None:
             return None

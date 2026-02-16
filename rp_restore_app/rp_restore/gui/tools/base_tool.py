@@ -15,6 +15,29 @@ class BaseTool:
         self.controller = controller
         self.canvas = canvas
 
+    def _refresh_segment_region(self, x0: int, y0: int, x1: int, y1: int, radius: int,) -> None:
+        """
+        z dvoch bodov a polomeru štetca spraví bbox a zavolá refresh_canvas_region
+        """
+        if self.controller is None:
+            return
+
+        margin = max(1, int(radius))
+        x_min = min(x0, x1) - margin
+        y_min = min(y0, y1) - margin
+        x_max = max(x0, x1) + margin
+        y_max = max(y0, y1) + margin
+
+        w = x_max - x_min
+        h = y_max - y_min
+        if w <= 0 or h <= 0:
+            return
+
+        if hasattr(self.controller, "refresh_canvas_region"):
+            self.controller.refresh_canvas_region((x_min, y_min, w, h))
+        else:
+            self.controller.refresh_canvas()
+
     #myš v image súradniciach:
     # img_x, img_y: int
     # buttons: Qt.MouseButtons

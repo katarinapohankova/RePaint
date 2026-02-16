@@ -25,6 +25,11 @@ class EraserTool(BaseTool):
         self._last_x: Optional[int] = None
         self._last_y: Optional[int] = None
 
+        self._stroke_min_x: Optional[int] = None
+        self._stroke_min_y: Optional[int] = None
+        self._stroke_max_x: Optional[int] = None
+        self._stroke_max_y: Optional[int] = None
+
     def _update_from_controller(self) -> None:
         self.brush_size = self.controller.get_brush_size()
 
@@ -87,7 +92,21 @@ class EraserTool(BaseTool):
         self._before_image = layer.image.copy()
 
         self._erase_dot(layer, img_x, img_y)
-        self.controller.refresh_canvas()
+
+        self._stroke_min_x = img_x
+        self._stroke_max_x = img_x
+        self._stroke_min_y = img_y
+        self._stroke_max_y = img_y
+
+        r = self.brush_size
+        x0 = img_x - r
+        y0 = img_y - r
+        w = 2 * r
+        h = 2 * r
+        if hasattr(self.controller, "refresh_canvas_region"):
+            self.controller.refresh_canvas_region((x0, y0, w, h))
+        else:
+            self.controller.refresh_canvas()
 
     def on_mouse_move(self, img_x: int, img_y: int, buttons: Qt.MouseButtons, modifiers: Qt.KeyboardModifiers) -> None:
         if not self.is_erasing:
@@ -101,12 +120,20 @@ class EraserTool(BaseTool):
             self._last_x = img_x
             self._last_y = img_y
 
-        self._erase_line(layer, self._last_x, self._last_y, img_x, img_y)
+        prev_x = self._last_x
+        prev_y = self._last_y
+        self._erase_line(layer, prev_x, prev_y, img_x, img_y)
 
         self._last_x = img_x
         self._last_y = img_y
 
-        self.controller.refresh_canvas()
+        #bbox celého ťahu
+        self._stroke_min_x = min(self._stroke_min_x, prev_x, img_x)
+        self._stroke_max_x = max(self._stroke_max_x, prev_x, img_x)
+        self._stroke_min_y = min(self._stroke_min_y, prev_y, img_y)
+        self._stroke_max_y = max(self._stroke_max_y, prev_y, img_y)
+
+        self._refresh_segment_region(prev_x, prev_y, img_x, img_y, self.brush_size)
 
     def on_mouse_release(self, img_x: int, img_y: int, buttons: Qt.MouseButtons, modifiers: Qt.KeyboardModifiers) -> None:
         if not self.is_erasing:
@@ -118,16 +145,50 @@ class EraserTool(BaseTool):
         if layer is None or self._before_image is None:
             return
 
-        after_image = layer.image.copy()
         h, w, _ = layer.image.shape
-        bbox = (0, 0, w, h)
 
-        action = UndoAction(description="Erase stroke", layer_id = layer.meta.id, layer_role = layer.meta.role, bbox = bbox, before = self._before_image, after = after_image)
+        if (
+            self._stroke_min_x is None
+            or self._stroke_max_x is None
+            or self._stroke_min_y is None
+            or self._stroke_max_y is None
+        ):
+            x0, y0 = 0, 0
+            x1, y1 = w, h
+        else:
+            margin = self.brush_size
+            x0 = max(0, self._stroke_min_x - margin)
+            y0 = max(0, self._stroke_min_y - margin)
+            x1 = min(w, self._stroke_max_x + margin)
+            y1 = min(h, self._stroke_max_y + margin)
 
-        self.controller.project.undo_manager.push_action(action)  
+        if x1 <= x0 or y1 <= y0:
+            #nič sa nezmenilo
+            self._before_image = None
+            self._last_x = None
+            self._last_y = None
+            self._stroke_min_x = self._stroke_min_y = None
+            self._stroke_max_x = self._stroke_max_y = None
+            return
+
+        bw = x1 - x0
+        bh = y1 - y0
+
+        before = self._before_image[y0:y1, x0:x1, :].copy()
+        after = layer.image[y0:y1, x0:x1, :].copy()
+
+        bbox = (x0, y0, bw, bh)
+
+        action = UndoAction(description="Erase stroke", layer_id = layer.meta.id, layer_role = layer.meta.role, bbox = bbox, before = before, after = after)
+        self.controller.project.undo_manager.push_action(action)
+
+        self.controller.refresh_canvas_region(bbox)
 
         self._before_image = None
         self._last_x = None
         self._last_y = None
+        self._stroke_min_x = None
+        self._stroke_min_y = None
+        self._stroke_max_x = None
+        self._stroke_max_y = None
 
-        self.controller.refresh_canvas()

@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 from pathlib import Path
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QAction, QActionGroup
+from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import QMainWindow, QStatusBar, QMessageBox, QDockWidget, QToolBar, QFileDialog, QLabel
 
 from rp_restore.config.settings import AppSettings
@@ -17,6 +17,7 @@ from rp_restore.gui.panels.log_panel import LogPanel
 from rp_restore.gui.panels.algorithm_panel import AlgorithmPanel
 from rp_restore.gui.panels.color_panel import ColorPanel
 from rp_restore.gui.panels.edge_settings_panel import EdgeSettingsPanel
+#from rp_restore.report.pdf_report import generate_report
 
 class MainWindow(QMainWindow):
     """
@@ -160,6 +161,12 @@ class MainWindow(QMainWindow):
         close_project_action.triggered.connect(self.on_close_project)
         file_menu.addAction(close_project_action)
 
+        # file_menu.addSeparator()
+
+        # export_report_action = QAction("Exportovat report…", self)
+        # export_report_action.triggered.connect(self.on_export_report)
+        # file_menu.addAction(export_report_action)
+
         file_menu.addSeparator()
 
         #neskôr -Open/Save/Exit
@@ -172,12 +179,12 @@ class MainWindow(QMainWindow):
         edit_menu = menu_bar.addMenu("&Edit")
 
         undo_action = QAction("Undo", self)
-        undo_action.setShortcut("Ctrl+Z")
+        undo_action.setShortcuts([QKeySequence.Undo])
         undo_action.triggered.connect(self.on_undo_triggered)
         edit_menu.addAction(undo_action)
 
         redo_action = QAction("Redo", self)
-        redo_action.setShortcut("Ctrl+Y")
+        redo_action.setShortcuts([QKeySequence.Redo])
         redo_action.triggered.connect(self.on_redo_triggered)
         edit_menu.addAction(redo_action)
 
@@ -263,10 +270,6 @@ class MainWindow(QMainWindow):
         if not text:
             return
 
-        # #použijeme central widget, aby sme boli nad plátnom 
-        # parent = self.centralWidget() or self
-        # self._toast_label.setParent(parent)
-
         self._toast_label.setText(text)
         self._toast_label.adjustSize()
 
@@ -308,10 +311,6 @@ class MainWindow(QMainWindow):
 
     def show_start_screen(self) -> None:
         """zobrazí úvodnú obrazovku"""
-        # if self.start_screen is not None:
-        #     self.start_screen.deleteLater()
-        #     self.start_screen = None
-        # self.setCentralWidget(self.start_screen)
 
         start_screen = StartScreenWidget(self)
         start_screen.set_recent_projects(self.app_settings.get_recent_projects())
@@ -432,7 +431,10 @@ class MainWindow(QMainWindow):
         #nastavíme aktívnu vrstvu podľa akcie
         self.controller.set_active_layer(action.layer_id)
         #refresh canvas a panel vrstiev
-        self.controller.refresh_canvas()
+
+        #prekreslíme len daný bbox
+        bbox = action.bbox
+        self.controller.refresh_canvas_region(bbox)
         self.controller.refresh_layers_panel()
 
     def on_redo_triggered(self) -> None:
@@ -445,7 +447,8 @@ class MainWindow(QMainWindow):
             return
 
         self.controller.set_active_layer(action.layer_id)
-        self.controller.refresh_canvas()
+        bbox = action.bbox
+        self.controller.refresh_canvas_region(bbox)
         self.controller.refresh_layers_panel()
 
     def on_new_project_from_image(self) -> None:
@@ -525,6 +528,34 @@ class MainWindow(QMainWindow):
 
         #self.start_screen.set_recent_projects(self.app_settings.get_recent_projects())
         self.statusBar().showMessage("Projekt uložený", 3000)
+
+    # def on_export_report(self) -> None:
+    #     """
+    #     Exportuje PDF report o aktuálnom projekte
+    #     """
+    #     if self.controller.project is None:
+    #         QMessageBox.information(self, "Žádný projekt", "Není otevřený žádný projekt")
+    #         return
+
+    #     pdf_path, _ = QFileDialog.getSaveFileName(
+    #         self,
+    #         "Uložit report jako",
+    #         "",
+    #         "PDF soubory (*.pdf);;Všechny soubory (*.*)",
+    #     )
+    #     if not pdf_path:
+    #         return
+
+    #     if not pdf_path.lower().endswith(".pdf"):
+    #         pdf_path += ".pdf"
+
+    #     try:
+    #         generate_report(self.controller.project, pdf_path)
+    #     except Exception as e:
+    #         QMessageBox.critical(self, "Chyba při exportu reportu", str(e))
+    #         return
+
+    #     self.statusBar().showMessage("Report byl úspěšně exportován.", 5000)
 
     def on_toggle_damage_overlay(self, checked: bool) -> None:
         """

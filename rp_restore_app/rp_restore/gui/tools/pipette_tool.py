@@ -21,13 +21,11 @@ class PipetteTool(BaseTool):
         if project is None:
             return
 
-        composited = project.get_current_composited_image()  #(H, W, 3)
-        h, w, _ = composited.shape
-
-        if img_x < 0 or img_y < 0 or img_x >= w or img_y >= h:
+        patch = project.composited_region((img_x, img_y, 1, 1))
+        if patch.size == 0:
             return
 
-        rgb = composited[img_y, img_x, :]
+        rgb = patch[0, 0, :]
         r, g, b = [int(c) for c in rgb.tolist()]
         a = 255
 

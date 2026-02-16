@@ -26,6 +26,7 @@ from rp_restore.gui.tools.selection_tool import SelectionTool
 from rp_restore.gui.tools.edge_tool import EdgeTool
 from rp_restore.gui.tools.pipette_tool import PipetteTool
 from rp_restore.io import image_io
+from rp_restore.io.image_io import load_working_image
 from rp_restore.io.project_storage import ProjectLoader, ProjectSerializer
 from rp_restore.core.auto_fill import auto_fill_small_regions
 
@@ -78,6 +79,10 @@ class ProjectController:
             else:
                 self.active_layer_id = self.project.layers[0].meta.id
         self.refresh_canvas()
+
+        if self.canvas is not None:
+            self.canvas.fit_to_window()
+
         self.refresh_layers_panel()
         self.refresh_log_panel()
         if self.color_panel is not None and hasattr(self.color_panel, "refresh_from_project"):
@@ -254,6 +259,52 @@ class ProjectController:
         qimage = self._numpy_rgb_to_qimage(image_rgb)
         self.canvas.set_image(qimage)
 
+    def refresh_canvas_region(self, bbox: tuple[int, int, int, int]) -> None:
+        """
+        rýchla verzia refreshu -len v oblasti bbox = (x, y, w, h), a ten patchuje do existujúceho QImage v canvase
+        """
+        if self.project is None or self.canvas is None:
+            return
+
+        x, y, w, h = bbox
+        if w <= 0 or h <= 0:
+            return
+
+        #composited patch z core
+        region_rgb = self.project.composited_region(bbox)
+        #damage overlay len pre túto oblasť
+        if self.show_damage_overlay:
+            remaining = self.project.get_damage_remaining_mask()
+            if remaining is not None:
+                y0, x0 = y, x
+                y1, x1 = y + h, x + w
+
+                Hmask, Wmask = remaining.shape
+                #orezať do hraníc masky
+                y0c = max(0, min(y0, Hmask))
+                y1c = max(0, min(y1, Hmask))
+                x0c = max(0, min(x0, Wmask))
+                x1c = max(0, min(x1, Wmask))
+
+                if y1c > y0c and x1c > x0c:
+                    sub_mask = remaining[y0c:y1c, x0c:x1c]
+                    h_sub, w_sub = sub_mask.shape
+                    h_img, w_img, _ = region_rgb.shape
+
+                    if h_sub == h_img and w_sub == w_img:
+                        overlay_color = np.array([255, 255, 255], dtype=np.float32)
+                        alpha = 0.6
+
+                        region = sub_mask
+                        orig = region_rgb[region].astype(np.float32)
+                        blended = orig * (1.0 - alpha) + overlay_color * alpha
+                        region_rgb[region] = blended.clip(0, 255).astype(np.uint8)
+
+        #konverzia patchu na QImage
+        patch_qimage = self._numpy_rgb_to_qimage(region_rgb)
+        #patch do canvasu
+        self.canvas.patch_region(patch_qimage, x, y)
+
     def set_active_layer(self, layer_id: str) -> None:
         """
         nastaví aktívnu vrstvu podľa jej id
@@ -363,22 +414,27 @@ class ProjectController:
         """
         Vytvorí nový Project zo zadaného obrázka (a voliteľne damage masky)
         """
-        img_rgba = image_io.load_image(image_path)
-        h, w, _ = img_rgba.shape
+        
+        working_arr, scale = load_working_image(image_path, max_size=8000)
 
         bg_meta = LayerMeta(id="background", name="Background", role=LayerRole.BACKGROUND)
-        bg_layer = Layer(bg_meta, img_rgba)
+        bg_layer = Layer(bg_meta, working_arr.copy())
 
-        paint_img = np.zeros_like(img_rgba, dtype=np.uint8)
+        paint_img = np.zeros_like(working_arr, dtype=np.uint8)
         paint_meta = LayerMeta(id="paint_1", name="Paint 1", role=LayerRole.PAINT)
         paint_layer = Layer(paint_meta, paint_img)
 
-        edge_img = np.zeros_like(img_rgba, dtype=np.uint8)
+        edge_img = np.zeros_like(working_arr, dtype=np.uint8)
         edge_meta = LayerMeta(id="edge_1", name="Edges 1", role=LayerRole.EDGE)
         edge_layer = Layer(edge_meta, edge_img)
 
         project_name = Path(image_path).stem
         project = Project(project_name)
+
+        project.base_image_path = Path(image_path)
+        project.base_image_scale = scale
+        project.base_image_working = working_arr    
+
         project.add_layer(bg_layer)
         project.add_layer(paint_layer)
         project.add_layer(edge_layer)

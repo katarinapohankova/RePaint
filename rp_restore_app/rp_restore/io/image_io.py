@@ -20,6 +20,26 @@ def load_image(path: PathLike) -> np.ndarray:
     arr = np.array(img, dtype=np.uint8)
     return arr
 
+def load_working_image(path: str | Path, max_size: int = 5000) -> tuple[np.ndarray, float]:
+    
+    with Image.open(path) as img:
+        img = img.convert("RGBA")
+
+        orig_w, orig_h = img.size
+        long_side = max(orig_w, orig_h)
+
+        if long_side <= max_size:
+            scale = 1.0
+            resized = img
+        else:
+            scale = max_size / float(long_side)
+            new_w = int(orig_w * scale)
+            new_h = int(orig_h * scale)
+            resized = img.resize((new_w, new_h), resample=Image.BILINEAR)
+
+        arr = np.array(resized, dtype=np.uint8)
+
+    return arr, scale
 
 def save_image(path: PathLike, arr: np.ndarray) -> None:
     """
