@@ -55,12 +55,17 @@ class FillTool(BaseTool):
             return
 
         #z projektu si vypýtame selection (podľa damage_remaining_mask)
-        selection = project.get_selection_from_click(img_x, img_y)
-        if selection is None:
-            return
-
-        region_mask = selection.region_mask
-        x, y, w, h = selection.bbox
+        selection_set = getattr(self.controller, "active_selection", None)
+        if (selection_set is not None and hasattr(selection_set, "is_empty") and not selection_set.is_empty()):
+            #multi-selection: combined mask + bbox
+            region_mask = selection_set.combined_mask()
+            x, y, w, h = selection_set.combined_bbox()
+        else:
+            selection = project.get_selection_from_click(img_x, img_y)
+            if selection is None:
+                return
+            region_mask = selection.region_mask
+            x, y, w, h = selection.bbox 
 
         #before – uložíme subregion
         before = layer.clone_subregion(x, y, w, h)
@@ -78,7 +83,7 @@ class FillTool(BaseTool):
         action = UndoAction(description="Fill region", layer_id=layer.meta.id, layer_role=layer.meta.role, bbox=(x, y, w, h), before=before, after=after)
 
         project.undo_manager.push_action(action)
-
+        project.mark_region_as_filled(region_mask)
         if hasattr(self.controller, "refresh_canvas_region"):
             self.controller.refresh_canvas_region((x, y, w, h))
         else:

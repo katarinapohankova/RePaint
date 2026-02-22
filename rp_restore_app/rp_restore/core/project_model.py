@@ -228,20 +228,21 @@ class Project:
         """
         ak v bode (x, y) je pixel poškodený (true), spraví flood-fill a vráti Selection (region_mask + bbox)
         """
-        remaining = self.get_damage_remaining_mask()
-        if remaining is None:
+        if self.damage_original_mask is None:
             return None
 
-        h, w = remaining.shape
+        mask = self.damage_original_mask
+        h, w = mask.shape
+
         if x < 0 or y < 0 or x >= w or y >= h:
             return None
 
-        if not remaining[y, x]:
+        if not mask[y, x]:
             #klik mimo poškodenej oblasti
             return None
 
         edge_layers = self.get_edge_layers()
-        region_map = build_region_map(remaining, edge_layers)
+        region_map = build_region_map(mask, edge_layers)
 
         label_image = region_map.label_image
         region_id = int(label_image[y, x])

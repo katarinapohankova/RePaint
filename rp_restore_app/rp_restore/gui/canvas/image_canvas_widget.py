@@ -6,7 +6,9 @@ from PySide6.QtWidgets import QWidget
 
 from typing import List, Optional, TYPE_CHECKING
 
-from .overlay_highlight import draw_region_highlights
+import numpy as np
+
+from .overlay_highlight import draw_region_highlights, draw_selection_highlight
 
 if TYPE_CHECKING:
     from rp_restore.core.warnings import RegionReference
@@ -35,6 +37,7 @@ class ImageCanvasWidget(QWidget):
 
         self.controller = None
 
+        self.selection_mask: np.ndarray | None = None
         self._highlight_regions: List["RegionReference"] = []
 
         self.setMinimumSize(400, 300)
@@ -48,6 +51,13 @@ class ImageCanvasWidget(QWidget):
     def set_controller(self, controller) -> None:
         """nastaví controller, ktorému budeme posielať udalosti myši"""
         self.controller = controller
+
+    def set_selection_mask(self, mask: np.ndarray | None) -> None:
+        """
+        Nastaví masku selection (v image súradniciach)
+        """
+        self.selection_mask = mask
+        self.update()
 
     def set_highlight_for_regions(self, regions: Optional[List["RegionReference"]]) -> None:
         """
@@ -101,6 +111,10 @@ class ImageCanvasWidget(QWidget):
         #zatiaľ bez zoomu 
         #nakreslíme obraz do ľavého horného rohu
         painter.drawImage(0, 0, img)
+        
+        #selection overlay –polopriehľadná maska
+        if self.selection_mask is not None:
+            draw_selection_highlight(painter, self.selection_mask)
         
         #overlay highlight (warningy / selection)
         if self._highlight_regions:

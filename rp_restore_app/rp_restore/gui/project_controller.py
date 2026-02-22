@@ -11,7 +11,7 @@ from PySide6.QtCore import Qt
 from rp_restore.core.layers import Layer, LayerMeta, LayerRole
 from rp_restore.core.project_model import Project
 from rp_restore.config.settings import AppSettings
-from rp_restore.core.selection import Selection
+from rp_restore.core.selection import Selection, SelectionSet
 from rp_restore.core.warnings import UserWarning
 from rp_restore.core.algorithm_runner import AlgorithmType, AlgorithmRequest, AlgorithmRunner
 from rp_restore.core.history import UndoAction
@@ -54,7 +54,7 @@ class ProjectController:
         self.layers_panel: Optional[LayersPanel] = None
         self.log_panel: Optional[LogPanel] = None
         self.current_tool: Optional[BaseTool] = None
-        self.active_selection: Optional[Selection] = None
+        self.active_selection: SelectionSet | None = None
         #vizualizácia damage masky v canvase
         self.show_damage_overlay: bool = True
         self.algorithm_panel = None
@@ -189,10 +189,27 @@ class ProjectController:
         nastaví aktuálnu selection
         zatiaľ len uložíme do atribútu, neskôr pridáme highlight na canvase a info AlgorithmPanelu
         """
-        self.active_selection = selection
+
+        if selection is None:
+            self.set_selection(None)
+        else:
+            self.set_selection(SelectionSet(selections=[selection]))
+
+    def set_selection(self, selection_set: SelectionSet | None) -> None:
+        """
+        Nastaví aktuálny multi-selection (SelectionSet) a refreshne canvas + AlgorithmPanel
+        """
+        self.active_selection = selection_set
+
+        #informujeme AlgorithmPanel
         if self.algorithm_panel is not None and hasattr(self.algorithm_panel, "refresh_from_selection"):
-            self.algorithm_panel.refresh_from_selection(selection)
-        #neskôr aj highlight selection v canvase
+            self.algorithm_panel.refresh_from_selection(selection_set)
+
+        #refresh canvas
+        self.refresh_canvas()
+
+    def clear_selection(self) -> None:
+        self.set_selection(None)
 
     def set_show_damage_overlay(self, show: bool) -> None:
         """
@@ -258,6 +275,15 @@ class ProjectController:
                 #inak overlay ignorujeme -maska nesedí
         qimage = self._numpy_rgb_to_qimage(image_rgb)
         self.canvas.set_image(qimage)
+        #selection overlay
+        if self.active_selection is not None and not self.active_selection.is_empty():
+            try:
+                sel_mask = self.active_selection.combined_mask()
+            except ValueError:
+                sel_mask = None
+        else:
+            sel_mask = None
+        self.canvas.set_selection_mask(sel_mask)
 
     def refresh_canvas_region(self, bbox: tuple[int, int, int, int]) -> None:
         """
@@ -545,7 +571,7 @@ class ProjectController:
         if project is None or self.active_selection is None:
             return
 
-        selection = self.active_selection
+        selection_set = self.active_selection
 
         original = project.get_original_image()
         current = project.get_current_composited_image()
@@ -555,7 +581,7 @@ class ProjectController:
             return
 
         #zabezpečíme tvar masiek
-        selected_mask = selection.region_mask.astype(bool)
+        selected_mask = selection_set.combined_mask()
         remaining_mask = damage_rem.astype(bool)
 
         #device – zatiaľ natvrdo cpu, neskôr z konfigurácie
@@ -616,7 +642,7 @@ class ProjectController:
         project.undo_manager.push_action(action)
 
         #označíme selection ako vyplnenú v damage maske
-        project.mark_region_as_filled(selection.region_mask)
+        project.mark_region_as_filled(selected_mask)
 
         #pridáme info do history_for_report
         project.history_for_report.append(

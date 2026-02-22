@@ -4,7 +4,7 @@ from typing import Optional
 
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton
 
-from rp_restore.core.selection import Selection
+from rp_restore.core.selection import Selection, SelectionSet
 from rp_restore.core.algorithm_runner import AlgorithmType
 
 
@@ -51,18 +51,24 @@ class AlgorithmPanel(QWidget):
         self.btn_realistic.setEnabled(enabled)
         self.btn_texture.setEnabled(enabled)
 
-    def refresh_from_selection(self, selection: Selection | None) -> None:
+    def refresh_from_selection(self, selection_set: SelectionSet | None) -> None:
         """
         Zavolá controller, keď sa zmení active_selection
         """
-        if selection is None:
+        if selection_set is None or selection_set.is_empty():
             self.info_label.setText("Žiadna vybraná oblasť")
             self._set_buttons_enabled(False)
             return
 
-        x, y, w, h = selection.bbox
-        self.info_label.setText(f"Vybraná oblasť: x={x}, y={y}, w={w}, h={h}")
+        x, y, w, h = selection_set.combined_bbox()
+        num_regions = len(selection_set.selections)
+
+        if num_regions == 1:
+            self.info_label.setText(f"Vybrán region: {w}×{h}")
+        else:
+            self.info_label.setText(f"Vybráno {num_regions} oblastí, společný bbox: {w}×{h}")
         self._set_buttons_enabled(True)
+        self.current_selection_bbox = (x, y, w, h)
 
     def _on_realistic_clicked(self) -> None:
         if self._controller is None:
