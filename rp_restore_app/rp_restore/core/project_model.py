@@ -183,11 +183,19 @@ class Project:
     
 
     #---------damage masky--------
-    def set_damage_masks(self, original_mask: np.ndarray) -> None:
+    def set_damage_masks(self, original_mask: Optional[np.ndarray]) -> None:
         """
         Nastaví masku poškodenia
         original_mask -2D pole (H, W), kde true je poškodené miesto
         """
+        if original_mask is None:
+            raise ValueError("Damage mask could not be loaded (None)")
+        
+        original_mask = np.asarray(original_mask)
+
+        if original_mask.ndim == 3:
+            original_mask = original_mask[..., 0]
+            
         if original_mask.ndim != 2:
             raise ValueError("Damage mask must be 2D (H, W)")
 

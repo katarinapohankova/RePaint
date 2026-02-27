@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 from PySide6.QtGui import QImage
-
+from PySide6.QtWidgets import QApplication, QDialog
 from PySide6.QtCore import Qt
 
 from rp_restore.core.layers import Layer, LayerMeta, LayerRole
@@ -15,6 +15,7 @@ from rp_restore.core.selection import Selection, SelectionSet
 from rp_restore.core.warnings import UserWarning
 from rp_restore.core.algorithm_runner import AlgorithmType, AlgorithmRequest, AlgorithmRunner
 from rp_restore.core.history import UndoAction
+from rp_restore.core import mask_alignment
 from rp_restore.gui.canvas.image_canvas_widget import ImageCanvasWidget
 from rp_restore.gui.panels.layers_panel import LayersPanel
 from rp_restore.gui.panels.log_panel import LogPanel
@@ -25,6 +26,7 @@ from rp_restore.gui.tools.fill_tool import FillTool
 from rp_restore.gui.tools.selection_tool import SelectionTool
 from rp_restore.gui.tools.edge_tool import EdgeTool
 from rp_restore.gui.tools.pipette_tool import PipetteTool
+from rp_restore.gui.mask_alignment_dialog import MaskAlignmentDialog
 from rp_restore.io import image_io
 from rp_restore.io.image_io import load_working_image
 from rp_restore.io.project_storage import ProjectLoader, ProjectSerializer
@@ -465,9 +467,24 @@ class ProjectController:
         project.add_layer(paint_layer)
         project.add_layer(edge_layer)
 
+        h_img, w_img, _ = working_arr.shape
         if mask_path:
-            mask = image_io.load_mask(mask_path)
-            project.set_damage_masks(mask)
+            mask_preview_arr, _ = load_working_image(mask_path, max_size=8000)
+
+            #otvoríme dialóg na zarovnanie
+            parent = QApplication.activeWindow()
+            dlg = MaskAlignmentDialog(working_arr, mask_preview_arr, parent=parent)
+            result = dlg.exec()
+
+            if result != QDialog.Accepted:
+                raise RuntimeError("Mask alignment was cancelled by the user")
+            
+            image_points, mask_points = dlg.get_points()
+            H = mask_alignment.compute_homography(src_points=mask_points, dst_points=image_points)
+            wrapped_mask_rgb = mask_alignment.warp_mask_to_image(mask_rgb=mask_preview_arr, H=H, target_size=(w_img, h_img))
+
+            damage_mask = mask_alignment.rgb_to_damage_mask(wrapped_mask_rgb)
+            project.set_damage_masks(damage_mask)
 
         self.set_project(project)
         self.current_project_path = None
