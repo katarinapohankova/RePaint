@@ -351,6 +351,7 @@ class ProjectController:
 
         self.active_layer_id = layer_id
         self.refresh_layers_panel()
+        self.update_layer_preview()
         #neskôr informujeme nástroje
 
     def add_paint_layer(self) -> None:
@@ -381,6 +382,59 @@ class ProjectController:
 
         self.refresh_layers_panel()
         self.refresh_canvas()
+    
+    def get_layer_by_id(self, layer_id: str) -> Layer | None:
+        if self.project is None:
+            return None
+        for layer in self.project.layers:
+            if layer.meta.id == layer_id:
+                return layer
+        return None
+    
+    def on_layer_visibility_changed(self, layer_id: str, visible: bool) -> None:
+        layer = self.get_layer_by_id(layer_id)
+        if layer is None:
+            return
+
+        layer.meta.visible = bool(visible)
+        self.refresh_canvas()
+        self.refresh_layers_panel()
+
+    def on_layer_delete_requested(self, layer_id: str) -> bool:
+        """
+        Zmaže paint vrstvu
+        -vráti True, ak sa podarilo
+        """
+        if self.project is None:
+            return False
+
+        layer = self.get_layer_by_id(layer_id)
+        if layer is None:
+            return False
+
+        if layer.meta.role != LayerRole.PAINT:
+            self.show_tool_message("This layer can't be deleted")
+            return False
+
+        try:
+            self.project.remove_layer(layer_id)
+        except Exception as e:
+            self.show_tool_message(str(e))
+            return False
+
+        #ak sme zmazali aktívnu vrstvu, nastavíme inú aktívnu
+        if self.active_layer_id == layer_id:
+            #preferujme prvú PAINT, inak background
+            paint_layers = self.project.get_paint_layers()
+            if paint_layers:
+                self.active_layer_id = paint_layers[-1].meta.id
+            else:
+                bg = self.project.get_background_layer()
+                self.active_layer_id = bg.meta.id if bg else None
+
+        self.refresh_layers_panel()
+        self.refresh_canvas()
+        return True
 
     def rename_layer(self, layer_id: str, new_name: str) -> None:
         """
@@ -402,7 +456,36 @@ class ProjectController:
             return
 
         self.layers_panel.refresh_from_project(self.project, self.active_layer_id)
+        self.update_layer_preview()
 
+    def update_layer_preview(self) -> None:
+        if self.project is None or self.layers_panel is None:
+            return
+
+        if self.active_layer_id is None:
+            if hasattr(self.layers_panel, "set_preview"):
+                self.layers_panel.set_preview(None)
+            return
+
+        layer = self.get_layer_by_id(self.active_layer_id)
+        if layer is None:
+            if hasattr(self.layers_panel, "set_preview"):
+                self.layers_panel.set_preview(None)
+            return
+
+        #RGBA -> RGB cez alfa blending na tmavé pozadie
+        rgba = layer.image.astype(np.float32)
+        rgb = rgba[..., :3]
+        alpha = rgba[..., 3:4] / 255.0
+        bg = np.zeros_like(rgb) + 30.0  #tmavé pozadie
+        out = rgb * alpha + bg * (1.0 - alpha)
+        out = np.clip(out, 0, 255).astype(np.uint8)
+
+        qimg = self._numpy_rgb_to_qimage(out)
+
+        if hasattr(self.layers_panel, "set_preview"):
+            #zmenší sa už v LayersPanel.set_preview, takže tu netreba
+            self.layers_panel.set_preview(qimg)
 
     def refresh_log_panel(self) -> None:
         if self.project is None or self.log_panel is None:

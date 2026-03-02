@@ -94,6 +94,9 @@ class MainWindow(QMainWindow):
         self.color_dock.hide()
         self.edge_settings_dock.hide()
 
+        self.layers_panel.visibility_changed.connect(self.controller.on_layer_visibility_changed)
+        self.layers_panel.delete_layer_requested.connect(self._on_delete_layer_requested)
+
         #start screen
         self.start_screen = None
         # self.start_screen = StartScreenWidget(self)
@@ -372,6 +375,22 @@ class MainWindow(QMainWindow):
         self.controller.set_current_tool(tool_name)
         #QActionGroup sa postará o check/uncheck
 
+    def _on_delete_layer_requested(self, layer_id: str) -> None:
+        if self.controller.project is None:
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Smazat vrstvu",
+            "Naozaj chceš smazat tuhle paint vrstvu?\nTahle akce nejde vrátit zpět",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        ok = self.controller.on_layer_delete_requested(layer_id)
+        if not ok:
+            QMessageBox.warning(self, "Smazat vrstvu", "Vrstvu sa nepodarilo smazat")
 
     def on_new_project_requested(self) -> None:
         """vytvorí jednoduchý projekt a prepne do workspace"""

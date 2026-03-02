@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton, QHBoxLayout, QInputDialog
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton, QHBoxLayout, QInputDialog, QToolButton, QFrame
 
 from rp_restore.core.project_model import Project
 
@@ -14,6 +15,8 @@ class LayersPanel(QWidget):
     - zobrazuje vrstvy z Projectu
     - pri kliknutí na vrstvu povie controlleru, že ju má nastaviť ako aktívnu
     """
+    visibility_changed = Signal(str, bool)   #(layer_id, visible)
+    delete_layer_requested = Signal(str)    #(layer_id)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -46,11 +49,32 @@ class LayersPanel(QWidget):
         #keď sa zmení výber, zavoláme callback
         self.list_widget.itemSelectionChanged.connect(self._on_selection_changed)
 
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        layout.addWidget(separator)
+
+        self.preview_label = QLabel("Náhled vrstvy")
+        layout.addWidget(self.preview_label)
+
+        self.preview_image = QLabel()
+        self.preview_image.setFixedSize(180, 120)
+        self.preview_image.setAlignment(Qt.AlignCenter)
+        self.preview_image.setStyleSheet("border: 1px solid #555; background: #222;")
+        layout.addWidget(self.preview_image)
+
     def set_controller(self, controller: object) -> None:
         """
         uloží referenciu na controller
         """
         self._controller = controller
+
+    def set_preview(self, qimage) -> None:
+        if qimage is None:
+            self.preview_image.clear()
+            return
+        pix = QPixmap.fromImage(qimage)
+        pix = pix.scaled(self.preview_image.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.preview_image.setPixmap(pix)
 
     #----------aktualizácia podľa projectu----------
 
@@ -64,13 +88,57 @@ class LayersPanel(QWidget):
 
         for layer in project.layers:
             meta = layer.meta
-            text = f"{meta.name} ({meta.role.value})"
-            item = QListWidgetItem(text)
+
+            #item len ako kontajner
+            item = QListWidgetItem()
             item.setData(Qt.UserRole, meta.id)
             self.list_widget.addItem(item)
 
+            #widget riadku
+            row = QWidget()
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(6, 2, 6, 2)
+            row_layout.setSpacing(6)
+
+            #eye button
+            eye = QToolButton()
+            eye.setCheckable(True)
+            eye.setChecked(meta.visible)
+            eye.setToolTip("Zobrazit / skrýt vrstvu")
+            eye_on = QIcon.fromTheme("view-visible")
+            eye_off = QIcon.fromTheme("view-hidden")
+            eye.setText("◉" if meta.visible else "⦸")
+
+            def _on_eye_toggled(checked, layer_id=meta.id, btn=eye):
+                btn.setText("◉" if checked else "⦸")
+                self.visibility_changed.emit(layer_id, checked)
+
+            eye.toggled.connect(_on_eye_toggled)
+            row_layout.addWidget(eye)
+
+            #name label
+            name_label = QLabel(meta.name)
+            row_layout.addWidget(name_label, 1)
+
+            #role label 
+            role_label = QLabel(meta.role.value)
+            role_label.setStyleSheet("color: #aaa; font-size: 10px;")
+            row_layout.addWidget(role_label)
+
+            #delete button len pre PAINT
+            if meta.role.value == "paint":
+                delete_btn = QToolButton()
+                delete_btn.setText("🗑")
+                delete_btn.setToolTip("Smazat paint vrstvu")
+                delete_btn.clicked.connect(lambda _=False, layer_id=meta.id: self.delete_layer_requested.emit(layer_id))
+                row_layout.addWidget(delete_btn)
+
+            item.setSizeHint(row.sizeHint())
+            self.list_widget.setItemWidget(item, row)
+
             if active_layer_id is not None and meta.id == active_layer_id:
                 item.setSelected(True)
+
 
         self.list_widget.blockSignals(False)
 

@@ -60,6 +60,23 @@ class Project:
     def add_layer(self, layer: Layer) -> None:
         """Pridá vrstvu do projektu"""
         self.layers.append(layer)
+    
+    def remove_layer(self, layer_id: str) -> None:
+        """
+        Odstráni vrstvu (iba paint)
+        """
+        layer = next((l for l in self.layers if l.meta.id == layer_id), None)
+        if layer is None:
+            return
+
+        if layer.meta.role != LayerRole.PAINT:
+            raise ValueError("Only PAINT layers can be removed")
+
+        self.layers = [l for l in self.layers if l.meta.id != layer_id]
+
+        #prepočítame order vrstiev
+        for idx, l in enumerate(self.layers):
+            l.meta.order = idx
 
     def get_background_layer(self) -> Optional[Layer]:
         """Vráti prvú BACKGROUND vrstvu (alebo None, ak neexistuje)"""
@@ -90,12 +107,18 @@ class Project:
         if bg_layer is None:
             raise RuntimeError("Project has no BACKGROUND layer.")
 
-        #začneme s RGB z backgroundu
-        base = bg_layer.image[..., :3].astype(np.float32)
-        h, w, _ = base.shape
+        h, w, _ = bg_layer.image.shape
+
+        #viditeľnosť backgroundu
+        if not bg_layer.meta.visible:
+            base = np.zeros((h, w, 3), dtype=np.float32)
+        else:
+            base = bg_layer.image[..., :3].astype(np.float32)
 
         #zoberieme všetky paint vrstvy v poradí, v akom sú v zozname
         for layer in self.get_paint_layers():
+            if not layer.meta.visible:
+                continue
             rgba = layer.image.astype(np.float32)
             rgb = rgba[..., :3]
             alpha = rgba[..., 3:4] / 255.0  #tvar (H, W, 1)
@@ -104,6 +127,8 @@ class Project:
             base = rgb * alpha + base * (1.0 - alpha)
 
         for layer in self.get_edge_layers():
+            if not layer.meta.visible:
+                continue
             rgba = layer.image.astype(np.float32)
 
             if rgba.shape[0] != h or rgba.shape[1] != w:
@@ -144,6 +169,8 @@ class Project:
 
         #PAINT vrstvy
         for layer in self.get_paint_layers():
+            if not layer.meta.visible:
+                continue
             rgba = layer.image[y0:y1, x0:x1, :].astype(np.float32)
             if rgba.size == 0:
                 continue
@@ -153,6 +180,8 @@ class Project:
 
         #EDGE vrstvy
         for layer in self.get_edge_layers():
+            if not layer.meta.visible:
+                continue
             rgba = layer.image
             if rgba.shape[0] != H or rgba.shape[1] != W:
                 continue
