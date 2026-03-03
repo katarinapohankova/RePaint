@@ -193,11 +193,39 @@ class MainWindow(QMainWindow):
 
         view_menu = menu_bar.addMenu("&View")
 
+        def _add_dock_toggle(view_menu, title: str, dock):
+            action = QAction(title, self)
+            action.setCheckable(True)
+            action.setChecked(dock.isVisible())
+
+            #menu -> dock
+            action.toggled.connect(dock.setVisible)
+            #dock -> menu (keď user zavrie krížikom)
+            dock.visibilityChanged.connect(action.setChecked)
+
+            view_menu.addAction(action)
+            return action
+        
         self.toggle_damage_overlay_action = QAction("Zobraziť poškodené oblasti", self)
         self.toggle_damage_overlay_action.setCheckable(True)
         self.toggle_damage_overlay_action.setChecked(True)
         self.toggle_damage_overlay_action.triggered.connect(self.on_toggle_damage_overlay)
         view_menu.addAction(self.toggle_damage_overlay_action)
+
+        if hasattr(self, "layers_dock"):
+            _add_dock_toggle(view_menu, "Vrstvy", self.layers_dock)
+
+        if hasattr(self, "color_dock"):
+            _add_dock_toggle(view_menu, "Barvy", self.color_dock)
+
+        if hasattr(self, "log_dock"):
+            _add_dock_toggle(view_menu, "Log", self.log_dock)
+
+        if hasattr(self, "algorithm_dock"):
+            _add_dock_toggle(view_menu, "Algoritmy", self.algorithm_dock)
+
+        if hasattr(self, "edge_settings_dock"):
+            _add_dock_toggle(view_menu, "Hrany", self.edge_settings_dock)
 
     def _create_toolbars(self) -> None:
         tools_toolbar = QToolBar("Nástroje", self)
@@ -356,7 +384,7 @@ class MainWindow(QMainWindow):
             self.algorithm_dock.show()
         if hasattr(self, "color_dock"):
             self.color_dock.show()
-        if hasattr(self, "brush_action") and not self.brush_action.isChecked(): 
+        if hasattr(self, "brush_action"): 
             self.brush_action.setChecked(True)  # spustí _on_tool_action_triggered
         if hasattr(self, "edge_settings_dock"):
             self.edge_settings_dock.show()

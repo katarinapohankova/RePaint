@@ -72,6 +72,8 @@ class ProjectController:
         """nastaví aktuálny Project a refreshne GUI"""
         self.project = project
 
+        self.reset_tools_to_default()
+        
         #default aktívna vrstva bude preferovaná BACKGROUND, inak prvú vrstvu v zozname
         self.active_layer_id = None
         if self.project.layers:
@@ -185,6 +187,15 @@ class ProjectController:
             self.current_tool = PipetteTool(self, self.canvas)
         else:
             self.current_tool = None
+
+    def reset_tools_to_default(self) -> None:
+        """
+        Reset nástrojov pri otvorení/zmene projektu:
+        - zruší selection
+        - nastaví default tool = brush
+        """
+        self.active_selection = None
+        self.set_current_tool("brush")
 
     def set_active_selection(self, selection: Selection | None) -> None:
         """
