@@ -44,6 +44,7 @@ class MainWindow(QMainWindow):
         # self.canvas.set_controller(self.controller)
         self.canvas = None
         self.controller.set_message_callback(self._show_tool_message)
+        self.setDockNestingEnabled(True)
 
         #layers panel
         self.layers_panel = LayersPanel(self)
@@ -286,6 +287,27 @@ class MainWindow(QMainWindow):
         self.auto_fill_action.triggered.connect(self.on_auto_fill_small_regions)
         tools_toolbar.addAction(self.auto_fill_action)
 
+    def _apply_right_dock_layout(self) -> None:
+        """
+        aby sa pravé docky neskladali cez seba, ale boli pod sebou (vertikálny split)
+        """
+        if not (hasattr(self, "algorithm_dock") and hasattr(self, "color_dock") and hasattr(self, "edge_settings_dock")):
+            return
+
+        self.setDockNestingEnabled(True)
+
+        self.splitDockWidget(self.algorithm_dock, self.color_dock, Qt.Vertical)
+        self.splitDockWidget(self.color_dock, self.edge_settings_dock, Qt.Vertical)
+
+        self.resizeDocks(
+            [self.algorithm_dock, self.color_dock, self.edge_settings_dock],
+            [220, 320, 260],
+            Qt.Vertical,
+        )
+        self.log_dock.show()
+        self.setCorner(Qt.BottomRightCorner, Qt.RightDockWidgetArea)
+        self.setCorner(Qt.BottomLeftCorner, Qt.BottomDockWidgetArea)
+        
 
     def _show_tool_message(self, text: str) -> None:
         """
@@ -361,8 +383,6 @@ class MainWindow(QMainWindow):
             self.algorithm_dock.hide()
         if hasattr(self, "color_dock"): 
             self.color_dock.hide()
-        if hasattr(self, "color_panel"):
-            self.color_panel.show()
         if hasattr(self, "edge_settings_dock"):
             self.edge_settings_dock.hide()
 
@@ -388,6 +408,7 @@ class MainWindow(QMainWindow):
             self.brush_action.setChecked(True)  # spustí _on_tool_action_triggered
         if hasattr(self, "edge_settings_dock"):
             self.edge_settings_dock.show()
+        QTimer.singleShot(0, self._apply_right_dock_layout)
 
     #----------akcie StartScreen-----------
 

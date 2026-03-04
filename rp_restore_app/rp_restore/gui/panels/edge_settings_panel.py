@@ -51,17 +51,21 @@ class EdgeSettingsPanel(QWidget):
         #tlačidlá
         self.btn_change_color = QPushButton("Změnit barvu…")
         self.btn_use_current = QPushButton("Použít aktuální barvu")
+        self.btn_add_to_palette = QPushButton("Přidat barvu do palety")
 
         self.btn_change_color.setToolTip("Otevře dialog pro výběr barvy hran")
         self.btn_use_current.setToolTip("Použije aktuální barvu z panelu Barvy jako barvu hran")
+        self.btn_add_to_palette.setToolTip("Přidá aktuální barvu hran do palety v panelu Barvy")
 
         layout.addWidget(self.btn_change_color)
         layout.addWidget(self.btn_use_current)
+        layout.addWidget(self.btn_add_to_palette)
         layout.addStretch(1)
 
         self.spin_width.valueChanged.connect(self._on_width_changed)
         self.btn_change_color.clicked.connect(self._on_change_color_clicked)
         self.btn_use_current.clicked.connect(self._on_use_current_clicked)
+        self.btn_add_to_palette.clicked.connect(self._on_add_edge_color_to_palette_clicked)
 
     #prepojenie s controllerom
 
@@ -141,3 +145,15 @@ class EdgeSettingsPanel(QWidget):
             self._controller.set_edge_color_rgba((r, g, b, a))
 
         self._set_swatch_color(QColor(r, g, b, a))
+    
+    def _on_add_edge_color_to_palette_clicked(self) -> None:
+        if self._controller is None:
+            return
+        if not hasattr(self._controller, "get_edge_color_rgba"):
+            return
+
+        arr = self._controller.get_edge_color_rgba()
+        r, g, b, a = [int(x) for x in arr.tolist()]
+
+        if hasattr(self._controller, "add_color_to_palette_rgba"):
+            self._controller.add_color_to_palette_rgba((r, g, b, a), avoid_duplicates=True)

@@ -135,6 +135,40 @@ class ProjectController:
         if self.color_panel is not None and hasattr(self.color_panel, "refresh_from_project"):
             self.color_panel.refresh_from_project(self.project)
    
+    def add_color_to_palette_rgba(self, color: tuple[int, int, int, int], avoid_duplicates: bool = True) -> None:
+        """
+        Pridá ľubovoľnú farbu do palety
+        """
+        if self.project is None:
+            return
+
+        if avoid_duplicates:
+            if color in self.project.get_palette_colors():
+                return
+
+        self.project.add_palette_color(color)
+
+        #refresh ColorPanel
+        if self.color_panel is not None and hasattr(self.color_panel, "refresh_from_project"):
+            self.color_panel.refresh_from_project(self.project)
+
+    def remove_color_from_palette(self, index: int) -> None:
+        """
+        Odstráni farbu z palety podľa indexu
+        """
+        if self.project is None:
+            return
+
+        palette = self.project.get_palette_colors()
+        if index < 0 or index >= len(palette):
+            return
+
+        #priamo upravíme zoznam
+        self.project.palette_colors.pop(index)
+
+        if self.color_panel is not None and hasattr(self.color_panel, "refresh_from_project"):
+            self.color_panel.refresh_from_project(self.project)
+
     #-Edge -hrúbka a farba
     def get_edge_brush_size(self) -> int:
         return int(self._edge_brush_size)
