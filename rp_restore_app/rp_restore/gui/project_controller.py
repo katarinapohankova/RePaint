@@ -481,6 +481,14 @@ class ProjectController:
         self.refresh_canvas()
         return True
 
+    def on_layer_opacity_changed(self, layer_id: str, opacity: float) -> None:
+        layer = self.get_layer_by_id(layer_id)
+        if layer is None:
+            return
+
+        layer.meta.opacity = float(max(0.0, min(1.0, opacity)))
+        self.refresh_canvas()
+
     def rename_layer(self, layer_id: str, new_name: str) -> None:
         """
         Premenuje vrstvu s daným id
@@ -787,7 +795,7 @@ class ProjectController:
         project.undo_manager.push_action(action)
 
         #označíme selection ako vyplnenú v damage maske
-        project.mark_region_as_filled(selected_mask)
+        project.mark_region_as_filled_on_layer(target_layer.meta.id, selected_mask)
 
         #pridáme info do history_for_report
         project.history_for_report.append(

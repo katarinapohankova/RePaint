@@ -97,6 +97,7 @@ class MainWindow(QMainWindow):
 
         self.layers_panel.visibility_changed.connect(self.controller.on_layer_visibility_changed)
         self.layers_panel.delete_layer_requested.connect(self._on_delete_layer_requested)
+        self.layers_panel.opacity_changed.connect(self.controller.on_layer_opacity_changed)
 
         #start screen
         self.start_screen = None

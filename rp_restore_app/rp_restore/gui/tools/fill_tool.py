@@ -67,11 +67,23 @@ class FillTool(BaseTool):
             region_mask = selection.region_mask
             x, y, w, h = selection.bbox 
 
+        #per-layer remaining mask
+        remaining = project.get_layer_damage_remaining_mask(layer.meta.id)
+        if remaining is None:
+            self.controller.show_tool_message("Chybí damage maska alebo aktivní vrstva není PAINT")
+            return
+        
+        #iba to čo na tejto vrstve ešte nie je vyplnené
+        effective_mask = region_mask & remaining 
+        if not effective_mask.any():
+            self.controller.show_tool_message("Tahle oblast již bylo na této vrstvě vyplněná")
+            return
+        
         #before – uložíme subregion
         before = layer.clone_subregion(x, y, w, h)
 
         #lokálna maska pre subregion
-        local_mask = region_mask[y : y + h, x : x + w]
+        local_mask = effective_mask[y : y + h, x : x + w]
 
         #vyplnenie vo vrstve
         sub_img = layer.image[y : y + h, x : x + w, :]
@@ -83,7 +95,7 @@ class FillTool(BaseTool):
         action = UndoAction(description="Fill region", layer_id=layer.meta.id, layer_role=layer.meta.role, bbox=(x, y, w, h), before=before, after=after)
 
         project.undo_manager.push_action(action)
-        project.mark_region_as_filled(region_mask)
+        project.mark_region_as_filled_on_layer(layer.meta.id, effective_mask)
         if hasattr(self.controller, "refresh_canvas_region"):
             self.controller.refresh_canvas_region((x, y, w, h))
         else:

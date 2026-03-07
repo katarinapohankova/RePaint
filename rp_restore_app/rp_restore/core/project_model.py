@@ -60,6 +60,12 @@ class Project:
     def add_layer(self, layer: Layer) -> None:
         """Pridá vrstvu do projektu"""
         self.layers.append(layer)
+
+        if layer.meta.role == LayerRole.PAINT and self.damage_original_mask is not None:
+            #ak už maska existuje, necháme ju -inak ju dopočítame z alfa kanálu
+            if getattr(layer, "damage_filled_mask", None) is None:
+                alpha_filled = (layer.image[..., 3] > 0) & self.damage_original_mask
+                layer.damage_filled_mask = alpha_filled.astype(bool)
     
     def remove_layer(self, layer_id: str) -> None:
         """
@@ -93,6 +99,42 @@ class Project:
         """Vráti zoznam všetkých EDGE vrstiev"""
         return [l for l in self.layers if l.meta.role == LayerRole.EDGE]
 
+    def get_layer_damage_remaining_mask(self, layer_id: str) -> np.ndarray | None:
+        """
+        Remaining mask pre konkrétnu paint vrstvu
+        """
+        if self.damage_original_mask is None:
+            return None
+
+        layer = next((l for l in self.layers if l.meta.id == layer_id), None)
+        if layer is None or layer.meta.role != LayerRole.PAINT:
+            return None
+
+        if layer.damage_filled_mask is None:
+            layer.damage_filled_mask = np.zeros_like(self.damage_original_mask, dtype=bool)
+
+        return self.damage_original_mask & ~layer.damage_filled_mask
+
+
+    def mark_region_as_filled_on_layer(self, layer_id: str, region_mask: np.ndarray) -> None:
+        """
+        Označí daný region ako vyplnený iba na konkrétnej paint vrstve
+        """
+        if self.damage_original_mask is None:
+            return
+
+        layer = next((l for l in self.layers if l.meta.id == layer_id), None)
+        if layer is None or layer.meta.role != LayerRole.PAINT:
+            return
+
+        if region_mask.shape != self.damage_original_mask.shape:
+            raise ValueError("region_mask must have same shape as damage_original_mask")
+
+        if layer.damage_filled_mask is None:
+            layer.damage_filled_mask = np.zeros_like(self.damage_original_mask, dtype=bool)
+
+        layer.damage_filled_mask |= region_mask.astype(bool)
+
     #---------Kompozícia obrazu---------
 
     def composited_image(self) -> np.ndarray:
@@ -115,18 +157,21 @@ class Project:
         else:
             base = bg_layer.image[..., :3].astype(np.float32)
 
-        #zoberieme všetky paint vrstvy v poradí, v akom sú v zozname
-        for layer in self.get_paint_layers():
+        #zoberieme všetky paint vrstvy zoradené
+        paint_layers = sorted(self.get_paint_layers(), key=lambda l: l.meta.order)
+        for layer in paint_layers:
             if not layer.meta.visible:
                 continue
             rgba = layer.image.astype(np.float32)
             rgb = rgba[..., :3]
-            alpha = rgba[..., 3:4] / 255.0  #tvar (H, W, 1)
+            alpha = (rgba[..., 3:4] / 255.0) * float(layer.meta.opacity)  #tvar (H, W, 1)
+            alpha = np.clip(alpha, 0.0, 1.0)
 
             #alpha blending: out = rgb * a + base * (1 - a)
             base = rgb * alpha + base * (1.0 - alpha)
 
-        for layer in self.get_edge_layers():
+        edge_layers = sorted(self.get_edge_layers(), key=lambda l: l.meta.order)
+        for layer in edge_layers:
             if not layer.meta.visible:
                 continue
             rgba = layer.image.astype(np.float32)
@@ -134,7 +179,8 @@ class Project:
             if rgba.shape[0] != h or rgba.shape[1] != w:
                 continue
             rgb = rgba[..., :3]
-            alpha = rgba[..., 3:4] / 255.0
+            alpha = (rgba[..., 3:4] / 255.0) * float(layer.meta.opacity)
+            alpha = np.clip(alpha, 0.0, 1.0)
             base = rgb * alpha + base * (1.0 - alpha)
         #výsledok pretypujeme na uint8
         return np.clip(base, 0, 255).astype(np.uint8)
@@ -175,7 +221,8 @@ class Project:
             if rgba.size == 0:
                 continue
             rgb = rgba[..., :3]
-            alpha = rgba[..., 3:4] / 255.0  #(h, w, 1)
+            alpha = rgba[..., 3:4] / 255.0 * float(layer.meta.opacity) #(h, w, 1)
+            alpha = np.clip(alpha, 0.0, 1.0)
             base = rgb * alpha + base * (1.0 - alpha)
 
         #EDGE vrstvy
@@ -189,7 +236,8 @@ class Project:
             if sub.size == 0:
                 continue
             rgb = sub[..., :3]
-            alpha = sub[..., 3:4] / 255.0
+            alpha = sub[..., 3:4] / 255.0 * float(layer.meta.opacity)
+            alpha = np.clip(alpha, 0.0, 1.0)
             base = rgb * alpha + base * (1.0 - alpha)
 
         return np.clip(base, 0, 255).astype(np.uint8)
@@ -370,15 +418,24 @@ class Project:
             return None
 
         h, w = self.damage_original_mask.shape
-        filled = np.zeros((h, w), dtype=bool)
+        filled_union = np.zeros((h, w), dtype=bool)
 
         for layer in self.get_paint_layers():
             if layer.image.shape[0] != h or layer.image.shape[1] != w:
                 continue
-            alpha = layer.image[..., 3] > 0
-            filled |= alpha
-
-        return filled
+            #preferujeme per-layer filled masku ak existuje
+            layers_mask = getattr(layer, "damage_filled_mask", None)
+            if layers_mask is not None:
+                if layers_mask.shape != (h, w):
+                    continue
+                filled_union |= layers_mask.astype(bool)
+                continue
+            
+            alpha_filled = (layer.image[..., 3] > 0) & self.damage_original_mask
+            filled_union |= alpha_filled
+        
+        filled_union &= self.damage_original_mask
+        return filled_union
 
     #---------metódy pre externé algoritmy---------
     def get_original_image(self) -> np.ndarray | None:

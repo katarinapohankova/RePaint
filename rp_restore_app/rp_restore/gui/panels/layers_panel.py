@@ -4,7 +4,7 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QIcon, QPixmap
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton, QHBoxLayout, QInputDialog, QToolButton, QFrame
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton, QHBoxLayout, QInputDialog, QToolButton, QFrame, QSlider
 
 from rp_restore.core.project_model import Project
 
@@ -17,6 +17,7 @@ class LayersPanel(QWidget):
     """
     visibility_changed = Signal(str, bool)   #(layer_id, visible)
     delete_layer_requested = Signal(str)    #(layer_id)
+    opacity_changed = Signal(str, float)    #(layer_id, opacity_0_1)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -61,6 +62,19 @@ class LayersPanel(QWidget):
         self.preview_image.setAlignment(Qt.AlignCenter)
         self.preview_image.setStyleSheet("border: 1px solid #555; background: #222;")
         layout.addWidget(self.preview_image)
+
+        self.opacity_label = QLabel("Průhlednost vrstvy:")
+        layout.addWidget(self.opacity_label)
+
+        self.opacity_slider = QSlider(Qt.Horizontal)
+        self.opacity_slider.setRange(0, 100)
+        self.opacity_slider.setValue(100)
+        self.opacity_slider.setToolTip("Průhlednost aktivní vrstvy (0–100 %)")
+        layout.addWidget(self.opacity_slider)
+
+        self.opacity_slider.valueChanged.connect(self._on_opacity_slider_changed)
+
+        self._active_layer_id_for_opacity: str | None = None
 
     def set_controller(self, controller: object) -> None:
         """
@@ -141,6 +155,25 @@ class LayersPanel(QWidget):
 
 
         self.list_widget.blockSignals(False)
+        self._active_layer_id_for_opacity = active_layer_id
+
+        active_layer = None
+        if active_layer_id is not None:
+            for layer in project.layers:
+                if layer.meta.id == active_layer_id:
+                    active_layer = layer
+                    break
+
+        if active_layer is None:
+            self.opacity_slider.blockSignals(True)
+            self.opacity_slider.setValue(100)
+            self.opacity_slider.blockSignals(False)
+        else:
+            val = int(round(float(active_layer.meta.opacity) * 100))
+            val = max(0, min(100, val))
+            self.opacity_slider.blockSignals(True)
+            self.opacity_slider.setValue(val)
+            self.opacity_slider.blockSignals(False)
 
     #----------callback pri kliknutí----------
 
@@ -194,4 +227,8 @@ class LayersPanel(QWidget):
         if hasattr(self._controller, "rename_layer"):
             self._controller.rename_layer(layer_id, new_name.strip())
 
-
+    def _on_opacity_slider_changed(self, value: int) -> None:
+        if self._active_layer_id_for_opacity is None:
+            return
+        opacity = float(value) / 100.0
+        self.opacity_changed.emit(self._active_layer_id_for_opacity, opacity)

@@ -43,6 +43,7 @@ class Layer:
 
         self.meta = meta
         self.image = image
+        self.damage_filled_mask: np.ndarray | None = None
 
     @property
     def size(self) -> Tuple[int, int]:

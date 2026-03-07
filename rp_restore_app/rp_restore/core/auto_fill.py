@@ -25,7 +25,7 @@ def auto_fill_small_regions(project: Project, target_layer: Layer, area_threshol
     if project is None or target_layer.meta.role != LayerRole.PAINT:
         return 0
 
-    damage_rem = project.get_damage_remaining_mask()
+    damage_rem = project.get_layer_damage_remaining_mask(target_layer.meta.id)
     if damage_rem is None:
         return 0
 
@@ -94,7 +94,7 @@ def auto_fill_small_regions(project: Project, target_layer: Layer, area_threshol
         sub_target[local_mask, 0:3] = mean_color
         sub_target[local_mask, 3] = 255
 
-        project.mark_region_as_filled(region_mask)
+        project.mark_region_as_filled_on_layer(target_layer.meta.id, region_mask)
 
         filled_count += 1
 
