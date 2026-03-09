@@ -182,6 +182,10 @@ class EraserTool(BaseTool):
         action = UndoAction(description="Erase stroke", layer_id = layer.meta.id, layer_role = layer.meta.role, bbox = bbox, before = before, after = after)
         self.controller.project.undo_manager.push_action(action)
 
+        project = self.controller.project
+        if project is not None:
+            project.sync_layer_filled_mask_from_alpha(layer.meta.id, bbox, mode="assign")
+
         self.controller.refresh_canvas_region(bbox)
 
         self._before_image = None

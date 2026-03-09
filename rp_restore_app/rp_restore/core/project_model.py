@@ -436,6 +436,46 @@ class Project:
         
         filled_union &= self.damage_original_mask
         return filled_union
+    
+    def sync_layer_filled_mask_from_alpha(self, layer_id: str, bbox: tuple[int,int,int,int] | None = None, mode: str = "or") -> None:
+        """
+        Synchronizuje layer.damage_filled_mask podľa alfa kanálu vrstvy (a len v damage_original_mask)
+        -ak bbox je None, prepočíta celú masku
+        """
+        if self.damage_original_mask is None:
+            return
+
+        layer = next((l for l in self.layers if l.meta.id == layer_id), None)
+        if layer is None or layer.meta.role != LayerRole.PAINT:
+            return
+
+        if layer.damage_filled_mask is None:
+            layer.damage_filled_mask = np.zeros_like(self.damage_original_mask, dtype=bool)
+
+        h, w = self.damage_original_mask.shape
+ 
+        if bbox is None:
+            alpha_filled = (layer.image[..., 3] > 0) & self.damage_original_mask
+            layer.damage_filled_mask[...] = alpha_filled
+            return
+
+        x, y, bw, bh = bbox
+        if bw <= 0 or bh <= 0:
+            return
+
+        x0 = max(0, x); y0 = max(0, y)
+        x1 = min(w, x + bw); y1 = min(h, y + bh)
+        if x1 <= x0 or y1 <= y0:
+            return
+
+        alpha_sub = (layer.image[y0:y1, x0:x1, 3] > 0)
+        dmg_sub = self.damage_original_mask[y0:y1, x0:x1]
+        filled_sub = alpha_sub & dmg_sub
+
+        if mode == "assign":
+            layer.damage_filled_mask[y0:y1, x0:x1] = filled_sub
+        else:
+            layer.damage_filled_mask[y0:y1, x0:x1] |= filled_sub
 
     #---------metódy pre externé algoritmy---------
     def get_original_image(self) -> np.ndarray | None:

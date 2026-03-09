@@ -122,19 +122,23 @@ class BrushTool(BaseTool):
 
         #prvý bod
         self._draw_dot(layer, img_x, img_y)
-        #rýchly refresh len okolo prvého bodu
+
+        # po prvom bode – sync filled mask pre malú oblasť
+        project = self.controller.project
+        if project is not None and self.controller.show_damage_overlay:
+            r = int(self.brush_size)
+            first_bbox = (img_x - r, img_y - r, 2 * r + 1, 2 * r + 1)
+            first_bbox = self._clamp_bbox_to_layer(layer, first_bbox)
+            if first_bbox is not None:
+                project.sync_layer_filled_mask_from_alpha(layer.meta.id, first_bbox)
+
+        #a refresh
+        self.controller.refresh_canvas_region(first_bbox if first_bbox is not None else (img_x - r, img_y - r, 2*r+1, 2*r+1))
+
         self._stroke_min_x = img_x
         self._stroke_max_x = img_x
         self._stroke_min_y = img_y
         self._stroke_max_y = img_y
-
-        r = self.brush_size
-        x0 = img_x - r
-        y0 = img_y - r
-        w = 2 * r
-        h = 2 * r
-
-        self.controller.refresh_canvas_region((x0, y0, w, h))
 
     def on_mouse_move(self, img_x: int, img_y: int, buttons: Qt.MouseButton, modifiers: Qt.KeyboardModifier) -> None:
         if not self.is_drawing:
@@ -152,6 +156,27 @@ class BrushTool(BaseTool):
         prev_y = self._last_y
         self._draw_line(layer, prev_x, prev_y, img_x, img_y)
 
+        r = self.brush_size
+        step_bbox = (
+            min(self._last_x, img_x) - r,
+            min(self._last_y, img_y) - r,
+            abs(img_x - self._last_x) + 2 * r + 1,
+            abs(img_y - self._last_y) + 2 * r + 1,
+        )
+       
+        step_bbox = self._clamp_bbox_to_layer(layer, step_bbox)
+        if step_bbox is None:
+            self._last_x = img_x
+            self._last_y = img_y
+            return
+        
+        project = self.controller.project
+        if project is not None and self.controller.show_damage_overlay:
+            project.sync_layer_filled_mask_from_alpha(layer.meta.id, step_bbox)
+
+        #refresh tej oblasti
+        self.controller.refresh_canvas_region(step_bbox)
+
         self._last_x = img_x
         self._last_y = img_y
         #bbox celého ťahu
@@ -159,9 +184,6 @@ class BrushTool(BaseTool):
         self._stroke_max_x = max(self._stroke_max_x, prev_x, img_x)
         self._stroke_min_y = min(self._stroke_min_y, prev_y, img_y)
         self._stroke_max_y = max(self._stroke_max_y, prev_y, img_y)
-
-        #rýchly refresh len v okolí tejto úsečky
-        self._refresh_segment_region(prev_x, prev_y, img_x, img_y, self.brush_size)
 
     def on_mouse_release(self, img_x: int, img_y: int, buttons: Qt.MouseButton, modifiers: Qt.KeyboardModifier) -> None:
         if not self.is_drawing:
@@ -174,7 +196,7 @@ class BrushTool(BaseTool):
             return
         h, w, _ = layer.image.shape
 
-        #ak sa bbox nenastavil, fallback na celú vrstvu
+        #ak sa bbox nenastavil, tak celú vrstvu
         if (
             self._stroke_min_x is None
             or self._stroke_min_y is None
@@ -213,6 +235,10 @@ class BrushTool(BaseTool):
 
         self.controller.project.undo_manager.push_action(action)
 
+        project = self.controller.project
+        if project is not None:
+            project.sync_layer_filled_mask_from_alpha(layer.meta.id, bbox)
+
         #cleanup
         self._before_image = None
         self._last_x = None
@@ -223,3 +249,20 @@ class BrushTool(BaseTool):
         self._stroke_max_y = None
 
         self.controller.refresh_canvas_region(bbox)
+
+    def _clamp_bbox_to_layer(self, layer, bbox: tuple[int, int, int, int]) -> tuple[int, int, int, int] | None:
+        x, y, w, h = bbox
+        if w <= 0 or h <= 0:
+            return None
+
+        H, W, _ = layer.image.shape
+
+        x0 = max(0, x)
+        y0 = max(0, y)
+        x1 = min(W, x + w)
+        y1 = min(H, y + h)
+
+        if x1 <= x0 or y1 <= y0:
+            return None
+
+        return (x0, y0, x1 - x0, y1 - y0)

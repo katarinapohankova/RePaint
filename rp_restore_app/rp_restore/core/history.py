@@ -71,6 +71,8 @@ class GlobalUndoManager:
         x, y, w, h = action.bbox
         layer.restore_subregion(x, y, action.before)
 
+        self._sync_paint_layer_masks_after_apply(project, action)
+
     def _apply_after(self, project: "Project", action: UndoAction) -> None:
         """Aplikuje 'after' pixely akcie (používa sa pri redo)"""
         layer = self._find_layer(project, action.layer_id)
@@ -79,6 +81,24 @@ class GlobalUndoManager:
 
         x, y, w, h = action.bbox
         layer.restore_subregion(x, y, action.after)
+
+        self._sync_paint_layer_masks_after_apply(project, action)
+
+    def _sync_paint_layer_masks_after_apply(self, project: "Project", action: UndoAction) -> None:
+        """
+        Po apply_before/apply_after zosynchronizuje per-layer damage mask pre PAINT vrstvy, aby overlay remaining sedel s reálnou alfa v layer.image
+        """
+        if action.layer_role != LayerRole.PAINT:
+            return
+
+        sync_fn = getattr(project, "sync_layer_filled_mask_from_alpha", None)
+        if sync_fn is None:
+            return
+
+        try:
+            sync_fn(action.layer_id, action.bbox, mode="assign")
+        except TypeError:
+            sync_fn(action.layer_id, action.bbox)
 
     #--------verejné metódy--------
 

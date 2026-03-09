@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication, QDialog
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 
 from rp_restore.core.layers import Layer, LayerMeta, LayerRole
 from rp_restore.core.project_model import Project
@@ -64,6 +64,11 @@ class ProjectController:
         self.current_project_path: Optional[str] = None
 
         self._message_callback: Optional[Callable[[str], None]] = None
+
+        #debounce pre opacity refresh (aby compositing nebežal pri každom ticku slidera)
+        self._opacity_debounce_timer: QTimer = QTimer()
+        self._opacity_debounce_timer.setSingleShot(True)
+        self._opacity_debounce_timer.timeout.connect(self._apply_opacity_debounced_refresh)
 
     def set_canvas(self, canvas: ImageCanvasWidget) -> None:
         self.canvas = canvas
@@ -295,6 +300,15 @@ class ProjectController:
 
     #refresh metódy
 
+    def _get_damage_overlay_mask_for_view(self) -> np.ndarray | None:
+        """
+        Vráti masku, ktorú chceme zobrazovať ako overlay
+        - globálne remaining
+        """
+        if self.project is None:
+            return None
+        return self.project.get_damage_remaining_mask()
+
     def refresh_canvas(self) -> None:
         if self.project is None or self.canvas is None:
             return
@@ -304,7 +318,7 @@ class ProjectController:
 
         #overlay poškodených oblastí (damage_remaining_mask)
         if self.show_damage_overlay:
-            remaining = self.project.get_damage_remaining_mask()
+            remaining = self._get_damage_overlay_mask_for_view()
             if remaining is not None:
                 h_img, w_img, _ = image_rgb.shape
                 h_mask, w_mask = remaining.shape
@@ -347,7 +361,7 @@ class ProjectController:
         region_rgb = self.project.composited_region(bbox)
         #damage overlay len pre túto oblasť
         if self.show_damage_overlay:
-            remaining = self.project.get_damage_remaining_mask()
+            remaining = self._get_damage_overlay_mask_for_view()
             if remaining is not None:
                 y0, x0 = y, x
                 y1, x1 = y + h, x + w
@@ -487,6 +501,12 @@ class ProjectController:
             return
 
         layer.meta.opacity = float(max(0.0, min(1.0, opacity)))
+        self._opacity_debounce_timer.start(80)
+
+    def _apply_opacity_debounced_refresh(self) -> None:
+        """
+        Zavolá sa po debounce timeout
+        """
         self.refresh_canvas()
 
     def rename_layer(self, layer_id: str, new_name: str) -> None:
@@ -579,7 +599,7 @@ class ProjectController:
         Vytvorí nový Project zo zadaného obrázka (a voliteľne damage masky)
         """
         
-        working_arr, scale = load_working_image(image_path, max_size=8000)
+        working_arr, scale = load_working_image(image_path, max_size=5000)
 
         bg_meta = LayerMeta(id="background", name="Background", role=LayerRole.BACKGROUND)
         bg_layer = Layer(bg_meta, working_arr.copy())
@@ -605,7 +625,7 @@ class ProjectController:
 
         h_img, w_img, _ = working_arr.shape
         if mask_path:
-            mask_preview_arr, _ = load_working_image(mask_path, max_size=8000)
+            mask_preview_arr, _ = load_working_image(mask_path, max_size=5000)
 
             #otvoríme dialóg na zarovnanie
             parent = QApplication.activeWindow()
