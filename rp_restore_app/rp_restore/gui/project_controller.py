@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 from PySide6.QtGui import QImage
-from PySide6.QtWidgets import QApplication, QDialog
+from PySide6.QtWidgets import QApplication, QDialog, QFileDialog
 from PySide6.QtCore import Qt, QTimer
 
 from rp_restore.core.layers import Layer, LayerMeta, LayerRole
@@ -63,6 +63,8 @@ class ProjectController:
 
         self.current_project_path: Optional[str] = None
 
+        self._undo_redo_changed_callback: Optional[Callable[[], None]] = None
+
         self._message_callback: Optional[Callable[[str], None]] = None
 
         #debounce pre opacity refresh (aby compositing nebežal pri každom ticku slidera)
@@ -76,6 +78,7 @@ class ProjectController:
     def set_project(self, project: Project) -> None:
         """nastaví aktuálny Project a refreshne GUI"""
         self.project = project
+        self.project.undo_manager.on_change = self._on_undo_manager_changed
 
         self.reset_tools_to_default()
         
@@ -282,6 +285,9 @@ class ProjectController:
         if hasattr(panel, "set_controller"):
             panel.set_controller(self)
 
+    def set_undo_redo_changed_callback(self, callback: Callable[[], None]) -> None:
+        self._undo_redo_changed_callback = callback
+
     def set_message_callback(self, callback: Callable[[str], None]) -> None:
         """
         nastaví callback na zobrazovanie krátkych hlášok pre užívateľa
@@ -458,6 +464,7 @@ class ProjectController:
         layer.meta.visible = bool(visible)
         self.refresh_canvas()
         self.refresh_layers_panel()
+        self.project.mark_dirty()
 
     def on_layer_delete_requested(self, layer_id: str) -> bool:
         """
@@ -477,6 +484,7 @@ class ProjectController:
 
         try:
             self.project.remove_layer(layer_id)
+            self.project.mark_dirty()
         except Exception as e:
             self.show_tool_message(str(e))
             return False
@@ -502,6 +510,7 @@ class ProjectController:
 
         layer.meta.opacity = float(max(0.0, min(1.0, opacity)))
         self._opacity_debounce_timer.start(80)
+        self.project.mark_dirty()
 
     def _apply_opacity_debounced_refresh(self) -> None:
         """
@@ -666,6 +675,7 @@ class ProjectController:
         ProjectSerializer.save_to_zip(self.project, zip_path)
         self.current_project_path = zip_path
         self.app_settings.add_recent_project(zip_path)
+        self.project.mark_saved()
 
     def save_project(self) -> bool:
         """
@@ -681,7 +691,54 @@ class ProjectController:
 
         ProjectSerializer.save_to_zip(self.project, self.current_project_path)
         self.app_settings.add_recent_project(self.current_project_path)
+        self.project.mark_saved()
         return True
+    
+    def has_open_project(self) -> bool:
+        return self.project is not None
+
+    def is_project_dirty(self) -> bool:
+        return self.project is not None and bool(getattr(self.project, "is_dirty", False))
+
+    def save_project_with_dialog_if_needed(self) -> bool:
+        """
+        Ak projekt nemá path -> vyžiada Save As dialóg (cez QFileDialog)
+        -inak spraví Save
+        -vráti True ak úspech, False ak zrušené alebo chyba
+        """
+        if self.project is None:
+            return False
+
+        #ak nemáme path, tak Save As dialog
+        if not self.current_project_path:
+            parent = QApplication.activeWindow()
+            zip_path, _ = QFileDialog.getSaveFileName(
+                parent,
+                "Uložiť projekt ako",
+                "",
+                "RP projekty (*.zip);;Všetky súbory (*.*)",
+            )
+            if not zip_path:
+                return False
+
+            if not zip_path.lower().endswith(".zip"):
+                zip_path += ".zip"
+
+            try:
+                self.save_project_as(zip_path)
+            except Exception as e:
+                self.show_tool_message(f"Chyba pri ukladaní: {e}")
+                return False
+
+            #po úspechu mark_saved
+            self.project.mark_saved()
+            return True
+
+        #inak obyčajný save
+        ok = self.save_project()
+        if ok:
+            self.project.mark_saved()
+        return ok
 
     def close_project(self) -> None:
         """
@@ -696,6 +753,9 @@ class ProjectController:
         self.active_selection = None
         self.current_tool = None
         self.current_project_path = None
+
+        if self._undo_redo_changed_callback is not None:
+            self._undo_redo_changed_callback()
 
     def run_auto_fill_small_regions(self, area_threshold: int = 200) -> int:
         """
@@ -851,3 +911,21 @@ class ProjectController:
 
         #highlight v canvase
         self.canvas.set_highlight_for_regions(regions)
+
+    def can_undo(self) -> bool:
+        return self.project is not None and self.project.can_undo()
+
+    def can_redo(self) -> bool:
+        return self.project is not None and self.project.can_redo()
+    
+    def _on_undo_manager_changed(self) -> None:
+        """
+        Volá sa pri push_action /undo /redo
+        -nastaví dirty
+        -MainWindow aktualizuje enabled stav Undo/Redo
+        """
+        if self.project is not None:
+            self.project.mark_dirty()
+        
+        if self._undo_redo_changed_callback is not None:
+            self._undo_redo_changed_callback()

@@ -47,10 +47,11 @@ class GlobalUndoManager:
       - redo_global() znovu aplikuje poslednú undo akciu
     """
 
-    def __init__(self, max_actions: Optional[int] = None) -> None:
+    def __init__(self, max_actions: Optional[int] = None, on_change: Optional[callable] = None) -> None:
         self.stack: List[UndoAction] = []
         self.redo_stack: List[UndoAction] = []
         self.max_actions = max_actions
+        self.on_change = on_change
 
     #--------interné pomocné metódy--------
 
@@ -114,6 +115,9 @@ class GlobalUndoManager:
         if self.max_actions is not None and len(self.stack) > self.max_actions:
             #zmažeme najstaršiu akciu
             self.stack.pop(0)
+        
+        if self.on_change is not None:
+            self.on_change()
 
     def undo_global(self, project: "Project") -> Optional[UndoAction]:
         """
@@ -127,6 +131,9 @@ class GlobalUndoManager:
         self._apply_before(project, action)
         action.is_undone = True
         self.redo_stack.append(action)
+
+        if self.on_change is not None:
+            self.on_change()
         return action
 
     def redo_global(self, project: "Project") -> Optional[UndoAction]:
@@ -140,6 +147,8 @@ class GlobalUndoManager:
         self._apply_after(project, action)
         action.is_undone = False
         self.stack.append(action)
+        if self.on_change is not None:
+            self.on_change()
         return action
 
     def undo_on_layer(self, project: "Project", layer_id: str) -> Optional[UndoAction]:
@@ -160,3 +169,9 @@ class GlobalUndoManager:
         action.is_undone = True
         self.redo_stack.append(action)
         return action
+    
+    def can_undo(self) -> bool:
+        return bool(self.stack)
+
+    def can_redo(self) -> bool:
+        return bool(self.redo_stack)

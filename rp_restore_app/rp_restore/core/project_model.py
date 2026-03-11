@@ -29,6 +29,7 @@ class Project:
 
         #info o pôvodnom obraze / working image
         self.base_image_path: Path | None = None
+        self.is_dirty: bool = False
         self.base_image_scale: float = 1.0  #working_size / original_size
         self.base_image_working: np.ndarray | None = None  #to, čo sa reálne používa
 
@@ -55,6 +56,12 @@ class Project:
         self.palette_colors: list[tuple[int, int, int, int]] = []
         self.current_color_rgba: tuple[int, int, int, int] = (0, 0, 0, 255)  #default bude čierna
 
+    def mark_dirty(self) -> None:
+        self.is_dirty = True
+
+    def mark_saved(self) -> None:
+        self.is_dirty = False
+        
     #---------Správa vrstiev---------
 
     def add_layer(self, layer: Layer) -> None:
@@ -258,6 +265,11 @@ class Project:
         """Vykoná undo na konkrétnej vrstve (zatiaľ jednoduchá verzia)"""
         return self.undo_manager.undo_on_layer(self, layer_id)
     
+    def can_undo(self) -> bool:
+        return self.undo_manager.can_undo()
+
+    def can_redo(self) -> bool:
+        return self.undo_manager.can_redo()
 
     #---------damage masky--------
     def set_damage_masks(self, original_mask: Optional[np.ndarray]) -> None:

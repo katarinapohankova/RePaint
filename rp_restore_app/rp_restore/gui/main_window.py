@@ -3,8 +3,8 @@ from __future__ import annotations
 import numpy as np
 from pathlib import Path
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QKeySequence
-from PySide6.QtWidgets import QMainWindow, QStatusBar, QMessageBox, QDockWidget, QToolBar, QFileDialog, QLabel
+from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QCloseEvent
+from PySide6.QtWidgets import QMainWindow, QStatusBar, QMessageBox, QDockWidget, QToolBar, QFileDialog, QLabel, QAbstractButton
 
 from rp_restore.config.settings import AppSettings
 from rp_restore.core.layers import Layer, LayerMeta, LayerRole
@@ -37,6 +37,7 @@ class MainWindow(QMainWindow):
 
         #controller
         self.controller = ProjectController(app_settings=self.app_settings)
+        self.controller.set_undo_redo_changed_callback(self.update_undo_redo_actions)
 
         #workspace canvas
         # self.canvas = ImageCanvasWidget(self)
@@ -183,15 +184,15 @@ class MainWindow(QMainWindow):
         #undo/redo
         edit_menu = menu_bar.addMenu("&Edit")
 
-        undo_action = QAction("Undo", self)
-        undo_action.setShortcuts([QKeySequence.Undo])
-        undo_action.triggered.connect(self.on_undo_triggered)
-        edit_menu.addAction(undo_action)
+        self.undo_action = QAction("Undo", self)
+        self.undo_action.setShortcuts([QKeySequence.Undo])
+        self.undo_action.triggered.connect(self.on_undo_triggered)
+        edit_menu.addAction(self.undo_action)
 
-        redo_action = QAction("Redo", self)
-        redo_action.setShortcuts([QKeySequence.Redo])
-        redo_action.triggered.connect(self.on_redo_triggered)
-        edit_menu.addAction(redo_action)
+        self.redo_action = QAction("Redo", self)
+        self.redo_action.setShortcuts([QKeySequence.Redo])
+        self.redo_action.triggered.connect(self.on_redo_triggered)
+        edit_menu.addAction(self.redo_action)
 
         view_menu = menu_bar.addMenu("&View")
 
@@ -410,6 +411,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "edge_settings_dock"):
             self.edge_settings_dock.show()
         QTimer.singleShot(0, self._apply_right_dock_layout)
+        self.update_undo_redo_actions()
 
     #----------akcie StartScreen-----------
 
@@ -465,6 +467,7 @@ class MainWindow(QMainWindow):
 
         try:
             self.controller.open_project(zip_path)
+            self.update_undo_redo_actions()
         except Exception as e:
             QMessageBox.critical(self, "Chyba pri otváraní projektu", str(e))
             self.show_start_screen()
@@ -506,6 +509,9 @@ class MainWindow(QMainWindow):
         self.controller.refresh_canvas_region(bbox)
         self.controller.refresh_layers_panel()
 
+        self._show_toast_message("Undo", 1500)
+        self.update_undo_redo_actions()
+
     def on_redo_triggered(self) -> None:
         project = self.controller.project
         if project is None:
@@ -519,6 +525,16 @@ class MainWindow(QMainWindow):
         bbox = action.bbox
         self.controller.refresh_canvas_region(bbox)
         self.controller.refresh_layers_panel()
+
+        self._show_toast_message("Redo", 1500)
+        self.update_undo_redo_actions()
+
+    def update_undo_redo_actions(self) -> None:
+        if not hasattr(self, "undo_action") or not hasattr(self, "redo_action"):
+            return
+        self.undo_action.setEnabled(self.controller.can_undo())
+        self.redo_action.setEnabled(self.controller.can_redo())
+
 
     def on_new_project_from_image(self) -> None:
         """
@@ -546,6 +562,7 @@ class MainWindow(QMainWindow):
 
         try:
             self.controller.create_project_from_files(img_path, mask_path)
+            self.update_undo_redo_actions()
         except Exception as e:
             QMessageBox.critical(self, "Chyba pri vytváraní projektu", str(e))
             self.controller.close_project()
@@ -598,6 +615,28 @@ class MainWindow(QMainWindow):
         #self.start_screen.set_recent_projects(self.app_settings.get_recent_projects())
         self.statusBar().showMessage("Projekt uložený", 3000)
 
+    def ask_to_save_before_close(self) -> str:
+        """
+        Vráti: "save" | "discard" | "cancel"
+        """
+        msg: QMessageBox = QMessageBox(self)
+        msg.setIcon(QMessageBox.Warning)
+        msg.setWindowTitle("Neuložené změny")
+        msg.setText("Projekt není uložen. Chcete uložit změny před zavřením?")
+        btn_save: QAbstractButton = msg.addButton("Uložit", QMessageBox.AcceptRole)
+        btn_discard = msg.addButton("Neukládat", QMessageBox.DestructiveRole)
+        btn_cancel = msg.addButton("Zrušit", QMessageBox.RejectRole)
+        msg.setDefaultButton(btn_save)
+
+        msg.exec()
+        clicked: QAbstractButton | None = msg.clickedButton()
+
+        if clicked == btn_save:
+            return "save"
+        if clicked == btn_discard:
+            return "discard"
+        return "cancel"
+
     # def on_export_report(self) -> None:
     #     """
     #     Exportuje PDF report o aktuálnom projekte
@@ -640,9 +679,39 @@ class MainWindow(QMainWindow):
             # nič nie je otvorené, tak len ukážeme start screen 
             self.show_start_screen()
             return
+        
+        #ak dirty -opýtať sa
+        if self.controller.is_project_dirty():
+            result = self.ask_to_save_before_close()
+            if result == "cancel":
+                return
+            if result == "save":
+                if not self.controller.save_project_with_dialog_if_needed():
+                    return
+            #discard -pokračujeme
 
         # neskôr sa spýtame na uloženie (Save)
+        self.controller.close_project()
         self.show_start_screen()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        #ak nie je otvorený projekt alebo nie je dirty, môžeme zavrieť
+        if not self.controller.has_open_project() or not self.controller.is_project_dirty():
+            event.accept()
+            return
+
+        result = self.ask_to_save_before_close()
+        if result == "cancel":
+            event.ignore()
+            return
+
+        if result == "save":
+            if not self.controller.save_project_with_dialog_if_needed():
+                event.ignore()
+                return
+
+        #discard alebo úspešný save
+        event.accept()
 
     def on_auto_fill_small_regions(self) -> None:
         """
