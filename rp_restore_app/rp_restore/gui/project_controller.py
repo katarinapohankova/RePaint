@@ -929,3 +929,10 @@ class ProjectController:
         
         if self._undo_redo_changed_callback is not None:
             self._undo_redo_changed_callback()
+
+    #-------export--------
+    def export_image(self, path: str, resolution: str = "working") -> None:
+        if self.project is None:
+            return
+        img = self.project.get_export_image()
+        image_io.save_image(path, img)

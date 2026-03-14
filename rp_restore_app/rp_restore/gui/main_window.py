@@ -145,27 +145,31 @@ class MainWindow(QMainWindow):
         new_from_image_action.triggered.connect(self.on_new_project_from_image)
         file_menu.addAction(new_from_image_action)
 
-        open_action = QAction("Otvoriť projekt...", self)
+        open_action = QAction("Otevřít projekt...", self)
         open_action.setShortcut("Ctrl+O")
         open_action.triggered.connect(self.on_open_project_requested)
         file_menu.addAction(open_action)
 
         file_menu.addSeparator()
 
-        save_action = QAction("Uložiť projekt", self)
+        save_action = QAction("Uložit projekt", self)
         save_action.setShortcut("Ctrl+S")
         save_action.triggered.connect(self.on_save_project)
         file_menu.addAction(save_action)
 
-        save_as_action = QAction("Uložiť projekt ako...", self)
+        save_as_action = QAction("Uložit projekt ako...", self)
         save_as_action.setShortcut("Ctrl+Shift+S")
         save_as_action.triggered.connect(self.on_save_project_as)
         file_menu.addAction(save_as_action)
 
-        close_project_action = QAction("Zavrieť projekt", self)
+        close_project_action = QAction("Zavřít projekt", self)
         close_project_action.setShortcut("Ctrl+W")
         close_project_action.triggered.connect(self.on_close_project)
         file_menu.addAction(close_project_action)
+
+        export_img_action = QAction("Exportovat obraz…", self)
+        export_img_action.triggered.connect(self.on_export_image)
+        file_menu.addAction(export_img_action)
 
         # file_menu.addSeparator()
 
@@ -176,7 +180,7 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
 
         #neskôr -Open/Save/Exit
-        exit_action = QAction("Ukončiť", self)
+        exit_action = QAction("Ukončit", self)
         exit_action.setShortcut("Ctrl+Q")
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
@@ -209,7 +213,7 @@ class MainWindow(QMainWindow):
             view_menu.addAction(action)
             return action
         
-        self.toggle_damage_overlay_action = QAction("Zobraziť poškodené oblasti", self)
+        self.toggle_damage_overlay_action = QAction("Zobrazit poškoděné oblasti", self)
         self.toggle_damage_overlay_action.setCheckable(True)
         self.toggle_damage_overlay_action.setChecked(True)
         self.toggle_damage_overlay_action.triggered.connect(self.on_toggle_damage_overlay)
@@ -490,6 +494,36 @@ class MainWindow(QMainWindow):
             self.show_start_screen()
             return
 
+    def on_export_image(self) -> None:
+        if self.controller.project is None:
+            QMessageBox.information(self, "Žándý projekt", "Není otevřený žádný projekt")
+            return
+
+        path, selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "Exportovat obraz",
+            "",
+            "TIFF (*.tif *.tiff);;PNG (*.png);;JPEG (*.jpg *.jpeg)",
+        )
+        if not path:
+            return
+
+        p = Path(path)
+        if p.suffix == "":
+            if "TIFF" in selected_filter:
+                path += ".tif"
+            elif "PNG" in selected_filter:
+                path += ".png"
+            else:
+                path += ".jpg"
+
+        try:
+            self.controller.export_image(path)
+        except Exception as e:
+            QMessageBox.critical(self, "Chyba exportu", str(e))
+            return
+
+        self.statusBar().showMessage("Obraz byl exportován", 4000)
 
     def on_undo_triggered(self) -> None:
         project = self.controller.project

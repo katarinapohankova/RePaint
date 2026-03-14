@@ -540,3 +540,10 @@ class Project:
 
     def clear_palette(self) -> None:
         self.palette_colors.clear()
+
+    #--------export--------
+    def get_export_image(self) -> np.ndarray:
+        """
+        vráti exportovateľný finálny náhľad (working resolution)
+        """
+        return self.composited_image()

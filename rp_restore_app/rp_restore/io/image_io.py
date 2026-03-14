@@ -50,18 +50,56 @@ def save_image(path: PathLike, arr: np.ndarray) -> None:
       - 3D (H, W, 4): RGBA
     """
     path = Path(path)
+    ext = path.suffix.lower()
 
-    if arr.ndim == 2:
-        mode = "L"
-    elif arr.ndim == 3 and arr.shape[2] == 3:
-        mode = "RGB"
-    elif arr.ndim == 3 and arr.shape[2] == 4:
-        mode = "RGBA"
+    a = np.asarray(arr)
+
+    if a.ndim == 2:
+        pass
+    elif a.ndim == 3 and a.shape[2] in (3, 4):
+        pass
     else:
-        raise ValueError("unsupported array shape for image saving")
+        raise ValueError("Unsupported image shape for save_image")
 
-    img = Image.fromarray(arr, mode=mode)
-    img.save(path)
+    #JPG musí byť uint8 a bez alpha
+    if ext in (".jpg", ".jpeg"):
+        if a.ndim == 3 and a.shape[2] == 4:
+            a = a[..., :3]
+        if a.dtype != np.uint8:
+            # ak je uint16, zmapujeme do 8-bit
+            if a.dtype == np.uint16:
+                a = (a / 256).astype(np.uint8)
+            else:
+                a = np.clip(a, 0, 255).astype(np.uint8)
+
+        img = Image.fromarray(a, mode="RGB" if a.ndim == 3 else "L")
+        img.save(path, format="JPEG", quality=95, subsampling=0)
+        return
+
+    #PNG/TIFF
+    if a.dtype == np.uint16 and a.ndim == 2:
+        img = Image.fromarray(a, mode="I;16")
+    else:
+        #RGB uint8
+        if a.dtype != np.uint8:
+            if a.dtype == np.uint16:
+                a = (a / 256).astype(np.uint8)
+            else:
+                a = np.clip(a, 0, 255).astype(np.uint8)
+
+        if a.ndim == 2:
+            img = Image.fromarray(a, mode="L")
+        elif a.shape[2] == 3:
+            img = Image.fromarray(a, mode="RGB")
+        else:
+            img = Image.fromarray(a, mode="RGBA")
+
+    if ext in (".png",):
+        img.save(path, format="PNG")
+    elif ext in (".tif", ".tiff"):
+        img.save(path, format="TIFF")
+    else:
+        img.save(path)
 
 
 def load_mask(path: PathLike, target_size: tuple[int, int] | None = None) -> np.ndarray:
