@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt
 
 from rp_restore.core.history import UndoAction
 from rp_restore.core.layers import LayerRole
+from rp_restore.core.texture_brush import generate_fill_pattern
 from rp_restore.gui.tools.base_tool import BaseTool
 
 
@@ -35,6 +36,24 @@ class FillTool(BaseTool):
                 else:
                     return None
         return None
+    
+    def _blend_pattern_into(self, dst: np.ndarray, pattern: np.ndarray, mask: np.ndarray) -> None:
+        if dst.shape != pattern.shape:
+            return
+
+        src_rgb = pattern[..., :3].astype(np.float32)
+        src_a = pattern[..., 3:4].astype(np.float32) / 255.0
+        dst_rgb = dst[..., :3].astype(np.float32)
+        dst_a = dst[..., 3:4].astype(np.float32) / 255.0
+
+        m = mask.astype(np.float32)[..., None]
+        src_a = src_a * m
+
+        out_rgb = src_rgb * src_a + dst_rgb * (1.0 - src_a)
+        out_a = src_a + dst_a * (1.0 - src_a)
+
+        dst[..., :3] = np.clip(out_rgb, 0, 255).astype(np.uint8)
+        dst[..., 3] = np.clip(out_a * 255.0, 0, 255).astype(np.uint8).reshape(dst.shape[0], dst.shape[1])
 
     def _update_color_from_controller(self) -> None:
         self.fill_color_rgba = self.controller.get_current_color_rgba()
@@ -87,7 +106,12 @@ class FillTool(BaseTool):
 
         #vyplnenie vo vrstve
         sub_img = layer.image[y : y + h, x : x + w, :]
-        sub_img[local_mask] = self.fill_color_rgba
+        ts = getattr(self.controller, "texture_settings", None)
+        if ts is not None and ts.texture is not None:
+            pattern = generate_fill_pattern(ts, bbox_w=w, bbox_h=h, seed=(x * 73856093) ^ (y * 19349663) )
+            self._blend_pattern_into(sub_img, pattern, local_mask)
+        else:
+            sub_img[local_mask] = self.fill_color_rgba
 
         #after – aktuálny stav subregionu
         after = layer.clone_subregion(x, y, w, h)

@@ -14,6 +14,7 @@ from .warnings import LogManager, WarningType, RegionReference
 from .selection import Selection
 from .regions import RegionMap, build_region_map, compare_region_maps
 from rp_restore.io.image_io import load_image
+from rp_restore.core.texture_brush import Texture
 
 
 class Project:
@@ -55,6 +56,8 @@ class Project:
         #paleta farieb a aktuálna farba (RGBA)
         self.palette_colors: list[tuple[int, int, int, int]] = []
         self.current_color_rgba: tuple[int, int, int, int] = (0, 0, 0, 255)  #default bude čierna
+
+        self.textures: dict[str, "Texture"] = {}
 
     def mark_dirty(self) -> None:
         self.is_dirty = True

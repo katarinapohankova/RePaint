@@ -4,7 +4,7 @@ import numpy as np
 from pathlib import Path
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QCloseEvent
-from PySide6.QtWidgets import QMainWindow, QStatusBar, QMessageBox, QDockWidget, QToolBar, QFileDialog, QLabel, QAbstractButton
+from PySide6.QtWidgets import QMainWindow, QStatusBar, QMessageBox, QDockWidget, QToolBar, QFileDialog, QLabel, QAbstractButton, QScrollArea
 
 from rp_restore.config.settings import AppSettings
 from rp_restore.core.layers import Layer, LayerMeta, LayerRole
@@ -15,9 +15,9 @@ from rp_restore.gui.start_screen_widget import StartScreenWidget
 from rp_restore.gui.panels.layers_panel import LayersPanel
 from rp_restore.gui.panels.log_panel import LogPanel
 from rp_restore.gui.panels.algorithm_panel import AlgorithmPanel
-from rp_restore.gui.panels.color_panel import ColorPanel
 from rp_restore.gui.panels.edge_settings_panel import EdgeSettingsPanel
-#from rp_restore.report.pdf_report import generate_report
+from rp_restore.gui.panels.materials_panel import MaterialsPanel
+from rp_restore.gui.panels.palette_panel import PalettePanel
 
 class MainWindow(QMainWindow):
     """
@@ -54,6 +54,15 @@ class MainWindow(QMainWindow):
         self.layers_dock.setWidget(self.layers_panel)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.layers_dock)
 
+        self.palette_panel = PalettePanel(self)
+        self.palette_dock = QDockWidget("Paleta", self)
+        self.palette_dock.setObjectName("PaletteDock")
+        self.palette_dock.setWidget(self.palette_panel)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.palette_dock)
+
+        self.splitDockWidget(self.layers_dock, self.palette_dock, Qt.Vertical)
+        
+
         #Log panel 
         self.log_panel = LogPanel(self)
         self.log_dock = QDockWidget("Log", self)
@@ -67,13 +76,6 @@ class MainWindow(QMainWindow):
         self.algorithm_dock.setObjectName("AlgorithmDock")
         self.algorithm_dock.setWidget(self.algorithm_panel)
         self.addDockWidget(Qt.RightDockWidgetArea, self.algorithm_dock)
-     
-        #color panel
-        self.color_panel = ColorPanel(self)
-        self.color_dock = QDockWidget("Barvy", self)
-        self.color_dock.setObjectName("ColorDock")
-        self.color_dock.setWidget(self.color_panel)
-        self.addDockWidget(Qt.RightDockWidgetArea, self.color_dock)
 
         #edge nastavenia panel
         self.edge_settings_panel = EdgeSettingsPanel(self)
@@ -82,19 +84,30 @@ class MainWindow(QMainWindow):
         self.edge_settings_dock.setWidget(self.edge_settings_panel)
         self.addDockWidget(Qt.RightDockWidgetArea, self.edge_settings_dock)
 
+        self.materials_panel = MaterialsPanel(self)
+        self.materials_scroll = QScrollArea(self)
+        self.materials_scroll. setWidgetResizable(True)
+        self.materials_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.materials_scroll.setWidget(self.materials_panel)
+        self.materials_dock = QDockWidget("Materiály", self)
+        self.materials_dock.setObjectName("MaterialsDock")
+        self.materials_dock.setWidget(self.materials_scroll)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.materials_dock)
+
         #prepojenie controller - layers_panel, log_panel
         self.controller.set_layers_panel(self.layers_panel)
         self.controller.set_log_panel(self.log_panel)
         self.controller.set_algorithm_panel(self.algorithm_panel)
-        self.controller.set_color_panel(self.color_panel)
         self.controller.set_edge_settings_panel(self.edge_settings_panel)
+        self.controller.set_materials_panel(self.materials_panel)
+        self.controller.set_palette_panel(self.palette_panel)
 
         #na začiatku (start screen) dock schováme
         self.layers_dock.hide()
         self.log_dock.hide()
         self.algorithm_dock.hide()
-        self.color_dock.hide()
         self.edge_settings_dock.hide()
+        self.palette_dock.hide()
 
         self.layers_panel.visibility_changed.connect(self.controller.on_layer_visibility_changed)
         self.layers_panel.delete_layer_requested.connect(self._on_delete_layer_requested)
@@ -222,8 +235,11 @@ class MainWindow(QMainWindow):
         if hasattr(self, "layers_dock"):
             _add_dock_toggle(view_menu, "Vrstvy", self.layers_dock)
 
-        if hasattr(self, "color_dock"):
-            _add_dock_toggle(view_menu, "Barvy", self.color_dock)
+        if hasattr(self, "materials_dock"):
+            _add_dock_toggle(view_menu, "Materiály", self.materials_dock)
+
+        if hasattr(self, "palette_dock"):
+            _add_dock_toggle(view_menu, "Paleta", self.palette_dock)
 
         if hasattr(self, "log_dock"):
             _add_dock_toggle(view_menu, "Log", self.log_dock)
@@ -302,12 +318,12 @@ class MainWindow(QMainWindow):
 
         self.setDockNestingEnabled(True)
 
-        self.splitDockWidget(self.algorithm_dock, self.color_dock, Qt.Vertical)
-        self.splitDockWidget(self.color_dock, self.edge_settings_dock, Qt.Vertical)
+        self.splitDockWidget(self.algorithm_dock, self.materials_dock, Qt.Vertical)
+        self.splitDockWidget(self.materials_dock, self.edge_settings_dock, Qt.Vertical)
 
         self.resizeDocks(
-            [self.algorithm_dock, self.color_dock, self.edge_settings_dock],
-            [220, 320, 260],
+            [self.algorithm_dock, self.materials_dock, self.edge_settings_dock],
+            [220, 260, 260, 260],
             Qt.Vertical,
         )
         self.log_dock.show()
@@ -391,6 +407,10 @@ class MainWindow(QMainWindow):
             self.color_dock.hide()
         if hasattr(self, "edge_settings_dock"):
             self.edge_settings_dock.hide()
+        if hasattr(self, "materials_dock"):
+            self.materials_dock.hide()
+        if hasattr(self, "palette_dock"):
+            self.palette_dock.hide()
 
     def show_workspace(self) -> None:
         """zobrazí pracovnú plochu (canvas, neskôr aj dock panely)"""
@@ -408,12 +428,14 @@ class MainWindow(QMainWindow):
             self.log_dock.show()
         if hasattr(self, "algorithm_dock"):
             self.algorithm_dock.show()
-        if hasattr(self, "color_dock"):
-            self.color_dock.show()
         if hasattr(self, "brush_action"): 
             self.brush_action.setChecked(True)  # spustí _on_tool_action_triggered
         if hasattr(self, "edge_settings_dock"):
             self.edge_settings_dock.show()
+        if hasattr(self, "materials_dock"):
+            self.materials_dock.show()
+        if hasattr(self, "palette_dock"):
+            self.palette_dock.show()
         QTimer.singleShot(0, self._apply_right_dock_layout)
         self.update_undo_redo_actions()
 
@@ -471,6 +493,8 @@ class MainWindow(QMainWindow):
 
         try:
             self.controller.open_project(zip_path)
+            if hasattr(self, "texture_panel"):
+                self.texture_panel.refresh_from_controller()
             self.update_undo_redo_actions()
         except Exception as e:
             QMessageBox.critical(self, "Chyba pri otváraní projektu", str(e))
@@ -489,6 +513,8 @@ class MainWindow(QMainWindow):
 
         try:
             self.controller.open_project(path)
+            if hasattr(self, "texture_panel"):
+                self.texture_panel.refresh_from_controller()
         except Exception as e:
             QMessageBox.critical(self, "Chyba pri otváraní projektu", str(e))
             self.show_start_screen()
@@ -596,6 +622,8 @@ class MainWindow(QMainWindow):
 
         try:
             self.controller.create_project_from_files(img_path, mask_path)
+            if hasattr(self, "texture_panel"):
+                self.texture_panel.refresh_from_controller()
             self.update_undo_redo_actions()
         except Exception as e:
             QMessageBox.critical(self, "Chyba pri vytváraní projektu", str(e))
@@ -768,7 +796,9 @@ class MainWindow(QMainWindow):
                 5000,
             )
 
-
+    def _on_material_tab_changed(self, idx: int):
+        #0 = Barvy, 1 = Textury
+        self.controller.texture_mode_enabled = (idx == 1)
 
     #----------helper metódy-----------
 

@@ -15,6 +15,7 @@ from rp_restore.core.selection import Selection, SelectionSet
 from rp_restore.core.warnings import UserWarning
 from rp_restore.core.algorithm_runner import AlgorithmType, AlgorithmRequest, AlgorithmRunner
 from rp_restore.core.history import UndoAction
+from rp_restore.core.texture_brush import TextureSettings, Texture
 from rp_restore.core import mask_alignment
 from rp_restore.gui.canvas.image_canvas_widget import ImageCanvasWidget
 from rp_restore.gui.panels.layers_panel import LayersPanel
@@ -45,8 +46,10 @@ class ProjectController:
         self.project: Optional[Project] = None
 
         self.canvas: Optional[ImageCanvasWidget] = None
-        self.color_panel = None
         self._brush_size: int = 10
+
+        self.materials_panel = None
+        self.palette_panel = None
         
         self.edge_settings_panel: Optional[object] = None
         self._edge_brush_size: int = 2
@@ -60,6 +63,7 @@ class ProjectController:
         #vizualizácia damage masky v canvase
         self.show_damage_overlay: bool = True
         self.algorithm_panel = None
+        self.palette_panel = None
 
         self.current_project_path: Optional[str] = None
 
@@ -71,6 +75,11 @@ class ProjectController:
         self._opacity_debounce_timer: QTimer = QTimer()
         self._opacity_debounce_timer.setSingleShot(True)
         self._opacity_debounce_timer.timeout.connect(self._apply_opacity_debounced_refresh)
+
+        self.texture_settings = TextureSettings(texture=None, scale=1.0, color=(255, 255, 255), strength=1.0)
+        self.texture_mode_enabled: bool = False
+
+        self.paint_mode: str = "brush"
 
     def set_canvas(self, canvas: ImageCanvasWidget) -> None:
         self.canvas = canvas
@@ -97,17 +106,76 @@ class ProjectController:
 
         self.refresh_layers_panel()
         self.refresh_log_panel()
-        if self.color_panel is not None and hasattr(self.color_panel, "refresh_from_project"):
-            self.color_panel.refresh_from_project(project)
+        if self.palette_panel is not None and hasattr(self.palette_panel, "refresh_from_project"):
+            self.palette_panel.refresh_from_project(project)
+        if self.materials_panel is not None and hasattr(self.materials_panel, "refresh_from_project"):
+            self.materials_panel.refresh_from_project(project)
         if self.edge_settings_panel is not None and hasattr(self.edge_settings_panel, "refresh_from_controller"):
             self.edge_settings_panel.refresh_from_controller(self)
         #neskôr refreshne všetko (refresh_layers_panel(), refresh_log_panel()...)
+    
+    def set_texture(self, texture_name: str | None) -> None:
+        if self.project is None:
+            self.texture_settings.texture = None
+            return
+        if texture_name is None:
+            self.texture_settings.texture = None
+            return
+        tex = self.project.textures.get(texture_name)
+        self.texture_settings.texture = tex
 
-    def set_color_panel(self, panel: object) -> None:
+    def set_texture_scale(self, scale: float) -> None:
+        self.texture_settings.scale = float(scale)
+
+    def set_texture_color(self, rgb: tuple[int,int,int]) -> None:
+        self.texture_settings.color = rgb
+
+    def set_texture_strength(self, strength: float) -> None:
+        self.texture_settings.strength = float(strength)
+
+    def _load_default_textures_into_project(self, project: Project, max_tex_size: int = 512) -> None:
         """
-        prepojí controller s ColorPanelom
+        Načíta default textúry z rp_restore/resources/textures do project.textures
         """
-        self.color_panel = panel
+        rp_restore_dir = Path(__file__).resolve().parents[1]
+        tex_dir = rp_restore_dir / "resources" / "textures"
+        if not tex_dir.is_dir():
+            return
+
+        project.textures = {}
+
+        exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
+        for p in sorted(tex_dir.iterdir()):
+            if not p.is_file():
+                continue
+            if p.suffix.lower() not in exts:
+                continue
+
+            try:
+                #načítame ako working (zmenšenie na max_tex_size)
+                arr, _ = load_working_image(str(p), max_size=max_tex_size)
+                #chceme RGBA alebo aspoň RGB
+                if arr.ndim == 3 and arr.shape[2] == 3:
+                    rgba = np.zeros((arr.shape[0], arr.shape[1], 4), dtype=np.uint8)
+                    rgba[..., :3] = arr
+                    rgba[..., 3] = 255
+                    arr = rgba
+                elif arr.ndim == 2:
+                    rgba = np.zeros((arr.shape[0], arr.shape[1], 4), dtype=np.uint8)
+                    rgba[..., 0] = arr
+                    rgba[..., 1] = arr
+                    rgba[..., 2] = arr
+                    rgba[..., 3] = 255
+                    arr = rgba
+
+                name = p.stem
+                project.textures[name] = Texture(name=name, image=arr)
+            except Exception:
+                #textúra sa nepodarila načítať, preskočíme
+                continue
+    
+    def set_materials_panel(self, panel: object) -> None:
+        self.materials_panel = panel
         if hasattr(panel, "set_controller"):
             panel.set_controller(self)
     
@@ -116,6 +184,11 @@ class ProjectController:
         Prepojí controller s EdgeSettingsPanelom
         """
         self.edge_settings_panel = panel
+        if hasattr(panel, "set_controller"):
+            panel.set_controller(self)
+
+    def set_palette_panel(self, panel: object) -> None:
+        self.palette_panel = panel
         if hasattr(panel, "set_controller"):
             panel.set_controller(self)
 
@@ -132,16 +205,25 @@ class ProjectController:
         if self.project is None:
             return
         self.project.set_current_color_rgba(color)
+        if hasattr(self, "texture_settings"):
+            r, g, b, a = self.project.get_current_color_rgba()
+            self.texture_settings.color = (r, g, b)
+
+        if self.palette_panel is not None and hasattr(self.palette_panel, "refresh_from_project"):
+            self.palette_panel.refresh_from_project(self.project)
         #refresh panel
-        if self.color_panel is not None and hasattr(self.color_panel, "refresh_from_project"):
-            self.color_panel.refresh_from_project(self.project)
+        if self.materials_panel is not None and hasattr(self.materials_panel, "refresh_from_project"):
+            self.materials_panel.refresh_from_project(self.project)
 
     def add_current_color_to_palette(self) -> None:
         if self.project is None:
             return
         self.project.add_palette_color(self.project.get_current_color_rgba())
-        if self.color_panel is not None and hasattr(self.color_panel, "refresh_from_project"):
-            self.color_panel.refresh_from_project(self.project)
+        if self.palette_panel is not None and hasattr(self.palette_panel, "refresh_from_project"):
+            self.palette_panel.refresh_from_project(self.project)
+
+        if self.materials_panel is not None and hasattr(self.materials_panel, "refresh_from_project"):
+            self.materials_panel.refresh_from_project(self.project)
    
     def add_color_to_palette_rgba(self, color: tuple[int, int, int, int], avoid_duplicates: bool = True) -> None:
         """
@@ -157,8 +239,11 @@ class ProjectController:
         self.project.add_palette_color(color)
 
         #refresh ColorPanel
-        if self.color_panel is not None and hasattr(self.color_panel, "refresh_from_project"):
-            self.color_panel.refresh_from_project(self.project)
+        if self.palette_panel is not None and hasattr(self.palette_panel, "refresh_from_project"):
+            self.palette_panel.refresh_from_project(self.project)
+
+        if self.materials_panel is not None and hasattr(self.materials_panel, "refresh_from_project"):
+            self.materials_panel.refresh_from_project(self.project)
 
     def remove_color_from_palette(self, index: int) -> None:
         """
@@ -174,8 +259,11 @@ class ProjectController:
         #priamo upravíme zoznam
         self.project.palette_colors.pop(index)
 
-        if self.color_panel is not None and hasattr(self.color_panel, "refresh_from_project"):
-            self.color_panel.refresh_from_project(self.project)
+        if self.palette_panel is not None and hasattr(self.palette_panel, "refresh_from_project"):
+            self.palette_panel.refresh_from_project(self.project)
+
+        if self.materials_panel is not None and hasattr(self.materials_panel, "refresh_from_project"):
+            self.materials_panel.refresh_from_project(self.project)
 
     #-Edge -hrúbka a farba
     def get_edge_brush_size(self) -> int:
@@ -201,8 +289,6 @@ class ProjectController:
 
     def set_brush_size(self, size: int) -> None:
         self._brush_size = max(1, int(size))
-        if self.color_panel is not None and hasattr(self.color_panel, "set_brush_size_value"):
-            self.color_panel.set_brush_size_value(self._brush_size)
 
     def set_layers_panel(self, panel: LayersPanel) -> None:
         """prepojí controller s panelom vrstiev"""
@@ -623,6 +709,8 @@ class ProjectController:
 
         project_name = Path(image_path).stem
         project = Project(project_name)
+
+        self._load_default_textures_into_project(project)
 
         project.base_image_path = Path(image_path)
         project.base_image_scale = scale

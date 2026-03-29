@@ -11,6 +11,7 @@ from PIL import Image
 
 from rp_restore.core.layers import Layer, LayerMeta, LayerRole
 from rp_restore.core.project_model import Project
+from rp_restore.core.texture_brush import Texture
 
 
 def _encode_png(arr: np.ndarray) -> bytes:
@@ -122,6 +123,16 @@ class ProjectSerializer:
                 "current_color": list(getattr(project, "current_color_rgba", (0, 0, 0, 255))),
             }
 
+            #textúry
+            textures_meta: list[dict] = []
+            if hasattr(project, "textures") and project.textures:
+                for name, tex in project.textures.items():
+                    rel = f"textures/{name}.png"
+                    zf.writestr(rel, _encode_png(tex.image))
+                    textures_meta.append({"name": name, "filename": rel})
+
+            meta["textures"] = textures_meta
+
             zf.writestr("project.json", json.dumps(meta, indent=2, ensure_ascii=False))
 
 
@@ -204,5 +215,17 @@ class ProjectLoader:
             if isinstance(current_color, (list, tuple)) and len(current_color) == 4:
                 project.current_color_rgba = tuple(int(c) for c in current_color)
 
+            #textúry
+            project.textures = {}
+            for info in meta.get("textures", []):
+                fname = info["filename"]
+                name = info["name"]
+                try:
+                    data = zf.read(fname)
+                except KeyError:
+                    continue
+                img_rgba = _decode_png_to_rgba(data)
+                #uložíme RGB/RGBA
+                project.textures[name] = Texture(name=name, image=img_rgba)
 
             return project

@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt
 
 from rp_restore.core.history import UndoAction
 from rp_restore.core.layers import LayerRole
+from rp_restore.core.texture_brush import generate_fill_pattern
 from rp_restore.gui.tools.base_tool import BaseTool
 
 
@@ -22,6 +23,7 @@ class BrushTool(BaseTool):
         #nastavenia štetca
         self.brush_size: int = self.controller.get_brush_size()
         self.color_rgba = self.controller.get_current_color_rgba()  #np.array([255, 0, 0, 255], dtype=np.uint8)
+        self._stroke_seed: int = 0
 
         #undo
         self._before_image: Optional[np.ndarray] = None
@@ -69,19 +71,38 @@ class BrushTool(BaseTool):
         x_min = max(0, x - r)
         x_max = min(w, x + r)
 
-        for yy in range(y_min, y_max):
-            for xx in range(x_min, x_max):
-                #kruhová maska
-                if (xx - x) ** 2 + (yy - y) ** 2 <= r * r:
-                    #ak máme damage masku, nekreslíme mimo nej
-                    if damage_mask is not None:
-                        mh, mw = damage_mask.shape
-                        if yy >= mh or xx >= mw:
-                            continue
-                        if not damage_mask[yy, xx]:
-                            continue
+        if x_max <= x_min or y_max <= y_min:
+            return
 
-                    layer.image[yy, xx, :] = self.color_rgba
+        sub = layer.image[y_min:y_max, x_min:x_max, :]
+        sh, sw, _ = sub.shape
+
+        #kruhová maska v tomto subregion-e
+        yy, xx = np.ogrid[0:sh, 0:sw]
+        cx = x - x_min
+        cy = y - y_min
+        circle = ((xx - cx) ** 2 + (yy - cy) ** 2) <= (r ** 2)
+
+        #damage mask obmedzenie
+        if damage_mask is not None:
+            dm_sub = damage_mask[y_min:y_max, x_min:x_max]
+            circle = circle & dm_sub
+
+        #ak je texture mode
+        ts = getattr(self.controller, "texture_settings", None)
+        texture_enabled = bool(getattr(self.controller, "paint_mode", "brush") == "texture")
+        r, g, b, a = self.controller.project.get_current_color_rgba()
+        self.controller.texture_settings.color = (r, g, b)
+        if texture_enabled and ts is not None and ts.texture is not None:
+            #pattern je pre tento subregion ukotvený offsetom (x_min,y_min) -nadväzuje na seba
+            pattern = generate_fill_pattern(ts, sw, sh, offset_x=x_min, offset_y=y_min)
+
+            # aplikujeme len v kruhu & damage maske
+            self._apply_pattern_max_alpha(sub, pattern, circle)
+            return
+
+        #brush mode 
+        sub[circle] = self.color_rgba
 
     def _draw_line(self, layer, x0: int, y0: int, x1: int, y1: int) -> None:
         """
@@ -98,6 +119,29 @@ class BrushTool(BaseTool):
             yy = int(round(y0 + t * dy))
             self._draw_dot(layer, xx, yy)
 
+    def _apply_pattern_max_alpha(self, dst: np.ndarray, pattern: np.ndarray, mask: np.ndarray) -> None:
+        """
+        Pattern paint:
+        -alpha = max(dst_a, src_a) v maske
+        -rgb nastavíme na pattern tam, kde src_a > 0 a maska platí
+        """
+        if dst.shape != pattern.shape:
+            return
+        if mask is None or not mask.any():
+            return
+
+        dst_a = dst[..., 3]
+        src_a = pattern[..., 3]
+
+        m = mask
+        new_a = dst_a.copy()
+        new_a[m] = np.maximum(dst_a[m], src_a[m])
+
+        src_has = (src_a > 0) & m
+        dst[src_has, 0:3] = pattern[src_has, 0:3]
+
+        dst[..., 3] = new_a
+        
     def _update_color_from_controller(self) -> None:
         self.color_rgba = self.controller.get_current_color_rgba()
 
@@ -116,6 +160,7 @@ class BrushTool(BaseTool):
         self.is_drawing = True
         self._last_x = img_x
         self._last_y = img_y
+        self._stroke_seed = int(np.random.randint(0, 2**31 - 1))
 
         #pre undo si uložíme celú vrstvu
         self._before_image = layer.image.copy()
