@@ -1024,3 +1024,29 @@ class ProjectController:
             return
         img = self.project.get_export_image()
         image_io.save_image(path, img)
+
+    #ColorChecker
+    def set_color_correction_matrix(self, matrix: np.ndarray | None) -> None:
+        if self.project is None:
+            return
+        self.project.set_color_correction_matrix(matrix)
+        #ak nastavíme matrix, default zapneme
+        if matrix is not None:
+            self.project.set_color_correction_enabled(True)
+        else:
+            self.project.set_color_correction_enabled(False)
+
+        self.project.mark_dirty()
+        self.refresh_canvas()
+
+    def set_color_correction_enabled(self, enabled: bool) -> None:
+        if self.project is None:
+            return
+        if enabled and not self.project.has_color_correction():
+            return
+        self.project.set_color_correction_enabled(enabled)
+        self.project.mark_dirty()
+        self.refresh_canvas()
+
+    def has_color_correction(self) -> bool:
+        return self.project is not None and self.project.has_color_correction()

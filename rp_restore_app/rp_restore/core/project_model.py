@@ -15,6 +15,7 @@ from .selection import Selection
 from .regions import RegionMap, build_region_map, compare_region_maps
 from rp_restore.io.image_io import load_image
 from rp_restore.core.texture_brush import Texture
+from rp_restore.core.color_correction import apply_color_correction
 
 
 class Project:
@@ -58,6 +59,9 @@ class Project:
         self.current_color_rgba: tuple[int, int, int, int] = (0, 0, 0, 255)  #default bude čierna
 
         self.textures: dict[str, "Texture"] = {}
+
+        self.color_correction_matrix: np.ndarray | None = None
+        self.color_correction_enabled: bool = False
 
     def mark_dirty(self) -> None:
         self.is_dirty = True
@@ -192,8 +196,15 @@ class Project:
             alpha = (rgba[..., 3:4] / 255.0) * float(layer.meta.opacity)
             alpha = np.clip(alpha, 0.0, 1.0)
             base = rgb * alpha + base * (1.0 - alpha)
+        
         #výsledok pretypujeme na uint8
-        return np.clip(base, 0, 255).astype(np.uint8)
+        out = np.clip(base, 0, 255).astype(np.uint8)
+
+        #aplikácia ColorChecker korekcie (len na náhľad)
+        if self.color_correction_enabled and self.color_correction_matrix is not None:
+            out = apply_color_correction(out, self.color_correction_matrix)
+
+        return out
     
     def composited_region(self, bbox: tuple[int, int, int, int]) -> np.ndarray:
         """
@@ -250,7 +261,12 @@ class Project:
             alpha = np.clip(alpha, 0.0, 1.0)
             base = rgb * alpha + base * (1.0 - alpha)
 
-        return np.clip(base, 0, 255).astype(np.uint8)
+        out = np.clip(base, 0, 255).astype(np.uint8)
+
+        if self.color_correction_enabled and self.color_correction_matrix is not None:
+            out = apply_color_correction(out, self.color_correction_matrix)
+
+        return out
     
     #---------Undo/redo rozhranie---------
 
@@ -543,6 +559,25 @@ class Project:
 
     def clear_palette(self) -> None:
         self.palette_colors.clear()
+
+    #----ColorChecker korekcia---------
+    def set_color_correction_matrix(self, matrix: np.ndarray | None) -> None:
+        """
+        Aktivuje/deaktivuje farebnú korekciu
+        """
+        if matrix is None:
+            self.color_correction_matrix = None
+            return
+        m = np.asarray(matrix, dtype=np.float32)
+        if m.shape not in [(3, 3), (3, 4)]:
+            raise ValueError("Color correction matrix must be 3x3 or 3x4")
+        self.color_correction_matrix = m
+
+    def set_color_correction_enabled(self, enabled: bool) -> None:
+        self.color_correction_enabled = bool(enabled)
+
+    def has_color_correction(self) -> bool:
+        return self.color_correction_matrix is not None
 
     #--------export--------
     def get_export_image(self) -> np.ndarray:

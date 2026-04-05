@@ -121,6 +121,14 @@ class ProjectSerializer:
                     list(color) for color in getattr(project, "palette_colors", [])
                 ],
                 "current_color": list(getattr(project, "current_color_rgba", (0, 0, 0, 255))),
+                                "colorchecker": {
+                    "enabled": bool(getattr(project, "color_correction_enabled", False)),
+                    "matrix": (
+                        getattr(project, "color_correction_matrix", None).tolist()
+                        if getattr(project, "color_correction_matrix", None) is not None
+                        else None
+                    ),
+                },
             }
 
             #textúry
@@ -214,6 +222,25 @@ class ProjectLoader:
             current_color = meta.get("current_color")
             if isinstance(current_color, (list, tuple)) and len(current_color) == 4:
                 project.current_color_rgba = tuple(int(c) for c in current_color)
+
+            #ColorChecker
+            cc = meta.get("colorchecker")
+            if isinstance(cc, dict):
+                enabled = bool(cc.get("enabled", False))
+                matrix = cc.get("matrix", None)
+
+                try:
+                    if matrix is None:
+                        project.set_color_correction_matrix(None)
+                        project.set_color_correction_enabled(False)
+                    else:
+                        m = np.array(matrix, dtype=np.float32)
+                        project.set_color_correction_matrix(m)
+                        project.set_color_correction_enabled(enabled)
+                except Exception:
+                    #ak chyba, radšej korekciu vypneme
+                    project.set_color_correction_matrix(None)
+                    project.set_color_correction_enabled(False)
 
             #textúry
             project.textures = {}

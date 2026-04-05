@@ -4,7 +4,7 @@ import numpy as np
 from pathlib import Path
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QCloseEvent
-from PySide6.QtWidgets import QMainWindow, QStatusBar, QMessageBox, QDockWidget, QToolBar, QFileDialog, QLabel, QAbstractButton, QScrollArea
+from PySide6.QtWidgets import QDialog, QMainWindow, QStatusBar, QMessageBox, QDockWidget, QToolBar, QFileDialog, QLabel, QAbstractButton, QScrollArea
 
 from rp_restore.config.settings import AppSettings
 from rp_restore.core.layers import Layer, LayerMeta, LayerRole
@@ -18,6 +18,7 @@ from rp_restore.gui.panels.algorithm_panel import AlgorithmPanel
 from rp_restore.gui.panels.edge_settings_panel import EdgeSettingsPanel
 from rp_restore.gui.panels.materials_panel import MaterialsPanel
 from rp_restore.gui.panels.palette_panel import PalettePanel
+from rp_restore.gui.colorchecker_dialog import ColorCheckerDialog
 
 class MainWindow(QMainWindow):
     """
@@ -211,6 +212,11 @@ class MainWindow(QMainWindow):
         self.redo_action.triggered.connect(self.on_redo_triggered)
         edit_menu.addAction(self.redo_action)
 
+        edit_menu.addSeparator()
+        self.colorchecker_action = QAction("ColorChecker...", self)
+        self.colorchecker_action.triggered.connect(self.on_colorchecker_dialog)
+        edit_menu.addAction(self.colorchecker_action)
+
         view_menu = menu_bar.addMenu("&View")
 
         def _add_dock_toggle(view_menu, title: str, dock):
@@ -231,6 +237,15 @@ class MainWindow(QMainWindow):
         self.toggle_damage_overlay_action.setChecked(True)
         self.toggle_damage_overlay_action.triggered.connect(self.on_toggle_damage_overlay)
         view_menu.addAction(self.toggle_damage_overlay_action)
+
+        view_menu.addSeparator()
+
+        self.toggle_colorchecker_action = QAction("Použít ColorChecker korekci", self)
+        self.toggle_colorchecker_action.setCheckable(True)
+        self.toggle_colorchecker_action.setChecked(False)
+        self.toggle_colorchecker_action.setEnabled(False)
+        self.toggle_colorchecker_action.toggled.connect(self.on_toggle_colorchecker)
+        view_menu.addAction(self.toggle_colorchecker_action)
 
         if hasattr(self, "layers_dock"):
             _add_dock_toggle(view_menu, "Vrstvy", self.layers_dock)
@@ -395,6 +410,7 @@ class MainWindow(QMainWindow):
 
         self.start_screen = start_screen
         self.setCentralWidget(self.start_screen)
+        self._update_colorchecker_actions()
 
         #schováme dock panely (kým nie je otvorený projekt)
         if hasattr(self, "layers_dock"):
@@ -438,6 +454,7 @@ class MainWindow(QMainWindow):
             self.palette_dock.show()
         QTimer.singleShot(0, self._apply_right_dock_layout)
         self.update_undo_redo_actions()
+        self._update_colorchecker_actions()
 
     #----------akcie StartScreen-----------
 
@@ -475,6 +492,7 @@ class MainWindow(QMainWindow):
         project = self._create_beta_project()
         self.controller.set_project(project)
         self.show_workspace()
+        self._update_colorchecker_actions()
 
     def on_open_project_requested(self) -> None:
         """
@@ -496,6 +514,7 @@ class MainWindow(QMainWindow):
             if hasattr(self, "texture_panel"):
                 self.texture_panel.refresh_from_controller()
             self.update_undo_redo_actions()
+            self._update_colorchecker_actions()
         except Exception as e:
             QMessageBox.critical(self, "Chyba pri otváraní projektu", str(e))
             self.show_start_screen()
@@ -515,6 +534,7 @@ class MainWindow(QMainWindow):
             self.controller.open_project(path)
             if hasattr(self, "texture_panel"):
                 self.texture_panel.refresh_from_controller()
+            self._update_colorchecker_actions()
         except Exception as e:
             QMessageBox.critical(self, "Chyba pri otváraní projektu", str(e))
             self.show_start_screen()
@@ -595,6 +615,44 @@ class MainWindow(QMainWindow):
         self.undo_action.setEnabled(self.controller.can_undo())
         self.redo_action.setEnabled(self.controller.can_redo())
 
+    def _update_colorchecker_actions(self) -> None:
+        """
+        Zapne/vypne možnosti v menu podľa toho, či projekt má color correction
+        """
+        proj = self.controller.project
+        if proj is None:
+            if hasattr(self, "toggle_colorchecker_action"):
+                self.toggle_colorchecker_action.setEnabled(False)
+                self.toggle_colorchecker_action.setChecked(False)
+            return
+
+        has_cc = proj.has_color_correction()
+        if hasattr(self, "toggle_colorchecker_action"):
+            self.toggle_colorchecker_action.setEnabled(has_cc)
+            self.toggle_colorchecker_action.blockSignals(True)
+            self.toggle_colorchecker_action.setChecked(bool(proj.color_correction_enabled) if has_cc else False)
+            self.toggle_colorchecker_action.blockSignals(False)
+
+    def on_colorchecker_dialog(self) -> None:
+        if self.controller.project is None:
+            QMessageBox.information(self, "Žiadny projekt", "Nie je otvorený žiadny projekt.")
+            return
+
+        dlg = ColorCheckerDialog(self)
+        if dlg.exec() != QDialog.Accepted:
+            return
+
+        result = dlg.get_result()
+        if result is None:
+            QMessageBox.warning(self, "ColorChecker", "Nebola spočítaná korekcia.")
+            return
+
+        #uložíme do projektu
+        self.controller.set_color_correction_matrix(result.matrix)
+
+        #zapneme toggle vo view
+        self._update_colorchecker_actions()
+        self._show_toast_message(f"ColorChecker korekce spočtena (RMS {result.rms_error:.2f})", 2500)
 
     def on_new_project_from_image(self) -> None:
         """
@@ -733,6 +791,12 @@ class MainWindow(QMainWindow):
         """
         self.controller.set_show_damage_overlay(checked)
 
+    def on_toggle_colorchecker(self, checked: bool) -> None:
+        if self.controller.project is None:
+            return
+        self.controller.set_color_correction_enabled(checked)
+        self._update_colorchecker_actions()
+
     def on_close_project(self) -> None:
         """
         Zavrie aktuálny projekt a vráti sa na úvodnú obrazovku
@@ -752,6 +816,7 @@ class MainWindow(QMainWindow):
                     return
             #discard -pokračujeme
 
+        self._update_colorchecker_actions()
         # neskôr sa spýtame na uloženie (Save)
         self.controller.close_project()
         self.show_start_screen()

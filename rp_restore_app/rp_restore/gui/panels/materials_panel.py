@@ -176,7 +176,6 @@ class MaterialsPanel(QWidget):
         self._clear_layout(self.tex_grid_layout)
 
         textures = getattr(project, "textures", {})
-        print("DEBUG textures:", type(textures), len(textures), list(textures.keys())[:5])
         cols = 4
         thumb = 64
 
