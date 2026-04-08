@@ -23,7 +23,8 @@ class SelectionTool(BaseTool):
         if project is None:
             return
 
-        selection = project.get_selection_from_click(img_x, img_y)
+        region_map = self.controller.get_selection_region_map_for_active_layer()
+        selection = project.get_selection_from_click(img_x, img_y, layer_id=self.controller.active_layer_id, region_map=region_map)
         ctrl_down = bool(modifiers & Qt.ControlModifier)
 
         #žiadna oblasť na danom mieste

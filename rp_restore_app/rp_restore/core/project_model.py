@@ -16,6 +16,7 @@ from .regions import RegionMap, build_region_map, compare_region_maps
 from rp_restore.io.image_io import load_image
 from rp_restore.core.texture_brush import Texture
 from rp_restore.core.color_correction import apply_color_correction
+from rp_restore.core.regions import build_region_map, RegionMap
 
 
 class Project:
@@ -340,14 +341,24 @@ class Project:
 
         self.damage_filled_mask |= region_mask.astype(bool)
 
-    def get_selection_from_click(self, x: int, y: int) -> Selection | None:
+    def get_selection_from_click(self, x: int, y: int, layer_id: str | None = None, region_map: RegionMap | None = None) -> Selection | None:
         """
         ak v bode (x, y) je pixel poškodený (true), spraví flood-fill a vráti Selection (region_mask + bbox)
         """
         if self.damage_original_mask is None:
             return None
 
-        mask = self.damage_original_mask
+        mask: np.ndarray | None = None
+        if layer_id is not None:
+            layer = next((l for l in self.layers if l.meta.id == layer_id), None)
+
+            if layer is not None and layer.meta.role == LayerRole.PAINT:
+                mask = self.get_layer_damage_remaining_mask(layer_id)
+            else:
+                mask = self.damage_original_mask
+        else:
+            mask = self.damage_original_mask
+
         h, w = mask.shape
 
         if x < 0 or y < 0 or x >= w or y >= h:
@@ -357,8 +368,9 @@ class Project:
             #klik mimo poškodenej oblasti
             return None
 
-        edge_layers = self.get_edge_layers()
-        region_map = build_region_map(mask, edge_layers)
+        if region_map is None:
+            edge_layers = self.get_edge_layers()
+            region_map = build_region_map(mask, edge_layers)
 
         label_image = region_map.label_image
         region_id = int(label_image[y, x])

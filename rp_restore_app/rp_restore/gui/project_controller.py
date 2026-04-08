@@ -17,6 +17,8 @@ from rp_restore.core.algorithm_runner import AlgorithmType, AlgorithmRequest, Al
 from rp_restore.core.history import UndoAction
 from rp_restore.core.texture_brush import TextureSettings, Texture
 from rp_restore.core import mask_alignment
+from rp_restore.core.auto_fill import auto_fill_regions, AutoFillRegion
+from rp_restore.core.regions import RegionMap, build_region_map
 from rp_restore.gui.canvas.image_canvas_widget import ImageCanvasWidget
 from rp_restore.gui.panels.layers_panel import LayersPanel
 from rp_restore.gui.panels.log_panel import LogPanel
@@ -31,7 +33,6 @@ from rp_restore.gui.mask_alignment_dialog import MaskAlignmentDialog
 from rp_restore.io import image_io
 from rp_restore.io.image_io import load_working_image
 from rp_restore.io.project_storage import ProjectLoader, ProjectSerializer
-from rp_restore.core.auto_fill import auto_fill_small_regions
 
 class ProjectController:
     """
@@ -48,6 +49,9 @@ class ProjectController:
         self.canvas: Optional[ImageCanvasWidget] = None
         self._brush_size: int = 10
 
+        self.selection_region_map_cache: RegionMap | None = None
+        self.selection_region_map_cache_layer_id: str | None = None
+
         self.materials_panel = None
         self.palette_panel = None
         
@@ -60,6 +64,12 @@ class ProjectController:
         self.log_panel: Optional[LogPanel] = None
         self.current_tool: Optional[BaseTool] = None
         self.active_selection: SelectionSet | None = None
+        self.auto_fill_preview_active: bool = False
+        self.auto_fill_threshold: int = 200
+        self.auto_fill_region_map: RegionMap | None = None
+        self.auto_fill_candidate_region_ids: set[int] = set()
+        self.auto_fill_excluded_region_ids: set[int] = set()
+        self.auto_fill_preview_layer_id: str | None = None
         #vizualizácia damage masky v canvase
         self.show_damage_overlay: bool = True
         self.algorithm_panel = None
@@ -88,6 +98,8 @@ class ProjectController:
         """nastaví aktuálny Project a refreshne GUI"""
         self.project = project
         self.project.undo_manager.on_change = self._on_undo_manager_changed
+        self.invalidate_selection_region_map_cache()
+        self.clear_auto_fill_preview()
 
         self.reset_tools_to_default()
         
@@ -301,6 +313,7 @@ class ProjectController:
         """
         if self.canvas is None:
             return
+        self.clear_auto_fill_preview()
         if tool_type == "brush":
             self.current_tool = BrushTool(self, self.canvas)
         elif tool_type == "eraser":
@@ -325,16 +338,26 @@ class ProjectController:
         self.active_selection = None
         self.set_current_tool("brush")
 
-    def set_active_selection(self, selection: Selection | None) -> None:
+    def set_active_selection(self, selection) -> None:
         """
         nastaví aktuálnu selection
         zatiaľ len uložíme do atribútu, neskôr pridáme highlight na canvase a info AlgorithmPanelu
         """
+        self.active_selection = selection
+        if self.active_selection is not None and not self.active_selection.is_empty():
+            self.clear_auto_fill_preview()
 
-        if selection is None:
-            self.set_selection(None)
-        else:
-            self.set_selection(SelectionSet(selections=[selection]))
+    def has_active_selection(self) -> bool:
+        """
+        True ak existuje neprázdny výber oblastí
+        """
+        return self.active_selection is not None and not self.active_selection.is_empty()
+
+    def clear_active_selection(self) -> None:
+        """
+        Zruší aktuálny výber oblastí
+        """
+        self.active_selection = None
 
     def set_selection(self, selection_set: SelectionSet | None) -> None:
         """
@@ -502,7 +525,9 @@ class ProjectController:
 
         self.active_layer_id = layer_id
         self.refresh_layers_panel()
+        self.clear_auto_fill_preview()
         self.update_layer_preview()
+        self.invalidate_selection_region_map_cache()
         #neskôr informujeme nástroje
 
     def add_paint_layer(self) -> None:
@@ -661,6 +686,10 @@ class ProjectController:
         self.log_panel.refresh_from_project(self.project)
 
     def on_canvas_mouse_press(self, img_x: int, img_y: int, buttons: Qt.MouseButtons, modifiers: Qt.KeyboardModifier) -> None:
+        if buttons & Qt.LeftButton:
+            handled = self.toggle_auto_fill_candidate_at(img_x, img_y)
+            if handled:
+                return
         if self.current_tool is None:
             return
         self.current_tool.on_mouse_press(img_x, img_y, buttons, modifiers)
@@ -856,27 +885,40 @@ class ProjectController:
             return 0
 
         #cieľová vrstva – preferujeme aktívnu, ak je PAINT
-        target_layer: Layer | None = None
-
-        if self.active_layer_id is not None:
-            for layer in self.project.layers:
-                if layer.meta.id == self.active_layer_id and layer.meta.role == LayerRole.PAINT:
-                    target_layer = layer
-                    break
-
-        if target_layer is None:
-            #fallback na prvú PAINT vrstvu
-            for layer in self.project.layers:
-                if layer.meta.role == LayerRole.PAINT:
-                    target_layer = layer
-                    break
-
+        target_layer = self.get_active_paint_layer_for_autofill()
         if target_layer is None:
             return 0
+        
+        mode = self.get_auto_fill_mode()
 
-        count = auto_fill_small_regions(self.project, target_layer, area_threshold)
+        regions_to_fill: list[AutoFillRegion] = []
+        region_map = None
+
+        if mode == "selection":
+            damage_rem = self.project.get_layer_damage_remaining_mask(target_layer.meta.id)
+            if damage_rem is None:
+                return 0
+            edge_layers = self.project.get_edge_layers()
+            region_map = build_region_map(damage_rem, edge_layers)
+            regions_to_fill = self._build_autofill_regions_from_selection()
+        elif mode == "preview":
+            if self.auto_fill_region_map is None:
+                return 0
+            region_map = self.auto_fill_region_map
+            regions_to_fill = self._build_autofill_regions_from_preview()
+        else: 
+            return 0
+
+        if not regions_to_fill or region_map is None:
+            return 0
+        count = auto_fill_regions(self.project, target_layer, region_map, regions_to_fill)
 
         if count > 0:
+            self.invalidate_selection_region_map_cache()
+            if mode == "selection":
+                self.clear_active_selection()
+            else:
+                self.clear_auto_fill_preview()
             self.refresh_canvas()
 
         return count
@@ -1050,3 +1092,224 @@ class ProjectController:
 
     def has_color_correction(self) -> bool:
         return self.project is not None and self.project.has_color_correction()
+    
+    #--autofill-------
+    def get_active_paint_layer_for_autofill(self) -> Layer | None:
+        """
+        Vráti paint vrstvu, na ktorej sa má robiť auto-fill preview/fill
+        -najprv berieme:
+            -aktívnu vrstvu, ak je PAINT
+            -prvú PAINT vrstvu v projekte
+        """
+        if self.project is None:
+            return None
+
+        if self.active_layer_id is not None:
+            for layer in self.project.layers:
+                if layer.meta.id == self.active_layer_id and layer.meta.role == LayerRole.PAINT:
+                    return layer
+
+        for layer in self.project.layers:
+            if layer.meta.role == LayerRole.PAINT:
+                return layer
+
+        return None
+
+    def clear_auto_fill_preview(self) -> None:
+        """
+        Zruší auto-fill preview stav
+        """
+        self.auto_fill_preview_active = False
+        self.auto_fill_region_map = None
+        self.auto_fill_candidate_region_ids.clear()
+        self.auto_fill_excluded_region_ids.clear()
+        self.auto_fill_preview_layer_id = None
+
+        if self.canvas is not None:
+            self.canvas.clear_auto_fill_preview_regions()
+
+    def set_auto_fill_threshold(self, threshold: int) -> None:
+        """
+        Nastaví nový threshold pre auto-fill preview
+        + reset ručne vyradených oblastí
+        + prepočítanie kandidátov
+        """
+        threshold = max(1, int(threshold))
+        self.auto_fill_threshold = threshold
+        self.auto_fill_excluded_region_ids.clear()
+        self.update_auto_fill_preview()
+    
+    def update_auto_fill_preview(self) -> None:
+        """
+        Prepočíta kandidátov pre auto-fill small podľa current threshold
+        -postaví RegionMap nad damage_remaining maskou cieľovej PAINT vrstvy
+        - uloží region_id kandidátov do controlleru
+        - zapne preview režim
+        """
+        self.clear_auto_fill_preview()
+
+        if self.project is None:
+            return
+        target_layer = self.get_active_paint_layer_for_autofill()
+        if target_layer is None:
+            return
+        damage_rem = self.project.get_layer_damage_remaining_mask(target_layer.meta.id)
+        if damage_rem is None:
+            return
+
+        edge_layers = self.project.get_edge_layers()
+        region_map = build_region_map(damage_rem, edge_layers)
+
+        candidate_ids = set(region_map.get_region_ids_smaller_than(self.auto_fill_threshold))
+        self.auto_fill_region_map = region_map
+        self.auto_fill_candidate_region_ids = candidate_ids
+        self.auto_fill_preview_layer_id = target_layer.meta.id
+        self.auto_fill_preview_active = True
+
+        self._refresh_auto_fill_preview_overlay()
+
+    def get_effective_auto_fill_region_ids(self) -> list[int]:
+        """
+        Vráti region_id, ktoré sa majú reálne vyplniť cez auto-fill preview režim (bez vyradených oblastí)
+        """
+        ids = self.auto_fill_candidate_region_ids - self.auto_fill_excluded_region_ids
+        return sorted(ids)
+    
+    def toggle_auto_fill_candidate_at(self, x: int, y: int) -> bool:
+        """
+        Keď je aktívny auto-fill preview režim, kliknutie na kandidáta ju:
+        -vyradí z auto-fill, ak bola aktívna
+        -alebo ju znovu zaradí, ak už bola vyradená
+        vráti True, ak sa niečo zmenilo
+        """
+        if not self.auto_fill_preview_active:
+            return False
+
+        if self.auto_fill_region_map is None:
+            return False
+
+        region_id = self.auto_fill_region_map.get_region_id_at(x, y)
+        if region_id == 0:
+            return False
+
+        if region_id not in self.auto_fill_candidate_region_ids:
+            return False
+
+        if region_id in self.auto_fill_excluded_region_ids:
+            self.auto_fill_excluded_region_ids.remove(region_id)
+        else:
+            self.auto_fill_excluded_region_ids.add(region_id)
+
+        self._refresh_auto_fill_preview_overlay()
+        return True
+    
+    def _refresh_auto_fill_preview_overlay(self) -> None:
+        """
+        Pošle canvas aktuálny stav auto-fill preview -všetkých kandidátov regióny a aj tie, ktoré sú ručne vyradené
+        """
+        if self.canvas is None:
+            return
+
+        self.canvas.set_auto_fill_preview_regions(self.auto_fill_region_map, self.auto_fill_candidate_region_ids, self.auto_fill_excluded_region_ids)
+
+    def _build_autofill_regions_from_preview(self) -> list[AutoFillRegion]:
+        """
+        Vytvorí zoznam AutoFillRegion z aktuálneho threshold preview režimu
+        """
+        result: list[AutoFillRegion] = []
+
+        if self.auto_fill_region_map is None:
+            return result
+
+        effective_ids = self.get_effective_auto_fill_region_ids()
+        for region_id in effective_ids:
+            if not self.auto_fill_region_map.has_region(region_id):
+                continue
+
+            bbox = self.auto_fill_region_map.get_region_bbox(region_id)
+            if bbox is None:
+                continue
+
+            result.append(AutoFillRegion(region_id=region_id, bbox=bbox))
+
+        return result
+    
+    def _build_autofill_regions_from_selection(self) -> list[AutoFillRegion]:
+        """
+        Vytvorí zoznam AutoFillRegion z aktívneho SelectionSetu
+        """
+        result: list[AutoFillRegion] = []
+
+        if self.active_selection is None or self.active_selection.is_empty():
+            return result
+
+        for sel in self.active_selection.selections:
+            result.append(AutoFillRegion(region_id=sel.region_id, bbox=sel.bbox))
+
+        return result
+    
+    def has_auto_fill_preview_candidates(self) -> bool:
+        """
+        True, ak existuje auto-fill preview a sú v ňom aspoň nejaký kandidáti
+        """
+        return self.auto_fill_preview_active and self.auto_fill_region_map is not None and len(self.get_effective_auto_fill_region_ids()) > 0
+    
+
+    def get_auto_fill_mode(self) -> str | None:
+        """
+        Vráti aktuálny režim auto-fill:
+        -"selection" -ak existuje active_selection
+        -"preview" -ak neexistuje selection, ale existuje preview kandidátov
+        -None
+        """
+        if self.has_active_selection():
+            return "selection"
+        if self.has_auto_fill_preview_candidates():
+            return "preview"
+
+        return None
+
+    def invalidate_selection_region_map_cache(self) -> None:
+        """
+        Zruší cached RegionMap pre selection
+        """
+        self.selection_region_map_cache = None
+        self.selection_region_map_cache_layer_id = None
+
+    def get_selection_region_map_for_active_layer(self) -> RegionMap | None:
+        """
+        Vráti RegionMap pre selection na aktuálnej vrstve
+        -na PAINT vrstve používa layer_damage_remaining_mask
+        -na BACKGROUND (alebo iné) používa damage_original_mask
+        """
+        if self.project is None:
+            return None
+
+        layer_id = self.active_layer_id
+        if layer_id is None:
+            return None
+
+        if self.selection_region_map_cache is not None and self.selection_region_map_cache_layer_id == layer_id:
+            return self.selection_region_map_cache
+
+        #zoberieme aktívnu vrstvu
+        layer = next((l for l in self.project.layers if l.meta.id == layer_id), None)
+        if layer is None:
+            return None
+
+        if layer.meta.role == LayerRole.PAINT:
+            mask = self.project.get_layer_damage_remaining_mask(layer_id)
+        else:
+            #ostatné
+            mask = self.project.damage_original_mask
+
+        if mask is None:
+            return None
+
+        edge_layers = self.project.get_edge_layers()
+        region_map = build_region_map(mask, edge_layers)
+
+        self.selection_region_map_cache = region_map
+        self.selection_region_map_cache_layer_id = layer_id
+
+        return region_map

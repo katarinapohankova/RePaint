@@ -283,6 +283,7 @@ class BrushTool(BaseTool):
         project = self.controller.project
         if project is not None:
             project.sync_layer_filled_mask_from_alpha(layer.meta.id, bbox)
+        self.controller.invalidate_selection_region_map_cache()
 
         #cleanup
         self._before_image = None

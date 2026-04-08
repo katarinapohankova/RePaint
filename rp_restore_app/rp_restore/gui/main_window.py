@@ -4,7 +4,7 @@ import numpy as np
 from pathlib import Path
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QCloseEvent
-from PySide6.QtWidgets import QDialog, QMainWindow, QStatusBar, QMessageBox, QDockWidget, QToolBar, QFileDialog, QLabel, QAbstractButton, QScrollArea
+from PySide6.QtWidgets import QDialog, QHBoxLayout, QMainWindow, QSlider, QSpinBox, QStatusBar, QMessageBox, QDockWidget, QToolBar, QFileDialog, QLabel, QAbstractButton, QScrollArea, QWidget
 
 from rp_restore.config.settings import AppSettings
 from rp_restore.core.layers import Layer, LayerMeta, LayerRole
@@ -47,6 +47,10 @@ class MainWindow(QMainWindow):
         self.canvas = None
         self.controller.set_message_callback(self._show_tool_message)
         self.setDockNestingEnabled(True)
+
+        #autofill
+        self.auto_fill_slider: QSlider | None = None
+        self.auto_fill_spinbox: QSpinBox | None = None
 
         #layers panel
         self.layers_panel = LayersPanel(self)
@@ -324,6 +328,32 @@ class MainWindow(QMainWindow):
         self.auto_fill_action.triggered.connect(self.on_auto_fill_small_regions)
         tools_toolbar.addAction(self.auto_fill_action)
 
+        auto_fill_widget = QWidget(self)
+        auto_fill_layout = QHBoxLayout(auto_fill_widget)
+        auto_fill_layout.setSpacing(6)
+
+        self.auto_fill_slider = QSlider(Qt.Vertical, auto_fill_widget)
+        self.auto_fill_slider.setMinimum(1)
+        self.auto_fill_slider.setMaximum(5000)
+        self.auto_fill_slider.setValue(self.controller.auto_fill_threshold)
+        self.auto_fill_slider.setFixedHeight(120)
+
+        self.auto_fill_spinbox = QSpinBox(auto_fill_widget)
+        self.auto_fill_spinbox.setMinimum(1)
+        self.auto_fill_spinbox.setMaximum(5000)
+        self.auto_fill_spinbox.setValue(self.controller.auto_fill_threshold)
+
+        auto_fill_layout.addWidget(self.auto_fill_slider)
+        auto_fill_layout.addWidget(self.auto_fill_spinbox)
+
+        tools_toolbar.addWidget(auto_fill_widget)
+
+        self.auto_fill_slider.valueChanged.connect(self._sync_auto_fill_slider_to_spinbox_only)
+        self.auto_fill_slider.sliderReleased.connect(self._commit_auto_fill_slider_value)
+
+        self.auto_fill_spinbox.valueChanged.connect(self._sync_auto_fill_spinbox_to_slider_only)
+        self.auto_fill_spinbox.editingFinished.connect(self._commit_auto_fill_spinbox_value)
+
     def _apply_right_dock_layout(self) -> None:
         """
         aby sa pravé docky neskladali cez seba, ale boli pod sebou (vertikálny split)
@@ -579,6 +609,8 @@ class MainWindow(QMainWindow):
         action = project.undo_global()
         if action is None:
             return
+        
+        self.controller.invalidate_selection_region_map_cache()
 
         #nastavíme aktívnu vrstvu podľa akcie
         self.controller.set_active_layer(action.layer_id)
@@ -600,6 +632,8 @@ class MainWindow(QMainWindow):
         action = project.redo_global()
         if action is None:
             return
+        
+        self.controller.invalidate_selection_region_map_cache()
 
         self.controller.set_active_layer(action.layer_id)
         bbox = action.bbox
@@ -848,7 +882,10 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Žiadny projekt", "Nie je otvorený žiadny projekt")
             return
 
-        count = self.controller.run_auto_fill_small_regions()
+        threshold = self.controller.auto_fill_threshold
+        if self.auto_fill_spinbox is not None:
+            threshold = int(self.auto_fill_spinbox.value())
+        count = self.controller.run_auto_fill_small_regions(area_threshold=threshold)
         if count == 0:
             QMessageBox.information(
                 self,
@@ -861,6 +898,50 @@ class MainWindow(QMainWindow):
                 5000,
             )
 
+    def _on_auto_fill_slider_changed(self, value: int) -> None:
+        """
+        Keď sa zmení slider, prepíšeme spinbox a controller threshold
+        """
+        if self.auto_fill_spinbox is not None and self.auto_fill_spinbox.value() != value:
+            self.auto_fill_spinbox.blockSignals(True)
+            self.auto_fill_spinbox.setValue(value)
+            self.auto_fill_spinbox.blockSignals(False)
+
+        self.controller.set_auto_fill_threshold(value)
+
+    def _on_auto_fill_spinbox_changed(self, value: int) -> None:
+        """
+        Keď sa zmení spinbox, prepíšeme slider a controller threshold
+        """
+        if self.auto_fill_slider is not None and self.auto_fill_slider.value() != value:
+            self.auto_fill_slider.blockSignals(True)
+            self.auto_fill_slider.setValue(value)
+            self.auto_fill_slider.blockSignals(False)
+
+        self.controller.set_auto_fill_threshold(value)
+
+    def _sync_auto_fill_slider_to_spinbox_only(self, value: int) -> None:
+        if self.auto_fill_spinbox is not None and self.auto_fill_spinbox.value() != value:
+            self.auto_fill_spinbox.blockSignals(True)
+            self.auto_fill_spinbox.setValue(value)
+            self.auto_fill_spinbox.blockSignals(False)
+
+    def _sync_auto_fill_spinbox_to_slider_only(self, value: int) -> None:
+        if self.auto_fill_slider is not None and self.auto_fill_slider.value() != value:
+            self.auto_fill_slider.blockSignals(True)
+            self.auto_fill_slider.setValue(value)
+            self.auto_fill_slider.blockSignals(False)
+
+    def _commit_auto_fill_slider_value(self) -> None:
+        if self.auto_fill_slider is None:
+            return
+        self.controller.set_auto_fill_threshold(self.auto_fill_slider.value())
+
+    def _commit_auto_fill_spinbox_value(self) -> None:
+        if self.auto_fill_spinbox is None:
+            return
+        self.controller.set_auto_fill_threshold(self.auto_fill_spinbox.value())
+            
     def _on_material_tab_changed(self, idx: int):
         #0 = Barvy, 1 = Textury
         self.controller.texture_mode_enabled = (idx == 1)

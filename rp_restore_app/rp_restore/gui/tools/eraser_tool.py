@@ -186,6 +186,7 @@ class EraserTool(BaseTool):
         if project is not None:
             project.sync_layer_filled_mask_from_alpha(layer.meta.id, bbox, mode="assign")
 
+        self.controller.invalidate_selection_region_map_cache()
         self.controller.refresh_canvas_region(bbox)
 
         self._before_image = None

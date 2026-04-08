@@ -12,7 +12,7 @@ from .overlay_highlight import draw_region_highlights, draw_selection_highlight
 
 if TYPE_CHECKING:
     from rp_restore.core.warnings import RegionReference
-
+from rp_restore.core.regions import RegionMap
 
 class ImageCanvasWidget(QWidget):
     """
@@ -42,6 +42,9 @@ class ImageCanvasWidget(QWidget):
 
         self.setMinimumSize(400, 300)
         self.setAutoFillBackground(True)
+        self.auto_fill_preview_region_map: RegionMap | None = None
+        self.auto_fill_preview_region_ids: set[int] = set()
+        self.auto_fill_preview_excluded_region_ids: set[int] = set()
 
     def set_image(self, image: QImage) -> None:
         """Nastaví nový obraz a prekreslí widget."""
@@ -111,6 +114,22 @@ class ImageCanvasWidget(QWidget):
         #zatiaľ bez zoomu 
         #nakreslíme obraz do ľavého horného rohu
         painter.drawImage(0, 0, img)
+
+        #auto-fill preview overlay
+        if self.auto_fill_preview_region_map is not None and self.auto_fill_preview_region_ids:
+            label_image = self.auto_fill_preview_region_map.label_image
+            painter.setPen(Qt.NoPen)
+            #polopriehľadná tyrkysová
+            active_color = Qt.cyan
+            excluded_color = Qt.darkGray
+
+            h, w = label_image.shape
+            for y in range(h):
+                for x in range(w):
+                    region_id = int(label_image[y, x])
+                    if region_id in self.auto_fill_preview_region_ids:
+                        color = excluded_color if region_id in self.auto_fill_preview_excluded_region_ids else active_color
+                        painter.fillRect(x, y, 1, 1, color)
         
         #selection overlay –polopriehľadná maska
         if self.selection_mask is not None:
@@ -307,4 +326,22 @@ class ImageCanvasWidget(QWidget):
         self.pan_x = 0.0
         self.pan_y = 0.0
 
+        self.update()
+
+    def set_auto_fill_preview_regions(self, region_map: RegionMap | None, region_ids: set[int], excluded_region_ids: set[int] | None = None) -> None:
+        """
+        Nastaví oblasti, ktoré sa majú zvýrazniť ako kandidáti pre auto-fill
+        """
+        self.auto_fill_preview_region_map = region_map
+        self.auto_fill_preview_region_ids = set(region_ids)
+        self.auto_fill_preview_excluded_region_ids = (set(excluded_region_ids) if excluded_region_ids is not None else set())
+        self.update()
+
+    def clear_auto_fill_preview_regions(self) -> None:
+        """
+        Zruší zvýraznenie kandidátov pre auto-fill
+        """
+        self.auto_fill_preview_region_map = None
+        self.auto_fill_preview_region_ids.clear()
+        self.auto_fill_preview_excluded_region_ids.clear()
         self.update()

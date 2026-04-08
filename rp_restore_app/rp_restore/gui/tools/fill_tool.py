@@ -120,6 +120,7 @@ class FillTool(BaseTool):
 
         project.undo_manager.push_action(action)
         project.mark_region_as_filled_on_layer(layer.meta.id, effective_mask)
+        self.controller.ivalidate_selection_region_map_cache()
         if hasattr(self.controller, "refresh_canvas_region"):
             self.controller.refresh_canvas_region((x, y, w, h))
         else:

@@ -200,6 +200,8 @@ class EdgeTool(BaseTool):
         #refresh log panelu, aby sa warningy zobrazili
         self.controller.refresh_log_panel()
 
+        self.controller.invalidate_selection_region_map_cache()
+
         #refresh canvasu len v bboxe
         self.controller.refresh_canvas_region(bbox)
 

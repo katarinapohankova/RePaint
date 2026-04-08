@@ -34,6 +34,37 @@ class RegionMap:
     def get_regions_smaller_than(self, threshold: int) -> List[RegionInfo]:
         """Vráti zoznam oblastí, ktorých area < threshold (v počte pixelov)"""
         return [r for r in self.regions.values() if r.area < threshold]
+    
+    def get_region_id_at(self, x: int, y: int) -> int:
+        """
+        Vráti ID oblasti na súradniciach (x, y)
+        -ak je mimo rozsah alebo tam nie je žiadna oblasť, vráti 0
+        """
+        h, w = self.label_image.shape
+        if x < 0 or y < 0 or x >= w or y >= h:
+            return 0
+        return int(self.label_image[y, x])
+
+    def has_region(self, region_id: int) -> bool:
+        """
+        True, ak taká oblasť existuje v region_map
+        """
+        return region_id in self.regions
+
+    def get_region_bbox(self, region_id: int) -> Tuple[int, int, int, int] | None:
+        """
+        Vráti bbox oblasti podľa ID alebo None
+        """
+        info = self.regions.get(region_id)
+        if info is None:
+            return None
+        return info.bbox
+
+    def get_region_ids_smaller_than(self, threshold: int) -> List[int]:
+        """
+        Vráti len ID oblastí, ktorých area < threshold
+        """
+        return [r.id for r in self.regions.values() if r.area < threshold]
 
 @dataclass
 class RegionMapChanges:
