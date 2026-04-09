@@ -27,8 +27,8 @@ class PalettePanel(QWidget):
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(6)
 
-        title = QLabel("Paleta")
-        layout.addWidget(title)
+        # title = QLabel("Paleta")
+        # layout.addWidget(title)
 
         #---aktuálna farba---
         self.current_color: QColor = QColor(0, 0, 0, 255)

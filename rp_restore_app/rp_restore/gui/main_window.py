@@ -4,7 +4,7 @@ import numpy as np
 from pathlib import Path
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QCloseEvent
-from PySide6.QtWidgets import QDialog, QHBoxLayout, QMainWindow, QSlider, QSpinBox, QStatusBar, QMessageBox, QDockWidget, QToolBar, QFileDialog, QLabel, QAbstractButton, QScrollArea, QWidget
+from PySide6.QtWidgets import QDialog, QHBoxLayout, QMainWindow, QSizePolicy, QSlider, QSpinBox, QStatusBar, QMessageBox, QDockWidget, QToolBar, QFileDialog, QLabel, QAbstractButton, QScrollArea, QWidget
 
 from rp_restore.config.settings import AppSettings
 from rp_restore.core.layers import Layer, LayerMeta, LayerRole
@@ -30,7 +30,7 @@ class MainWindow(QMainWindow):
     def __init__(self, app_settings: AppSettings, parent=None) -> None:
         super().__init__(parent)
 
-        self.setWindowTitle("RP – Reštaurovanie obrazov")
+        self.setWindowTitle("RePaint")
 
         self.resize(1200, 800)
 
@@ -77,7 +77,7 @@ class MainWindow(QMainWindow):
 
         #algorithm panel 
         self.algorithm_panel = AlgorithmPanel(self)
-        self.algorithm_dock = QDockWidget("Algoritmy", self)
+        self.algorithm_dock = QDockWidget("Externé algoritmy", self)
         self.algorithm_dock.setObjectName("AlgorithmDock")
         self.algorithm_dock.setWidget(self.algorithm_panel)
         self.addDockWidget(Qt.RightDockWidgetArea, self.algorithm_dock)
@@ -280,21 +280,21 @@ class MainWindow(QMainWindow):
 
         self.tool_actions: dict[QAction, str] = {}
 
-        self.brush_action = QAction("Brush", self)
+        self.brush_action = QAction("Štětec", self)
         self.brush_action.setShortcut("B")
         self.brush_action.setCheckable(True)
         self.tools_toolbar.addAction(self.brush_action)
         self.tool_action_group.addAction(self.brush_action)
         self.tool_actions[self.brush_action] = "brush"
 
-        self.eraser_action = QAction("Eraser", self)
+        self.eraser_action = QAction("Guma", self)
         self.eraser_action.setShortcut("E")
         self.eraser_action.setCheckable(True)
         self.tools_toolbar.addAction(self.eraser_action)
         self.tool_action_group.addAction(self.eraser_action)
         self.tool_actions[self.eraser_action] = "eraser"
 
-        self.fill_action = QAction("Fill", self)
+        self.fill_action = QAction("Výplň", self)
         self.fill_action.setShortcut("F")
         self.fill_action.setCheckable(True)
         self.tools_toolbar.addAction(self.fill_action)
@@ -302,21 +302,21 @@ class MainWindow(QMainWindow):
         self.tool_actions[self.fill_action] = "fill"
 
 
-        self.selection_action = QAction("Select", self)
+        self.selection_action = QAction("Vybrat", self)
         self.selection_action.setShortcut("S")
         self.selection_action.setCheckable(True)
         self.tools_toolbar.addAction(self.selection_action)
         self.tool_action_group.addAction(self.selection_action)
         self.tool_actions[self.selection_action] = "selection"
 
-        self.edge_action = QAction("Edge", self)
+        self.edge_action = QAction("Hrana", self)
         self.edge_action.setShortcut("G")  #G-graphics
         self.edge_action.setCheckable(True)
         self.tools_toolbar.addAction(self.edge_action)
         self.tool_action_group.addAction(self.edge_action)
         self.tool_actions[self.edge_action] = "edge"
 
-        self.pipette_action = QAction("Pipette", self)
+        self.pipette_action = QAction("Pipeta", self)
         self.pipette_action.setShortcut("I")    #eyedropper
         self.pipette_action.setCheckable(True)
         self.pipette_action.setToolTip("pipeta -vyber barvu z obrazu")
@@ -324,13 +324,14 @@ class MainWindow(QMainWindow):
         self.tool_action_group.addAction(self.pipette_action)
         self.tool_actions[self.pipette_action] = "pipette"
 
-        self.auto_fill_action = QAction("Auto-fill small", self)
+        self.auto_fill_action = QAction("Auto-výplň mini \n (px)", self)
         self.auto_fill_action.triggered.connect(self.on_auto_fill_small_regions)
         self.tools_toolbar.addAction(self.auto_fill_action)
 
         auto_fill_widget = QWidget(self)
         auto_fill_layout = QHBoxLayout(auto_fill_widget)
-        auto_fill_layout.setSpacing(6)
+        auto_fill_layout.setContentsMargins(0, 0, 0, 0)
+        auto_fill_widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
         self.auto_fill_slider = QSlider(Qt.Vertical, auto_fill_widget)
         self.auto_fill_slider.setMinimum(1)
@@ -360,17 +361,17 @@ class MainWindow(QMainWindow):
         """
         aby sa pravé docky neskladali cez seba, ale boli pod sebou (vertikálny split)
         """
-        if not (hasattr(self, "algorithm_dock") and hasattr(self, "color_dock") and hasattr(self, "edge_settings_dock")):
+        if not (hasattr(self, "algorithm_dock") and hasattr(self, "edge_settings_dock") and hasattr(self, "materials_dock")):
             return
 
         self.setDockNestingEnabled(True)
 
-        self.splitDockWidget(self.algorithm_dock, self.materials_dock, Qt.Vertical)
-        self.splitDockWidget(self.materials_dock, self.edge_settings_dock, Qt.Vertical)
+        self.splitDockWidget(self.algorithm_dock, self.edge_settings_dock, Qt.Vertical)
+        self.splitDockWidget(self.edge_settings_dock, self.materials_dock, Qt.Vertical)
 
         self.resizeDocks(
-            [self.algorithm_dock, self.materials_dock, self.edge_settings_dock],
-            [220, 260, 260, 260],
+            [self.algorithm_dock, self.edge_settings_dock, self.materials_dock],
+            [200, 220, 380],
             Qt.Vertical,
         )
         # self.log_dock.show()

@@ -25,8 +25,8 @@ class EdgeSettingsPanel(QWidget):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(6)
 
-        title = QLabel("Hrany")
-        layout.addWidget(title)
+        # title = QLabel("Hrany")
+        # layout.addWidget(title)
 
         #hrúbka
         row_width = QHBoxLayout()

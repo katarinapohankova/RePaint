@@ -28,8 +28,8 @@ class LayersPanel(QWidget):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
 
-        label = QLabel("Vrstvy")
-        layout.addWidget(label)
+        # label = QLabel("Vrstvy")
+        # layout.addWidget(label)
 
         #self.list_widget.setSelectionMode(QListWidget.SingleSelection)
         buttons_row = QHBoxLayout()

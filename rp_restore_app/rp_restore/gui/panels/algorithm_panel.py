@@ -26,8 +26,8 @@ class AlgorithmPanel(QWidget):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(8)
 
-        title = QLabel("Externé algoritmy")
-        layout.addWidget(title)
+        # title = QLabel("Externé algoritmy")
+        # layout.addWidget(title)
 
         self.info_label = QLabel("Žiadna vybraná oblasť.")
         layout.addWidget(self.info_label)

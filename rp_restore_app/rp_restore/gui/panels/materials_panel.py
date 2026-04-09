@@ -41,7 +41,7 @@ class MaterialsPanel(QWidget):
         mode_box = QGroupBox("Režim")
         mode_layout = QHBoxLayout(mode_box)
 
-        self.rb_brush = QRadioButton("Brush")
+        self.rb_brush = QRadioButton("Štětec")
         self.rb_texture = QRadioButton("Textura")
         self.rb_brush.setChecked(True)
 

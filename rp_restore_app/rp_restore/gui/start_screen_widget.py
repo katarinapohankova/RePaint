@@ -33,7 +33,7 @@ class StartScreenWidget(QWidget):
         self.setPalette(palette)
 
         #nadpis
-        title = QLabel("RP – Reštaurovanie obrazov")
+        title = QLabel("RePaint")
         title.setAlignment(Qt.AlignCenter)
         font = title.font()
         font.setPointSize(18)
