@@ -314,6 +314,7 @@ class ProjectController:
         if self.canvas is None:
             return
         self.clear_auto_fill_preview()
+        self._auto_switch_active_layer_for_tool(tool_type)
         if tool_type == "brush":
             self.current_tool = BrushTool(self, self.canvas)
         elif tool_type == "eraser":
@@ -423,6 +424,37 @@ class ProjectController:
         if self.project is None:
             return None
         return self.project.get_damage_remaining_mask()
+    
+    def _auto_switch_active_layer_for_tool(self, tool_type: str) -> None:
+        """
+        Automaticky prepne aktívnu vrstvu podľa nástroja 
+        - edge ->EDGE vrstva
+        - brush ->prvá PAINT vrstva
+        """
+        if self.project is None:
+            return
+
+        def find_first(role: LayerRole) -> str | None:
+            for layer in self.project.layers:
+                if layer.meta.role == role:
+                    return layer.meta.id
+            return None
+
+        #edge tool -> EDGE vrstva
+        if tool_type == "edge":
+            edge_id = find_first(LayerRole.EDGE)
+            if edge_id is not None:
+                self.set_active_layer(edge_id)
+
+        #brush tool -> PAINT vrstva 
+        if tool_type == "brush":
+            if self.active_layer_id is not None:
+                active = self.get_layer_by_id(self.active_layer_id)
+                if active is not None and active.meta.role == LayerRole.PAINT:
+                    return
+            paint_id = find_first(LayerRole.PAINT)
+            if paint_id is not None:
+                self.set_active_layer(paint_id)
 
     def refresh_canvas(self) -> None:
         if self.project is None or self.canvas is None:

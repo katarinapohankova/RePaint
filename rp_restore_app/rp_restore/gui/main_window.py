@@ -270,8 +270,8 @@ class MainWindow(QMainWindow):
             _add_dock_toggle(view_menu, "Hrany", self.edge_settings_dock)
 
     def _create_toolbars(self) -> None:
-        tools_toolbar = QToolBar("Nástroje", self)
-        self.addToolBar(Qt.LeftToolBarArea, tools_toolbar)
+        self.tools_toolbar = QToolBar("Nástroje", self)
+        self.addToolBar(Qt.LeftToolBarArea, self.tools_toolbar)
 
         #skupina na exkluzívne checkovanie
         self.tool_action_group = QActionGroup(self)
@@ -283,21 +283,21 @@ class MainWindow(QMainWindow):
         self.brush_action = QAction("Brush", self)
         self.brush_action.setShortcut("B")
         self.brush_action.setCheckable(True)
-        tools_toolbar.addAction(self.brush_action)
+        self.tools_toolbar.addAction(self.brush_action)
         self.tool_action_group.addAction(self.brush_action)
         self.tool_actions[self.brush_action] = "brush"
 
         self.eraser_action = QAction("Eraser", self)
         self.eraser_action.setShortcut("E")
         self.eraser_action.setCheckable(True)
-        tools_toolbar.addAction(self.eraser_action)
+        self.tools_toolbar.addAction(self.eraser_action)
         self.tool_action_group.addAction(self.eraser_action)
         self.tool_actions[self.eraser_action] = "eraser"
 
         self.fill_action = QAction("Fill", self)
         self.fill_action.setShortcut("F")
         self.fill_action.setCheckable(True)
-        tools_toolbar.addAction(self.fill_action)
+        self.tools_toolbar.addAction(self.fill_action)
         self.tool_action_group.addAction(self.fill_action)
         self.tool_actions[self.fill_action] = "fill"
 
@@ -305,14 +305,14 @@ class MainWindow(QMainWindow):
         self.selection_action = QAction("Select", self)
         self.selection_action.setShortcut("S")
         self.selection_action.setCheckable(True)
-        tools_toolbar.addAction(self.selection_action)
+        self.tools_toolbar.addAction(self.selection_action)
         self.tool_action_group.addAction(self.selection_action)
         self.tool_actions[self.selection_action] = "selection"
 
         self.edge_action = QAction("Edge", self)
         self.edge_action.setShortcut("G")  #G-graphics
         self.edge_action.setCheckable(True)
-        tools_toolbar.addAction(self.edge_action)
+        self.tools_toolbar.addAction(self.edge_action)
         self.tool_action_group.addAction(self.edge_action)
         self.tool_actions[self.edge_action] = "edge"
 
@@ -320,13 +320,13 @@ class MainWindow(QMainWindow):
         self.pipette_action.setShortcut("I")    #eyedropper
         self.pipette_action.setCheckable(True)
         self.pipette_action.setToolTip("pipeta -vyber barvu z obrazu")
-        tools_toolbar.addAction(self.pipette_action)
+        self.tools_toolbar.addAction(self.pipette_action)
         self.tool_action_group.addAction(self.pipette_action)
         self.tool_actions[self.pipette_action] = "pipette"
 
         self.auto_fill_action = QAction("Auto-fill small", self)
         self.auto_fill_action.triggered.connect(self.on_auto_fill_small_regions)
-        tools_toolbar.addAction(self.auto_fill_action)
+        self.tools_toolbar.addAction(self.auto_fill_action)
 
         auto_fill_widget = QWidget(self)
         auto_fill_layout = QHBoxLayout(auto_fill_widget)
@@ -346,13 +346,15 @@ class MainWindow(QMainWindow):
         auto_fill_layout.addWidget(self.auto_fill_slider)
         auto_fill_layout.addWidget(self.auto_fill_spinbox)
 
-        tools_toolbar.addWidget(auto_fill_widget)
+        self.tools_toolbar.addWidget(auto_fill_widget)
 
         self.auto_fill_slider.valueChanged.connect(self._sync_auto_fill_slider_to_spinbox_only)
         self.auto_fill_slider.sliderReleased.connect(self._commit_auto_fill_slider_value)
 
         self.auto_fill_spinbox.valueChanged.connect(self._sync_auto_fill_spinbox_to_slider_only)
         self.auto_fill_spinbox.editingFinished.connect(self._commit_auto_fill_spinbox_value)
+
+        self.tools_toolbar.hide()
 
     def _apply_right_dock_layout(self) -> None:
         """
@@ -371,7 +373,7 @@ class MainWindow(QMainWindow):
             [220, 260, 260, 260],
             Qt.Vertical,
         )
-        self.log_dock.show()
+        # self.log_dock.show()
         self.setCorner(Qt.BottomRightCorner, Qt.RightDockWidgetArea)
         self.setCorner(Qt.BottomLeftCorner, Qt.BottomDockWidgetArea)
         
@@ -457,6 +459,8 @@ class MainWindow(QMainWindow):
             self.materials_dock.hide()
         if hasattr(self, "palette_dock"):
             self.palette_dock.hide()
+        if hasattr(self, "tools_toolbar"):
+            self.tools_toolbar.hide()
 
     def show_workspace(self) -> None:
         """zobrazí pracovnú plochu (canvas, neskôr aj dock panely)"""
@@ -470,8 +474,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.canvas)
         if hasattr(self, "layers_dock"):
             self.layers_dock.show()
-        if hasattr(self, "log_dock"):
-            self.log_dock.show()
+        # if hasattr(self, "log_dock"):
+        #     self.log_dock.show()
         if hasattr(self, "algorithm_dock"):
             self.algorithm_dock.show()
         if hasattr(self, "brush_action"): 
@@ -482,6 +486,8 @@ class MainWindow(QMainWindow):
             self.materials_dock.show()
         if hasattr(self, "palette_dock"):
             self.palette_dock.show()
+        if hasattr(self, "tools_toolbar"):
+            self.tools_toolbar.show()
         QTimer.singleShot(0, self._apply_right_dock_layout)
         self.update_undo_redo_actions()
         self._update_colorchecker_actions()

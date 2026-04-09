@@ -21,6 +21,7 @@ class EdgeTool(BaseTool):
         super().__init__(controller, canvas)
 
         self.is_drawing: bool = False
+        self.is_erasing: bool = False
         self.brush_size: int = controller.get_edge_brush_size()
         self.edge_color: np.ndarray = controller.get_edge_color_rgba()
         #self._reset_stroke_state()
@@ -70,7 +71,11 @@ class EdgeTool(BaseTool):
                             continue
                         if not damage_mask[yy, xx]:
                             continue
-                    layer.image[yy, xx, :] = self.edge_color
+                    if self.is_erasing:
+                        layer.image[yy, xx, 3] = 0
+                        layer.image[yy, xx, 0:3] = 0
+                    else:
+                        layer.image[yy, xx, :] = self.edge_color
 
     def _draw_line(self, layer, x0: int, y0: int, x1: int, y1: int) -> None:
         dx = x1 - x0
@@ -88,8 +93,10 @@ class EdgeTool(BaseTool):
         self.edge_color = self.controller.get_edge_color_rgba()
 
     def on_mouse_press(self, img_x: int, img_y: int, buttons: Qt.MouseButtons, modifiers: Qt.KeyboardModifiers) -> None:
-        if not (buttons & Qt.LeftButton):
+        if not ((buttons & Qt.LeftButton) or (buttons & Qt.RightButton)):
             return
+        
+        self.is_erasing = bool(buttons & Qt.RightButton) or bool(modifiers & Qt.ShiftModifier)
         #pri začiatku ťahu natiahneme aktuálnu hrúbku a farbu
         self._update_settings_from_controller()
 
