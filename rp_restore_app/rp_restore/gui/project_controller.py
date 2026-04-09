@@ -955,7 +955,7 @@ class ProjectController:
 
         return count
     
-    def run_algorithm_on_selection(self, algorithm_type: AlgorithmType, use_mock: bool = True) -> None:
+    def run_algorithm_on_selection(self, algorithm_type: AlgorithmType, use_mock: bool = False) -> None:
         """
         Spustí externý algoritmus na aktuálnej selection
         - pripraví AlgorithmRequest, zavolá AlgorithmRunner.run
@@ -1010,6 +1010,7 @@ class ProjectController:
             return
 
         x, y, w, h = result.bbox
+        local_sel = selected_mask[y:y+h, x:x+w]
         patch = result.output_patch
 
         #zarovnanie patch na RGBA
@@ -1027,7 +1028,7 @@ class ProjectController:
 
         #vložíme patch do vrstvy
         sub_img = target_layer.image[y : y + h, x : x + w, :]
-        sub_img[...] = patch_rgba
+        sub_img[local_sel] = patch_rgba[local_sel]
 
         #after
         after = target_layer.clone_subregion(x, y, w, h)

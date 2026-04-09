@@ -81,4 +81,4 @@ class AlgorithmPanel(QWidget):
         if self._controller is None:
             return
         if hasattr(self._controller, "run_algorithm_on_selection"):
-            self._controller.run_algorithm_on_selection(AlgorithmType.TEXTURE, use_mock=True)
+            self._controller.run_algorithm_on_selection(AlgorithmType.TEXTURE, use_mock=False)

@@ -9,6 +9,7 @@ import numpy as np
 
 import subprocess
 import tempfile
+import sys
 
 from rp_restore.io import image_io
 
@@ -53,8 +54,13 @@ class AlgorithmRunner:
     """
 
     #toto sa musí prispôsobiť algoritmom
-    REALISTIC_CMD = ["python", "realistic_inpaint.py"]
-    TEXTURE_CMD = ["python", "texture_inpaint.py"]
+    # REALISTIC_CMD = ["python", "realistic_inpaint.py"]
+    # TEXTURE_CMD = ["python", "texture_inpaint.py"]
+    _REPO_ROOT = Path(__file__).resolve().parents[2]  # rp_restore/core -> rp_restore -> repo root
+    _ALGO_DIR = _REPO_ROOT / "external_algorithms"
+
+    REALISTIC_CMD = [sys.executable, str(_ALGO_DIR / "realistic_inpaint.py")]  # zatiaľ placeholder
+    TEXTURE_CMD = [sys.executable, str(_ALGO_DIR / "texture_inpaint.py")]
 
     @classmethod
     def run(cls, request: AlgorithmRequest) -> AlgorithmResult:

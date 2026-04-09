@@ -33,3 +33,8 @@ damage_mask_example.png
 png_for_mask_damage_example.png
 damage_mask_skuska.py
 bugy.txt
+
+demo_image.jpg
+demo_mask.png
+out.png
+external_algorithms/infill_generation_demo.py
