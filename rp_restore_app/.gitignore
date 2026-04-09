@@ -38,3 +38,4 @@ demo_image.jpg
 demo_mask.png
 out.png
 external_algorithms/infill_generation_demo.py
+tmp/

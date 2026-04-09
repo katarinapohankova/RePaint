@@ -142,7 +142,12 @@ class AlgorithmRunner:
         x_max = int(xs.max())
         bbox = (x_min, y_min, x_max - x_min + 1, y_max - y_min + 1)
 
+        # debug_root = Path("tmp")  
+        # debug_root.mkdir(parents=True, exist_ok=True)
+
+        # tmpdir_path = Path(tempfile.mkdtemp(prefix="algo_", dir=str(debug_root)))
         with tempfile.TemporaryDirectory() as tmpdir:
+        # try:
             tmpdir_path = Path(tmpdir)
 
             input_image_path = tmpdir_path / "input_image.png"
@@ -197,7 +202,9 @@ class AlgorithmRunner:
 
             #načítame výstupný obrázok
             output_img = image_io.load_image(output_path)  #RGBA (H, W, 4)
-
+        # finally:
+        #     pass
+        
         #vyrežeme patch podľa bbox
         x, y, w_box, h_box = bbox
         output_patch = output_img[y : y + h_box, x : x + w_box, :]
