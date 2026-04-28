@@ -10,6 +10,7 @@ __pycache__/
 
 .venv/
 venv/
+algo_venv/
 
 .pytest_cache/
 
@@ -39,3 +40,14 @@ demo_mask.png
 out.png
 external_algorithms/infill_generation_demo.py
 tmp/
+
+RP-Restore.spec
+dist.zip
+dist2.zip
+dist/
+dist2/
+external_algorithms_bin/
+texture_inpaint.spec
+
+user_readme.md
+user_readme2.md

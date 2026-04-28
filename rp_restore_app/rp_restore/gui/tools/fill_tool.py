@@ -75,7 +75,8 @@ class FillTool(BaseTool):
 
         #z projektu si vypýtame selection (podľa damage_remaining_mask)
         selection_set = getattr(self.controller, "active_selection", None)
-        if (selection_set is not None and hasattr(selection_set, "is_empty") and not selection_set.is_empty()):
+        used_selection_set = (selection_set is not None and hasattr(selection_set, "is_empty") and not selection_set.is_empty())
+        if used_selection_set:
             #multi-selection: combined mask + bbox
             region_mask = selection_set.combined_mask()
             x, y, w, h = selection_set.combined_bbox()
@@ -95,7 +96,7 @@ class FillTool(BaseTool):
         #iba to čo na tejto vrstve ešte nie je vyplnené
         effective_mask = region_mask & remaining 
         if not effective_mask.any():
-            self.controller.show_tool_message("Tahle oblast již bylo na této vrstvě vyplněná")
+            self.controller.show_tool_message("Tahle oblast již byla na této vrstvě vyplněná")
             return
         
         #before – uložíme subregion
@@ -106,9 +107,13 @@ class FillTool(BaseTool):
 
         #vyplnenie vo vrstve
         sub_img = layer.image[y : y + h, x : x + w, :]
+        paint_mode = getattr(self.controller, "paint_mode", "brush")
         ts = getattr(self.controller, "texture_settings", None)
-        if ts is not None and ts.texture is not None:
-            pattern = generate_fill_pattern(ts, bbox_w=w, bbox_h=h, seed=(x * 73856093) ^ (y * 19349663) )
+        if paint_mode == "texture":
+            if ts is None or ts.texture is None:
+                self.controller.show_tool_message("Není zvolená konkrétní textura")
+                return
+            pattern = generate_fill_pattern(ts, w=w, h=h, offset_x=x, offset_y=y) #seed=(x * 73856093) ^ (y * 19349663) )
             self._blend_pattern_into(sub_img, pattern, local_mask)
         else:
             sub_img[local_mask] = self.fill_color_rgba
@@ -121,6 +126,9 @@ class FillTool(BaseTool):
         project.undo_manager.push_action(action)
         project.mark_region_as_filled_on_layer(layer.meta.id, effective_mask)
         self.controller.invalidate_selection_region_map_cache()
+
+        if used_selection_set:
+            self.controller.clear_selection()
         if hasattr(self.controller, "refresh_canvas_region"):
             self.controller.refresh_canvas_region((x, y, w, h))
         else:

@@ -309,6 +309,13 @@ class MainWindow(QMainWindow):
         self.tool_action_group.addAction(self.selection_action)
         self.tool_actions[self.selection_action] = "selection"
 
+        self.lasso_action = QAction("Laso", self)
+        self.lasso_action.setShortcut("L")
+        self.lasso_action.setCheckable(True)
+        self.tools_toolbar.addAction(self.lasso_action)
+        self.tool_action_group.addAction(self.lasso_action)
+        self.tool_actions[self.lasso_action] = "lasso"
+
         self.edge_action = QAction("Hrana", self)
         self.edge_action.setShortcut("G")  #G-graphics
         self.edge_action.setCheckable(True)

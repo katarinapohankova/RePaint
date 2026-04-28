@@ -20,7 +20,7 @@ def load_image(path: PathLike) -> np.ndarray:
     arr = np.array(img, dtype=np.uint8)
     return arr
 
-def load_working_image(path: str | Path, max_size: int = 5000) -> tuple[np.ndarray, float]:
+def load_working_image(path: str | Path, max_size: int = 4000) -> tuple[np.ndarray, float]:
     
     with Image.open(path) as img:
         img = img.convert("RGBA")

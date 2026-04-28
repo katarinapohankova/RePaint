@@ -84,3 +84,10 @@ class SelectionSet:
 
     def remove_by_region_id(self, region_id: int) -> None:
         self.selections = [sel for sel in self.selections if sel.region_id != region_id]
+
+    def extend_unique(self, other: "SelectionSet") -> None:
+        """
+        Pridá selections z iného set bez duplicít podľa region_id
+        """
+        for sel in other.selections:
+            self.add_selection(sel)

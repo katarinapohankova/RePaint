@@ -29,6 +29,7 @@ from rp_restore.gui.tools.fill_tool import FillTool
 from rp_restore.gui.tools.selection_tool import SelectionTool
 from rp_restore.gui.tools.edge_tool import EdgeTool
 from rp_restore.gui.tools.pipette_tool import PipetteTool
+from rp_restore.gui.tools.lasso_tool import LassoTool
 from rp_restore.gui.mask_alignment_dialog import MaskAlignmentDialog
 from rp_restore.io import image_io
 from rp_restore.io.image_io import load_working_image
@@ -327,6 +328,8 @@ class ProjectController:
             self.current_tool = EdgeTool(self, self.canvas)
         elif tool_type == "pipette":
             self.current_tool = PipetteTool(self, self.canvas)
+        elif tool_type == "lasso":
+            self.current_tool = LassoTool(self, self.canvas)
         else:
             self.current_tool = None
 
@@ -755,7 +758,7 @@ class ProjectController:
         Vytvorí nový Project zo zadaného obrázka (a voliteľne damage masky)
         """
         
-        working_arr, scale = load_working_image(image_path, max_size=5000)
+        working_arr, scale = load_working_image(image_path, max_size=4000)
 
         bg_meta = LayerMeta(id="background", name="Background", role=LayerRole.BACKGROUND)
         bg_layer = Layer(bg_meta, working_arr.copy())
@@ -783,7 +786,7 @@ class ProjectController:
 
         h_img, w_img, _ = working_arr.shape
         if mask_path:
-            mask_preview_arr, _ = load_working_image(mask_path, max_size=5000)
+            mask_preview_arr, _ = load_working_image(mask_path, max_size=4000)
 
             #otvoríme dialóg na zarovnanie
             parent = QApplication.activeWindow()
@@ -989,6 +992,7 @@ class ProjectController:
         except Exception as e:
             #zatia+ to aspoň vypíšeme do konzoly
             print("Algorithm error:", e)
+            self.show_tool_message(f"Algorithm error: {e}")
             return
 
         #nájdeme cieľovú PAINT vrstvu

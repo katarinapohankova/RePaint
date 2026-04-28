@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import List, Optional
 
 from pathlib import Path
+from PIL import Image, ImageDraw
 import numpy as np
 
 from .layers import Layer, LayerRole
@@ -11,7 +12,7 @@ from .history import UndoAction, GlobalUndoManager
 
 from .warnings import UserWarning
 from .warnings import LogManager, WarningType, RegionReference
-from .selection import Selection
+from .selection import Selection, SelectionSet
 from .regions import RegionMap, build_region_map, compare_region_maps
 from rp_restore.io.image_io import load_image
 from rp_restore.core.texture_brush import Texture
@@ -385,6 +386,78 @@ class Project:
         bbox = info.bbox
 
         return Selection(region_mask=region_mask, bbox=bbox, seed_point=(x, y), region_id=region_id)
+    
+    def get_selections_from_polygon(self, polygon_points: list[tuple[int, int]], layer_id: str | None = None, region_map: RegionMap | None = None) -> SelectionSet | None:
+        """
+        Nájde všetky selection oblasti, ktoré ležia vo vnútri polygonu (lasom ohraničené)
+        -na PAINT vrstve používa layer damage remaining mask
+        """
+        if self.damage_original_mask is None:
+            return None
+
+        if not polygon_points or len(polygon_points) < 3:
+            return None
+
+        mask: np.ndarray | None = None
+
+        if layer_id is not None:
+            layer = next((l for l in self.layers if l.meta.id == layer_id), None)
+            if layer is not None and layer.meta.role == LayerRole.PAINT:
+                mask = self.get_layer_damage_remaining_mask(layer_id)
+            else:
+                mask = self.damage_original_mask
+        else:
+            mask = self.damage_original_mask
+
+        if mask is None:
+            return None
+
+        h, w = mask.shape
+
+        #ak region_map náhodou nie je region map, vytvoríme ho
+        if region_map is None:
+            edge_layers = self.get_edge_layers()
+            region_map = build_region_map(mask, edge_layers)
+
+        #rasterizácia polygonu do bool masky
+        poly_img = Image.new("L", (w, h), 0)
+        draw = ImageDraw.Draw(poly_img)
+        draw.polygon(polygon_points, outline=1, fill=1)
+        polygon_mask = np.array(poly_img, dtype=np.uint8) > 0
+
+        #chceme len pixely, ktoré sú vo vnútri polygonu a zároveň patria do relevantnej damage masky
+        effective_mask = polygon_mask & mask
+        if not effective_mask.any():
+            return None
+
+        #zistíme ktoré region_id sa nachádzajú vo vnútri
+        label_sub = region_map.label_image[effective_mask]
+        region_ids = np.unique(label_sub)
+        region_ids = region_ids[region_ids > 0]
+
+        if region_ids.size == 0:
+            return None
+
+        selections: list[Selection] = []
+
+        for region_id in region_ids.tolist():
+            info = region_map.regions.get(int(region_id))
+            if info is None:
+                continue
+
+            region_mask = region_map.get_region_mask(int(region_id))
+            bbox = info.bbox
+
+            #seed point = stred bboxu
+            x, y, bw, bh = bbox
+            seed_point = (x + bw // 2, y + bh // 2)
+
+            selections.append(Selection(region_mask=region_mask, bbox=bbox, seed_point=seed_point, region_id=int(region_id)))
+
+        if not selections:
+            return None
+
+        return SelectionSet(selections=selections)
 
     #---------zmeny hrán ---------
     def on_edge_layer_modified(self, edge_layer_id: str) -> None:

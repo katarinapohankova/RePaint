@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QPoint
-from PySide6.QtGui import QImage, QPainter, QPaintEvent, QTransform, QWheelEvent
+from PySide6.QtGui import QImage, QPainter, QPaintEvent, QTransform, QWheelEvent, QPen
 from PySide6.QtWidgets import QWidget
 
 from typing import List, Optional, TYPE_CHECKING
@@ -45,6 +45,9 @@ class ImageCanvasWidget(QWidget):
         self.auto_fill_preview_region_map: RegionMap | None = None
         self.auto_fill_preview_region_ids: set[int] = set()
         self.auto_fill_preview_excluded_region_ids: set[int] = set()
+
+        self.lasso_preview_points: list[tuple[int, int]] = []
+        self.show_lasso_preview: bool = False
 
     def set_image(self, image: QImage) -> None:
         """Nastaví nový obraz a prekreslí widget."""
@@ -138,6 +141,23 @@ class ImageCanvasWidget(QWidget):
         #overlay highlight (warningy / selection)
         if self._highlight_regions:
             draw_region_highlights(painter, self._highlight_regions)
+
+        #lasso overlay
+        if self.show_lasso_preview and len(self.lasso_preview_points) >= 2:
+            pen = QPen(Qt.yellow)
+            pen.setWidth(2)
+            painter.setPen(pen)
+
+            pts = self.lasso_preview_points
+
+            for i in range(1, len(pts)):
+                x0, y0 = pts[i - 1]
+                x1, y1 = pts[i]
+                painter.drawLine(x0, y0, x1, y1)
+
+            last_x, last_y = pts[-1]
+            painter.setBrush(Qt.yellow)
+            painter.drawEllipse(last_x - 2, last_y - 2, 4, 4)
 
 
     def get_current_transform(self) -> QTransform:
@@ -344,4 +364,20 @@ class ImageCanvasWidget(QWidget):
         self.auto_fill_preview_region_map = None
         self.auto_fill_preview_region_ids.clear()
         self.auto_fill_preview_excluded_region_ids.clear()
+        self.update()
+
+    def set_lasso_preview_points(self, points: list[tuple[int, int]]) -> None:
+        """
+        Nastaví body dočasného lasa, ktoré sa kreslí počas ťahu myšou
+        """
+        self.lasso_preview_points = list(points)
+        self.show_lasso_preview = len(self.lasso_preview_points) >= 1
+        self.update()
+
+    def clear_lasso_preview(self) -> None:
+        """
+        Zruší dočasný preview obrys lasa
+        """
+        self.lasso_preview_points = []
+        self.show_lasso_preview = False
         self.update()
