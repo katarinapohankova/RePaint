@@ -18,6 +18,8 @@ class TextureSettings:
     color: Tuple[int, int, int] = (255, 255, 255)  #tint RGB
     strength: float = 1.0  #0..1
     rotation_deg: float = 0.0
+    # "transparent" -cez alfa ako doteraz / "color" -plná textúra s odtieňmi
+    texture_style: str = "transparent"
 
 
 def _to_gray01(tex_rgb: np.ndarray) -> np.ndarray:
@@ -97,12 +99,36 @@ def generate_fill_pattern(settings: TextureSettings, w: int, h: int, offset_x: i
     patch = tex_f[np.ix_(yy, xx)]  #(h,w,3)
 
     gray = _to_gray01(patch)
+    gray = np.clip(gray, 0.0, 1.0)
+
+    color = np.array(settings.color, dtype=np.float32) / 255.0
+    strength = float(np.clip(settings.strength, 0.0, 1.0))
+
+    out = np.zeros((h, w, 4), dtype=np.uint8)
+
+    style = getattr(settings, "texture_style", "transparent")
+
+    if style == "color":
+        #farba nie je všade rovnaká -grayscale textúry mení odtieň aktuálnej farby a alfa je skoro plná
+        # 0.0 (tmavšia) -> 0.5 (pôvodná farba) -> 1.0 (svetlejšia)
+        variation = 0.35 * strength
+        shade_factor = 1.0 + (gray - 0.5) * 2.0 * variation
+        shade_factor = np.clip(shade_factor, 0.55, 1.45)
+
+        rgb = color[None, None, :] * shade_factor[..., None]
+        rgb = np.clip(rgb, 0.0, 1.0)
+
+        alpha = strength * (0.88 + 0.12 * (1.0 - gray))
+        alpha = np.clip(alpha, 0.0, 1.0)
+
+        out[..., 0:3] = np.clip(rgb * 255.0, 0, 255).astype(np.uint8)
+        out[..., 3] = np.clip(alpha * 255.0, 0, 255).astype(np.uint8)
+        return out
+    
+    #transparentná
     alpha = (1.0 - gray) * float(settings.strength)
     alpha = np.clip(alpha, 0.0, 1.0)
 
-    color = np.array(settings.color, dtype=np.float32) / 255.0
-
-    out = np.zeros((h, w, 4), dtype=np.uint8)
     out[..., 0:3] = np.clip(color[None, None, :] * 255.0, 0, 255).astype(np.uint8)
     out[..., 3] = np.clip(alpha * 255.0, 0, 255).astype(np.uint8)
     return out

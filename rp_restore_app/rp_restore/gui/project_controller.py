@@ -87,7 +87,7 @@ class ProjectController:
         self._opacity_debounce_timer.setSingleShot(True)
         self._opacity_debounce_timer.timeout.connect(self._apply_opacity_debounced_refresh)
 
-        self.texture_settings = TextureSettings(texture=None, scale=1.0, color=(255, 255, 255), strength=1.0)
+        self.texture_settings = TextureSettings(texture=None, scale=1.0, color=(255, 255, 255), strength=1.0, texture_style="transparent")
         self.texture_mode_enabled: bool = False
 
         self.paint_mode: str = "brush"
@@ -101,6 +101,8 @@ class ProjectController:
         self.project.undo_manager.on_change = self._on_undo_manager_changed
         self.invalidate_selection_region_map_cache()
         self.clear_auto_fill_preview()
+
+        self.texture_settings.texture_style = getattr(project, "texture_style", "transparent")
 
         self.reset_tools_to_default()
         
@@ -146,6 +148,24 @@ class ProjectController:
     def set_texture_strength(self, strength: float) -> None:
         self.texture_settings.strength = float(strength)
 
+    def set_texture_style(self, style: str) -> None:
+        """
+        Nastaví spôsob generovania textúry:
+            - transparent - pôvodná priesvitná textúra
+            - color - farebná textúra s odtieňmi
+        """
+        if style not in ("transparent", "color"):
+            style = "transparent"
+
+        self.texture_settings.texture_style = style
+
+        if self.project is not None:
+            self.project.texture_style = style
+            self.project.mark_dirty()
+
+        if self.materials_panel is not None and hasattr(self.materials_panel, "refresh_from_project"):
+            self.materials_panel.refresh_from_project(self.project)
+
     def _load_default_textures_into_project(self, project: Project, max_tex_size: int = 512) -> None:
         """
         Načíta default textúry z rp_restore/resources/textures do project.textures
@@ -186,6 +206,94 @@ class ProjectController:
             except Exception:
                 #textúra sa nepodarila načítať, preskočíme
                 continue
+    
+    def add_texture_from_file_via_dialog(self, parent=None) -> None:
+        """
+        Otvorí dialóg a pridá vybraný obrázok ako textúru iba do aktuálneho projektu
+        """
+        if self.project is None:
+            return
+
+        path, _ = QFileDialog.getOpenFileName(
+            parent,
+            "Přidat texturu",
+            "",
+            "Obrázky (*.png *.jpg *.jpeg *.tif *.tiff);;Všechny soubory (*.*)",
+        )
+        if not path:
+            return
+
+        try:
+            self.add_texture_from_file(path)
+        except Exception as e:
+            self.show_tool_message(f"Texturu se nepodařilo přidat: {e}")
+
+    def add_texture_from_file(self, path: str, max_tex_size: int = 512) -> None:
+        """
+        Pridá textúru do aktuálneho projektu
+        (nekopíruje ju do default resources, iba do project.textures)
+        """
+        if self.project is None:
+            return
+
+        p = Path(path)
+        if not p.is_file():
+            raise FileNotFoundError(str(p))
+
+        arr, _ = load_working_image(str(p), max_size=max_tex_size)
+
+        # normalizácia na RGBA
+        if arr.ndim == 2:
+            rgba = np.zeros((arr.shape[0], arr.shape[1], 4), dtype=np.uint8)
+            rgba[..., 0] = arr
+            rgba[..., 1] = arr
+            rgba[..., 2] = arr
+            rgba[..., 3] = 255
+            arr = rgba
+        elif arr.ndim == 3 and arr.shape[2] == 3:
+            rgba = np.zeros((arr.shape[0], arr.shape[1], 4), dtype=np.uint8)
+            rgba[..., :3] = arr
+            rgba[..., 3] = 255
+            arr = rgba
+        elif arr.ndim == 3 and arr.shape[2] == 4:
+            arr = arr.astype(np.uint8)
+        else:
+            raise ValueError("Unsupported texture image format")
+
+        base_name = p.stem or "texture"
+        name = self._make_unique_texture_name(base_name)
+
+        tex = Texture(name=name, image=arr)
+        self.project.textures[name] = tex
+
+        #hneď ju vyberieme ako aktuálnu textúru
+        self.texture_settings.texture = tex
+
+        self.project.mark_dirty()
+
+        if self.materials_panel is not None and hasattr(self.materials_panel, "refresh_from_project"):
+            self.materials_panel.refresh_from_project(self.project)
+
+    def _make_unique_texture_name(self, base_name: str) -> str:
+        """
+        Vytvorí jedinečný názov textúry v aktuálnom projekte
+        """
+        if self.project is None:
+            return base_name
+
+        existing = set(getattr(self.project, "textures", {}).keys())
+
+        safe = "".join(ch if ch.isalnum() or ch in ("_", "-") else "_" for ch in base_name).strip("_")
+        if not safe:
+            safe = "texture"
+
+        if safe not in existing:
+            return safe
+
+        i = 2
+        while f"{safe}_{i}" in existing:
+            i += 1
+        return f"{safe}_{i}"
     
     def set_materials_panel(self, panel: object) -> None:
         self.materials_panel = panel

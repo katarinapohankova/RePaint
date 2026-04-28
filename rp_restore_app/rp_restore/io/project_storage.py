@@ -129,6 +129,7 @@ class ProjectSerializer:
                         else None
                     ),
                 },
+                "texture_style": getattr(project, "texture_style", "transparent")
             }
 
             #textúry
@@ -164,6 +165,10 @@ class ProjectLoader:
 
             project_name = meta.get("project_name", zip_path.stem)
             project = Project(project_name)
+
+            project.texture_style = meta.get("texture_style", "transparent")
+            if project.texture_style not in ("transparent", "color"):
+                project.texture_style = "transparent"
 
             #načítanie vrstiev
             for layer_info in meta.get("layers", []):

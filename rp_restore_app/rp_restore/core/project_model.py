@@ -61,6 +61,7 @@ class Project:
         self.current_color_rgba: tuple[int, int, int, int] = (0, 0, 0, 255)  #default bude čierna
 
         self.textures: dict[str, "Texture"] = {}
+        self.texture_style: str = "transparent"
 
         self.color_correction_matrix: np.ndarray | None = None
         self.color_correction_enabled: bool = False

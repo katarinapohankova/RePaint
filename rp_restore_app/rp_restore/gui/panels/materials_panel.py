@@ -63,6 +63,26 @@ class MaterialsPanel(QWidget):
         tex_layout.setContentsMargins(0, 0, 0, 0)
         tex_layout.setSpacing(8)
 
+        #štýl textúry
+        style_box = QGroupBox("Styl textury")
+        style_layout = QHBoxLayout(style_box)
+
+        self.rb_texture_transparent = QRadioButton("Transparentní")
+        self.rb_texture_color = QRadioButton("Barevná")
+        self.rb_texture_transparent.setChecked(True)
+
+        self.texture_style_group = QButtonGroup(self)
+        self.texture_style_group.setExclusive(True)
+        self.texture_style_group.addButton(self.rb_texture_transparent)
+        self.texture_style_group.addButton(self.rb_texture_color)
+
+        self.rb_texture_transparent.toggled.connect(self._on_texture_style_changed)
+        self.rb_texture_color.toggled.connect(self._on_texture_style_changed)
+
+        style_layout.addWidget(self.rb_texture_transparent)
+        style_layout.addWidget(self.rb_texture_color)
+        tex_layout.addWidget(style_box)
+
         tex_layout.addWidget(QLabel("Textury:"))
 
         self.tex_grid_widget = QWidget()
@@ -145,6 +165,17 @@ class MaterialsPanel(QWidget):
             self.strength_slider.blockSignals(False)
             self.rot_slider.blockSignals(False)
 
+            style = getattr(ts, "texture_style", "transparent")
+
+            self.rb_texture_transparent.blockSignals(True)
+            self.rb_texture_color.blockSignals(True)
+
+            self.rb_texture_transparent.setChecked(style == "transparent")
+            self.rb_texture_color.setChecked(style == "color")
+
+            self.rb_texture_transparent.blockSignals(False)
+            self.rb_texture_color.blockSignals(False)
+
         self._update_preview(project)
 
     def _on_brush_size_changed(self, value: int) -> None:
@@ -183,6 +214,8 @@ class MaterialsPanel(QWidget):
         if ts is not None and ts.texture is not None:
             self._selected_texture_name = ts.texture.name
 
+        names = sorted(textures.keys())
+
         for idx, name in enumerate(sorted(textures.keys())):
             tex = textures[name].image  #RGBA
 
@@ -206,6 +239,29 @@ class MaterialsPanel(QWidget):
             r = idx // cols
             c = idx % cols
             self.tex_grid_layout.addWidget(btn, r, c)
+
+        add_idx = len(names)
+        add_btn = QToolButton()
+        add_btn.setText("+")
+        add_btn.setToolTip("Přidat texturu do projektu")
+        add_btn.setFixedSize(thumb + 10, thumb + 10)
+        add_btn.setStyleSheet("QToolButton { border: 1px dashed #777; font-weight: bold; }"
+                              "QToolButton:hover { border: 2px solid #4aa3ff; }")
+        add_btn.clicked.connect(self._on_add_texture_clicked)
+
+        r = add_idx // cols
+        c = add_idx % cols
+        self.tex_grid_layout.addWidget(add_btn, r, c)
+
+    def _on_add_texture_clicked(self) -> None:
+        """
+        kliknuté na + v zozname textúr
+        """
+        if self._controller is None:
+            return
+
+        if hasattr(self._controller, "add_texture_from_file_via_dialog"):
+            self._controller.add_texture_from_file_via_dialog(parent=self)
 
     def _select_texture(self, name: str) -> None:
         if self._controller is None or self._controller.project is None:
@@ -253,6 +309,23 @@ class MaterialsPanel(QWidget):
         qimg = QImage(stamp.data, w, h, 4 * w, QImage.Format_RGBA8888).copy()
         pix = QPixmap.fromImage(qimg).scaled(self.preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self.preview.setPixmap(pix)
+
+    def _on_texture_style_changed(self) -> None:
+        """
+        Prepína medzi transparentnou a farebnou textúrou
+        """
+        if self._controller is None:
+            return
+
+        style = "color" if self.rb_texture_color.isChecked() else "transparent"
+
+        if hasattr(self._controller, "set_texture_style"):
+            self._controller.set_texture_style(style)
+        else:
+            self._controller.texture_settings.texture_style = style
+
+        if self._controller.project is not None:
+            self._update_preview(self._controller.project)
 
     def set_brush_size_value(self, size: int) -> None:
         self.brush_slider.blockSignals(True)
