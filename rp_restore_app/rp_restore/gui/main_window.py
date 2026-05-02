@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 from pathlib import Path
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QSize
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QCloseEvent
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QMainWindow, QSizePolicy, QSlider, QSpinBox, QStatusBar, QMessageBox, QDockWidget, QToolBar, QFileDialog, QLabel, QAbstractButton, QScrollArea, QWidget
 
@@ -46,6 +46,7 @@ class MainWindow(QMainWindow):
         # self.canvas.set_controller(self.controller)
         self.canvas = None
         self.controller.set_message_callback(self._show_tool_message)
+        self.controller.set_brush_size_preview_callback(self._show_brush_size_preview)
         self.setDockNestingEnabled(True)
 
         #autofill
@@ -145,6 +146,14 @@ class MainWindow(QMainWindow):
         self._toast_timer.setSingleShot(True)
         self._toast_timer.timeout.connect(self._toast_label.hide)
 
+        #overlay kruh pre náhľad veľkosti štetca
+        self._brush_preview_label = QLabel(self)
+        self._brush_preview_label.setVisible(False)
+        self._brush_preview_label.setAlignment(Qt.AlignCenter)
+
+        self._brush_preview_timer = QTimer(self)
+        self._brush_preview_timer.setSingleShot(True)
+        self._brush_preview_timer.timeout.connect(self._brush_preview_label.hide)
 
     #----------GUI setup-----------
 
@@ -220,6 +229,18 @@ class MainWindow(QMainWindow):
         self.colorchecker_action = QAction("ColorChecker...", self)
         self.colorchecker_action.triggered.connect(self.on_colorchecker_dialog)
         edit_menu.addAction(self.colorchecker_action)
+
+        edit_menu.addSeparator()
+
+        increase_brush_action = QAction("Zvětšit štětec", self)
+        increase_brush_action.setShortcuts([QKeySequence("+"), QKeySequence("=")])
+        increase_brush_action.triggered.connect(lambda: self.controller.adjust_brush_size(1))
+        edit_menu.addAction(increase_brush_action)
+
+        decrease_brush_action = QAction("Zmenšit štětec", self)
+        decrease_brush_action.setShortcut(QKeySequence("-"))
+        decrease_brush_action.triggered.connect(lambda: self.controller.adjust_brush_size(-1))
+        edit_menu.addAction(decrease_brush_action)
 
         view_menu = menu_bar.addMenu("&View")
 
@@ -416,6 +437,47 @@ class MainWindow(QMainWindow):
 
         self._toast_timer.stop()
         self._toast_timer.start(msec)
+
+    def _show_brush_size_preview(self, brush_size: int) -> None:
+        """
+        Zobrazí dočasný kruh zodpovedajúci aktuálnej veľkosti štetca
+        -veľkosť sa prepočítava podľa zoomu canvasu
+        """
+        if self.canvas is None:
+            return
+
+        zoom = float(getattr(self.canvas, "zoom_factor", 1.0))
+        diameter = int(max(8, round(brush_size * 2 * zoom)))
+
+        #aby pri veľkom zoome nebol overlay cez celé okno
+        diameter = min(diameter, 500)
+
+        self._brush_preview_label.setText(f"{brush_size}px")
+        self._brush_preview_label.setFixedSize(QSize(diameter, diameter))
+        self._brush_preview_label.setStyleSheet(
+            f"""
+            QLabel {{
+                color: white;
+                background-color: rgba(0, 0, 0, 35);
+                border: 2px solid rgba(255, 255, 255, 210);
+                border-radius: {diameter // 2}px;
+                font-size: 11px;
+            }}
+            """
+        )
+
+        canvas_center = self.canvas.rect().center()
+        center_in_window = self.canvas.mapTo(self, canvas_center)
+
+        x = center_in_window.x() - diameter // 2
+        y = center_in_window.y() - diameter // 2
+
+        self._brush_preview_label.setGeometry(x, y, diameter, diameter)
+        self._brush_preview_label.raise_()
+        self._brush_preview_label.show()
+
+        self._brush_preview_timer.stop()
+        self._brush_preview_timer.start(2000)
 
 
     def set_current_tool(self, tool_name: str) -> None:

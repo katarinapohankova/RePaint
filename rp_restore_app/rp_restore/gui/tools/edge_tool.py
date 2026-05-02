@@ -57,25 +57,58 @@ class EdgeTool(BaseTool):
             damage_mask = getattr(project, "damage_original_mask", None)
 
         y_min = max(0, y - r)
-        y_max = min(h, y + r)
+        y_max = min(h, y + r + 1)
         x_min = max(0, x - r)
-        x_max = min(w, x + r)
+        x_max = min(w, x + r + 1)
+
+        feather = max(1.0, min(4.0, r * 0.35))
 
         for yy in range(y_min, y_max):
             for xx in range(x_min, x_max):
-                if (xx - x) ** 2 + (yy - y) ** 2 <= r * r:
-                    #orežeme na damage masku
-                    if damage_mask is not None:
-                        mh, mw = damage_mask.shape
-                        if yy >= mh or xx >= mw:
-                            continue
-                        if not damage_mask[yy, xx]:
-                            continue
-                    if self.is_erasing:
-                        layer.image[yy, xx, 3] = 0
-                        layer.image[yy, xx, 0:3] = 0
-                    else:
-                        layer.image[yy, xx, :] = self.edge_color
+                dist = ((xx - x) ** 2 + (yy - y) ** 2) ** 0.5
+                if dist > r:
+                    continue
+
+                #orezanie na damage masku
+                if damage_mask is not None:
+                    mh, mw = damage_mask.shape
+                    if yy >= mh or xx >= mw:
+                        continue
+                    if not damage_mask[yy, xx]:
+                        continue
+
+                if self.is_erasing:
+                    layer.image[yy, xx, 3] = 0
+                    layer.image[yy, xx, 0:3] = 0
+                    continue
+
+                if dist <= r - feather:
+                    alpha_factor = 1.0
+                else:
+                    alpha_factor = (r - dist) / feather
+
+                alpha_factor = max(0.0, min(1.0, alpha_factor))
+
+                src = self.edge_color.astype(np.float32).copy()
+                src_alpha = int(src[3] * alpha_factor)
+
+                #ak je alpha veľmi malá, preskočíme
+                if src_alpha <= 0:
+                    continue
+
+                dst = layer.image[yy, xx, :].astype(np.float32)
+                old_a = dst[3] / 255.0
+                new_a = src_alpha / 255.0
+
+                out_a = max(old_a, new_a)
+
+                if out_a <= 0:
+                    layer.image[yy, xx, :] = 0
+                    continue
+
+                #prekrytie farby podľa novej alpha
+                layer.image[yy, xx, 0:3] = src[0:3].astype(np.uint8)
+                layer.image[yy, xx, 3] = int(out_a * 255)
 
     def _draw_line(self, layer, x0: int, y0: int, x1: int, y1: int) -> None:
         dx = x1 - x0

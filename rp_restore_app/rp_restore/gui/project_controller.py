@@ -81,6 +81,8 @@ class ProjectController:
         self._undo_redo_changed_callback: Optional[Callable[[], None]] = None
 
         self._message_callback: Optional[Callable[[str], None]] = None
+        
+        self._brush_size_preview_callback: Optional[Callable[[int], None]] = None
 
         #debounce pre opacity refresh (aby compositing nebežal pri každom ticku slidera)
         self._opacity_debounce_timer: QTimer = QTimer()
@@ -410,6 +412,18 @@ class ProjectController:
 
     def set_brush_size(self, size: int) -> None:
         self._brush_size = max(1, int(size))
+    
+        if self.materials_panel is not None and hasattr(self.materials_panel, "set_brush_size_value"):
+            self.materials_panel.set_brush_size_value(self._brush_size)
+
+        if self._brush_size_preview_callback is not None:
+            self._brush_size_preview_callback(self._brush_size)
+
+    def adjust_brush_size(self, delta: int) -> None:
+        """
+        zväčší/zmenší brush size o delta
+        """
+        self.set_brush_size(self._brush_size + int(delta))
 
     def set_layers_panel(self, panel: LayersPanel) -> None:
         """prepojí controller s panelom vrstiev"""
@@ -515,6 +529,12 @@ class ProjectController:
         (tool warnings a pod.)
         """
         self._message_callback = callback
+
+    def set_brush_size_preview_callback(self, callback: Callable[[int], None]) -> None:
+        """
+        nastaví callback pre zobrazenie náhľadu veľkosti brush
+        """
+        self._brush_size_preview_callback = callback
 
     def show_tool_message(self, text: str) -> None:
         """

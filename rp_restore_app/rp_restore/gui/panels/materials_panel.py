@@ -30,11 +30,25 @@ class MaterialsPanel(QWidget):
         #---Brush size--
         row2 = QHBoxLayout()
         row2.addWidget(QLabel("Velikost štětce:"))
+
+        self.brush_minus_btn = QPushButton("−")
+        self.brush_minus_btn.setFixedWidth(28)
+        self.brush_minus_btn.setToolTip("Zmenšit štětec")
+        self.brush_minus_btn.clicked.connect(lambda: self._change_brush_size_by(-1))
+        row2.addWidget(self.brush_minus_btn)
+
         self.brush_slider = QSlider(Qt.Horizontal)
         self.brush_slider.setRange(1, 200)
         self.brush_slider.setValue(10)
         self.brush_slider.valueChanged.connect(self._on_brush_size_changed)
         row2.addWidget(self.brush_slider)
+
+        self.brush_plus_btn = QPushButton("+")
+        self.brush_plus_btn.setFixedWidth(28)
+        self.brush_plus_btn.setToolTip("Zvětšit štětec")
+        self.brush_plus_btn.clicked.connect(lambda: self._change_brush_size_by(1))
+        row2.addWidget(self.brush_plus_btn)
+
         layout.addLayout(row2)
 
         #---Mode--- exkluzívne
@@ -182,6 +196,19 @@ class MaterialsPanel(QWidget):
         if self._controller is None:
             return
         self._controller.set_brush_size(int(value))
+
+    def _change_brush_size_by(self, delta: int) -> None:
+        """
+        Zmena veľkosti brush tlačidlami + / - v paneli
+        """
+        if self._controller is None:
+            return
+        
+        value = int(self.brush_slider.value()) + int(delta)
+        value = max(self.brush_slider.minimum(), min(self.brush_slider.maximum(), value))
+
+        self.brush_slider.setValue(value)
+        self._controller.set_brush_size(value)
 
     #palette buttons
     def _clear_layout(self, grid: QGridLayout) -> None:
