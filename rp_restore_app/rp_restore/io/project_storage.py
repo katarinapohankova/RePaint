@@ -129,7 +129,12 @@ class ProjectSerializer:
                         else None
                     ),
                 },
-                "texture_style": getattr(project, "texture_style", "transparent")
+                "texture_style": getattr(project, "texture_style", "transparent"),
+                "brush_settings": {
+                    "hardness": float(getattr(project, "brush_hardness", 1.0)),
+                    "opacity": float(getattr(project, "brush_opacity", 1.0)),
+                    "flow": float(getattr(project, "brush_flow", 1.0)),
+                },
             }
 
             #textúry
@@ -260,4 +265,14 @@ class ProjectLoader:
                 #uložíme RGB/RGBA
                 project.textures[name] = Texture(name=name, image=img_rgba)
 
+            brush_settings = meta.get("brush_settings", {})
+            if isinstance(brush_settings, dict):
+                project.brush_hardness = float(brush_settings.get("hardness", 1.0))
+                project.brush_opacity = float(brush_settings.get("opacity", 1.0))
+                project.brush_flow = float(brush_settings.get("flow", 1.0))
+
+                project.brush_hardness = max(0.0, min(1.0, project.brush_hardness))
+                project.brush_opacity = max(0.0, min(1.0, project.brush_opacity))
+                project.brush_flow = max(0.0, min(1.0, project.brush_flow))
+                
             return project

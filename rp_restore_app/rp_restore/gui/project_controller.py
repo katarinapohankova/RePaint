@@ -49,6 +49,10 @@ class ProjectController:
 
         self.canvas: Optional[ImageCanvasWidget] = None
         self._brush_size: int = 10
+        self._brush_hardness: float = 1.0
+        self._brush_opacity: float = 1.0
+        self._brush_flow: float = 1.0
+        self._brush_allow_overlap: bool = True
 
         self.selection_region_map_cache: RegionMap | None = None
         self.selection_region_map_cache_layer_id: str | None = None
@@ -107,6 +111,10 @@ class ProjectController:
         self.texture_settings.texture_style = getattr(project, "texture_style", "transparent")
 
         self.reset_tools_to_default()
+        self._brush_hardness = float(getattr(project, "brush_hardness", 1.0))
+        self._brush_opacity = float(getattr(project, "brush_opacity", 1.0))
+        self._brush_flow = float(getattr(project, "brush_flow", 1.0))
+        self._brush_allow_ovelap = bool(getattr(project, "brush_allow_overlap", True))
         
         #default aktívna vrstva bude preferovaná BACKGROUND, inak prvú vrstvu v zozname
         self.active_layer_id = None
@@ -424,6 +432,43 @@ class ProjectController:
         zväčší/zmenší brush size o delta
         """
         self.set_brush_size(self._brush_size + int(delta))
+
+    def get_brush_allow_overlap(self) -> bool:
+        return bool(self._brush_allow_overlap)
+
+    def set_brush_allow_overlap(self, allow: bool) -> None:
+        self._brush_allow_overlap = bool(allow)
+
+        if self.project is not None:
+            self.project.brush_allow_overlap = self._brush_allow_overlap
+            self.project.mark_dirty()
+            
+    def get_brush_hardness(self) -> float:
+        return float(self._brush_hardness)
+
+    def set_brush_hardness(self, value: float) -> None:
+        self._brush_hardness = max(0.0, min(1.0, float(value)))
+        if self.project is not None:
+            self.project.brush_hardness = self._brush_hardness
+            self.project.mark_dirty()
+
+    def get_brush_opacity(self) -> float:
+        return float(self._brush_opacity)
+
+    def set_brush_opacity(self, value: float) -> None:
+        self._brush_opacity = max(0.0, min(1.0, float(value)))
+        if self.project is not None:
+            self.project.brush_opacity = self._brush_opacity
+            self.project.mark_dirty()
+
+    def get_brush_flow(self) -> float:
+        return float(self._brush_flow)
+
+    def set_brush_flow(self, value: float) -> None:
+        self._brush_flow = max(0.0, min(1.0, float(value)))
+        if self.project is not None:
+            self.project.brush_flow = self._brush_flow
+            self.project.mark_dirty()
 
     def set_layers_panel(self, panel: LayersPanel) -> None:
         """prepojí controller s panelom vrstiev"""

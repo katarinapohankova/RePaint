@@ -60,6 +60,12 @@ class Project:
         self.palette_colors: list[tuple[int, int, int, int]] = []
         self.current_color_rgba: tuple[int, int, int, int] = (0, 0, 0, 255)  #default bude čierna
 
+        #nastavenia štetca 0..1
+        self.brush_hardness: float = 1.0
+        self.brush_opacity: float = 1.0
+        self.brush_flow: float = 1.0
+        self.brush_allow_overlap: bool = True
+
         self.textures: dict[str, "Texture"] = {}
         self.texture_style: str = "transparent"
 

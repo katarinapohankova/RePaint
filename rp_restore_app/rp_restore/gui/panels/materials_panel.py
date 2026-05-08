@@ -5,7 +5,7 @@ from typing import Optional
 import numpy as np
 from PySide6.QtCore import Qt, QSize, QTimer
 from PySide6.QtGui import QColor, QPixmap, QImage, QIcon
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QSlider, QColorDialog, QGridLayout, QToolButton, QRadioButton, QButtonGroup, QGroupBox, QFrame, QScrollArea
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QSlider, QColorDialog, QGridLayout, QToolButton, QRadioButton, QButtonGroup, QGroupBox, QFrame, QScrollArea, QCheckBox
 
 from rp_restore.core.texture_brush import generate_brush_stamp
 
@@ -50,6 +50,46 @@ class MaterialsPanel(QWidget):
         row2.addWidget(self.brush_plus_btn)
 
         layout.addLayout(row2)
+
+        #---Brush / Eraser advanced settings
+        brush_box = QGroupBox("Štětec / guma")
+        brush_layout = QVBoxLayout(brush_box)
+
+        hardness_row = QHBoxLayout()
+        hardness_row.addWidget(QLabel("Tvrdost:"))
+        self.hardness_slider = QSlider(Qt.Horizontal)
+        self.hardness_slider.setRange(0, 100)
+        self.hardness_slider.setValue(100)
+        self.hardness_slider.valueChanged.connect(self._on_hardness_changed)
+        hardness_row.addWidget(self.hardness_slider)
+        brush_layout.addLayout(hardness_row)
+
+        opacity_row = QHBoxLayout()
+        opacity_row.addWidget(QLabel("Krytí:"))
+        self.opacity_slider = QSlider(Qt.Horizontal)
+        self.opacity_slider.setRange(0, 100)
+        self.opacity_slider.setValue(100)
+        self.opacity_slider.valueChanged.connect(self._on_opacity_changed)
+        opacity_row.addWidget(self.opacity_slider)
+
+        self.overlap_checkbox = QCheckBox("Vrstvit v tahu")
+        self.overlap_checkbox.setChecked(True)
+        self.overlap_checkbox.setToolTip("Pokud je zapnuto, dá se tah vrstvit, ale maximálně do hodnoty Krytí")
+        self.overlap_checkbox.toggled.connect(self._on_overlap_changed)
+        opacity_row.addWidget(self.overlap_checkbox)
+
+        brush_layout.addLayout(opacity_row)
+
+        flow_row = QHBoxLayout()
+        flow_row.addWidget(QLabel("Hustota:"))
+        self.flow_slider = QSlider(Qt.Horizontal)
+        self.flow_slider.setRange(0, 100)
+        self.flow_slider.setValue(100)
+        self.flow_slider.valueChanged.connect(self._on_flow_changed)
+        flow_row.addWidget(self.flow_slider)
+        brush_layout.addLayout(flow_row)
+
+        layout.addWidget(brush_box)
 
         #---Mode--- exkluzívne
         mode_box = QGroupBox("Režim")
@@ -163,6 +203,26 @@ class MaterialsPanel(QWidget):
             self.brush_slider.setValue(int(self._controller.get_brush_size()))
             self.brush_slider.blockSignals(False)
 
+        if hasattr(self._controller, "get_brush_hardness"):
+            self.hardness_slider.blockSignals(True)
+            self.hardness_slider.setValue(int(round(self._controller.get_brush_hardness() * 100)))
+            self.hardness_slider.blockSignals(False)
+
+        if hasattr(self._controller, "get_brush_opacity"):
+            self.opacity_slider.blockSignals(True)
+            self.opacity_slider.setValue(int(round(self._controller.get_brush_opacity() * 100)))
+            self.opacity_slider.blockSignals(False)
+
+        if hasattr(self._controller, "get_brush_allow_overlap"):
+            self.overlap_checkbox.blockSignals(True)
+            self.overlap_checkbox.setChecked(bool(self._controller.get_brush_allow_overlap()))
+            self.overlap_checkbox.blockSignals(False)
+
+        if hasattr(self._controller, "get_brush_flow"):
+            self.flow_slider.blockSignals(True)
+            self.flow_slider.setValue(int(round(self._controller.get_brush_flow() * 100)))
+            self.flow_slider.blockSignals(False)
+
         #textures
         self._rebuild_textures_grid(project)
 
@@ -196,6 +256,27 @@ class MaterialsPanel(QWidget):
         if self._controller is None:
             return
         self._controller.set_brush_size(int(value))
+
+    def _on_hardness_changed(self, value: int) -> None:
+        if self._controller is None:
+            return
+        self._controller.set_brush_hardness(value / 100.0)
+
+    def _on_opacity_changed(self, value: int) -> None:
+        if self._controller is None:
+            return
+        self._controller.set_brush_opacity(value / 100.0)
+
+    def _on_overlap_changed(self, checked: bool) -> None:
+        if self._controller is None:
+            return
+        if hasattr(self._controller, "set_brush_allow_overlap"):
+            self._controller.set_brush_allow_overlap(bool(checked))
+            
+    def _on_flow_changed(self, value: int) -> None:
+        if self._controller is None:
+            return
+        self._controller.set_brush_flow(value / 100.0)
 
     def _change_brush_size_by(self, delta: int) -> None:
         """
