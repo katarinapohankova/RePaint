@@ -305,6 +305,8 @@ class MaterialsPanel(QWidget):
         if self._controller is None:
             return
         self._controller.paint_mode = "texture" if self.rb_texture.isChecked() else "brush"
+        if hasattr(self._controller, "update_current_tool_cursor"):
+            self._controller.update_current_tool_cursor()
 
     def _apply_mode_ui(self) -> None:
         tex_enabled = self.rb_texture.isChecked()
@@ -379,24 +381,32 @@ class MaterialsPanel(QWidget):
         self._selected_texture_name = name
         self._rebuild_textures_grid(self._controller.project)
         self._update_preview(self._controller.project)
+        if hasattr(self._controller, "update_current_tool_cursor"):
+            self._controller.update_current_tool_cursor()
 
     def _on_scale_changed(self, value: int) -> None:
         if self._controller is None:
             return
         self._controller.texture_settings.scale = max(0.25, min(4.0, value / 100.0))
         self._update_preview(self._controller.project)
+        if hasattr(self._controller, "update_current_tool_cursor"):
+            self._controller.update_current_tool_cursor()
 
     def _on_strength_changed(self, value: int) -> None:
         if self._controller is None:
             return
         self._controller.texture_settings.strength = max(0.0, min(1.0, value / 100.0))
         self._update_preview(self._controller.project)
+        if hasattr(self._controller, "update_current_tool_cursor"):
+            self._controller.update_current_tool_cursor()
 
     def _on_rotation_changed(self, value: int) -> None:
         if self._controller is None:
             return
         self._controller.texture_settings.rotation_deg = float(value)
         self._update_preview(self._controller.project)
+        if hasattr(self._controller, "update_current_tool_cursor"):
+            self._controller.update_current_tool_cursor()
 
     def _update_preview(self, project) -> None:
         if self._controller is None:
@@ -434,6 +444,9 @@ class MaterialsPanel(QWidget):
 
         if self._controller.project is not None:
             self._update_preview(self._controller.project)
+
+        if hasattr(self._controller, "update_current_tool_cursor"):
+            self._controller.update_current_tool_cursor()
 
     def set_brush_size_value(self, size: int) -> None:
         self.brush_slider.blockSignals(True)

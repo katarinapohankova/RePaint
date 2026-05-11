@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QCursor
 
 
 class BaseTool:
@@ -54,3 +55,6 @@ class BaseTool:
     def on_mouse_release(self, img_x: int, img_y: int, buttons: Qt.MouseButtons, modifiers: Qt.KeyboardModifiers) -> None:
         """reakcia na uvoľnenie tlačidla myši"""
         return
+    
+    def get_cursor(self) -> QCursor | Qt.CursorShape | None:
+        return None

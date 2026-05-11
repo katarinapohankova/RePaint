@@ -319,6 +319,8 @@ class ImageCanvasWidget(QWidget):
         self.pan_y += (iy_after - iy_before)
 
         self.update()
+        if self.controller is not None and hasattr(self.controller, "update_current_tool_cursor"):
+            self.controller.update_current_tool_cursor()
 
     def fit_to_window(self) -> None:
         """

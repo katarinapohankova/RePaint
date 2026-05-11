@@ -485,3 +485,19 @@ class BrushTool(BaseTool):
             return None
 
         return (x0, y0, x1 - x0, y1 - y0)
+    
+    def get_cursor(self):
+        if self.controller is None:
+            return Qt.ArrowCursor
+
+        #size -radius v image px
+        radius = int(self.controller.get_brush_size())
+
+        #ak je texture mode, cursor = textura
+        if getattr(self.controller, "paint_mode", "brush") == "texture":
+            return self.controller._make_texture_cursor(radius)
+
+        #inak brush cursor s farbou current_color
+        rgba = self.controller.project.get_current_color_rgba() if self.controller.project is not None else (0, 0, 0, 255)
+        rgba_t = tuple(int(x) for x in rgba)
+        return self.controller._make_brush_cursor(radius, rgba_t)

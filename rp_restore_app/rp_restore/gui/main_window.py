@@ -3,8 +3,8 @@ from __future__ import annotations
 import numpy as np
 from pathlib import Path
 from PySide6.QtCore import Qt, QTimer, QSize
-from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QCloseEvent
-from PySide6.QtWidgets import QDialog, QHBoxLayout, QMainWindow, QSizePolicy, QSlider, QSpinBox, QStatusBar, QMessageBox, QDockWidget, QToolBar, QFileDialog, QLabel, QAbstractButton, QScrollArea, QWidget
+from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QCloseEvent, QCursor
+from PySide6.QtWidgets import QDialog, QHBoxLayout, QMainWindow, QSizePolicy, QSlider, QSpinBox, QStatusBar, QMessageBox, QDockWidget, QToolBar, QFileDialog, QLabel, QAbstractButton, QScrollArea, QWidget, QWidgetAction
 
 from rp_restore.config.settings import AppSettings
 from rp_restore.core.layers import Layer, LayerMeta, LayerRole
@@ -263,6 +263,23 @@ class MainWindow(QMainWindow):
         self.toggle_damage_overlay_action.triggered.connect(self.on_toggle_damage_overlay)
         view_menu.addAction(self.toggle_damage_overlay_action)
 
+        opacity_action = QWidgetAction(self)
+        opacity_slider = QSlider(Qt.Horizontal)
+        opacity_slider.setRange(0, 100)
+
+        #default 35%
+        opacity_slider.setValue(35)
+
+        opacity_slider.setToolTip("Priehľadnosť poškodených oblastí")
+
+        opacity_slider.valueChanged.connect(lambda v: self.controller.set_damage_overlay_opacity(v / 100.0))
+        opacity_action.setDefaultWidget(opacity_slider)
+        view_menu.addAction(opacity_action)
+
+        #slider aktívny len keď je overlay zapnutý
+        opacity_slider.setEnabled(self.toggle_damage_overlay_action.isChecked())
+        self.toggle_damage_overlay_action.toggled.connect(opacity_slider.setEnabled)
+
         view_menu.addSeparator()
 
         self.toggle_colorchecker_action = QAction("Použít ColorChecker korekci", self)
@@ -478,26 +495,6 @@ class MainWindow(QMainWindow):
 
         self._brush_preview_timer.stop()
         self._brush_preview_timer.start(2000)
-
-
-    def set_current_tool(self, tool_name: str) -> None:
-        """
-        Nastaví aktuálny nástroj v controllery a vizuálne ho zvýrazní v toolbar
-        """
-        self.controller.set_current_tool(tool_name)
-        self.current_tool_name = tool_name
-
-        #reset flagov
-        for name, action in (
-            ("brush", getattr(self, "action_brush", None)),
-            ("eraser", getattr(self, "action_eraser", None)),
-            ("fill", getattr(self, "action_fill", None)),
-            ("selection", getattr(self, "action_selection", None)),
-            ("edge", getattr(self, "action_edge", None)),
-            ("pipette", getattr(self, "action_pipette", None)),
-        ):
-            if action is not None:
-                action.setChecked(name == tool_name)
 
     #----------prepínanie obrazoviek-----------
 

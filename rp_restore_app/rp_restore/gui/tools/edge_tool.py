@@ -253,3 +253,8 @@ class EdgeTool(BaseTool):
         self._stroke_max_x = None
         self._stroke_max_y = None
 
+
+    def get_cursor(self):
+        if self.controller is None:
+            return Qt.CrossCursor
+        return self.controller._make_edge_cursor()

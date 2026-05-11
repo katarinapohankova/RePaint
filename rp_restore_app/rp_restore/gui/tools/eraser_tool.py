@@ -4,6 +4,7 @@ from typing import Optional
 
 import numpy as np
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 
 from rp_restore.core.history import UndoAction
 from rp_restore.core.layers import LayerRole
@@ -390,3 +391,14 @@ class EraserTool(BaseTool):
         self._stroke_min_y = None
         self._stroke_max_x = None
         self._stroke_max_y = None
+
+    def get_cursor(self):
+        if self.controller is None:
+            return Qt.ArrowCursor
+
+        radius = int(self.controller.get_brush_size())
+
+        #eraser vždy brush mode
+        rgba_t = (240, 240, 240, 255)
+        outline = QColor(255, 80, 80, 230)
+        return self.controller._make_brush_cursor(radius, rgba_t, outline)

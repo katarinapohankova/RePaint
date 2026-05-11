@@ -42,3 +42,6 @@ class PipetteTool(BaseTool):
 
         self.controller.set_current_color_rgba((r, g, b, 255))
         self.controller.show_tool_message(f"Vybraná barva pipetou: R={r}, G={g}, B={b}")
+
+    def get_cursor(self):
+        return Qt.CrossCursor

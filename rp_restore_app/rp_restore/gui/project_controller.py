@@ -4,7 +4,7 @@ from typing import Optional, Callable
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtGui import QImage
+from PySide6.QtGui import QBrush, QColor, QCursor, QImage, QPainter, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import QApplication, QDialog, QFileDialog
 from PySide6.QtCore import Qt, QTimer
 
@@ -15,7 +15,7 @@ from rp_restore.core.selection import Selection, SelectionSet
 from rp_restore.core.warnings import UserWarning
 from rp_restore.core.algorithm_runner import AlgorithmType, AlgorithmRequest, AlgorithmRunner
 from rp_restore.core.history import UndoAction
-from rp_restore.core.texture_brush import TextureSettings, Texture
+from rp_restore.core.texture_brush import TextureSettings, Texture, generate_brush_stamp
 from rp_restore.core import mask_alignment
 from rp_restore.core.auto_fill import auto_fill_regions, AutoFillRegion
 from rp_restore.core.regions import RegionMap, build_region_map
@@ -54,6 +54,8 @@ class ProjectController:
         self._brush_flow: float = 1.0
         self._brush_allow_overlap: bool = True
 
+        self._cursor_cache: dict[tuple, QCursor] = {}
+
         self.selection_region_map_cache: RegionMap | None = None
         self.selection_region_map_cache_layer_id: str | None = None
 
@@ -77,6 +79,7 @@ class ProjectController:
         self.auto_fill_preview_layer_id: str | None = None
         #vizualizácia damage masky v canvase
         self.show_damage_overlay: bool = True
+        self.damage_overlay_opacity: float = 0.35
         self.algorithm_panel = None
         self.palette_panel = None
 
@@ -115,7 +118,7 @@ class ProjectController:
         self._brush_opacity = float(getattr(project, "brush_opacity", 1.0))
         self._brush_flow = float(getattr(project, "brush_flow", 1.0))
         self._brush_allow_ovelap = bool(getattr(project, "brush_allow_overlap", True))
-        
+
         #default aktívna vrstva bude preferovaná BACKGROUND, inak prvú vrstvu v zozname
         self.active_layer_id = None
         if self.project.layers:
@@ -346,6 +349,8 @@ class ProjectController:
         if self.materials_panel is not None and hasattr(self.materials_panel, "refresh_from_project"):
             self.materials_panel.refresh_from_project(self.project)
 
+        self.update_current_tool_cursor()
+
     def add_current_color_to_palette(self) -> None:
         if self.project is None:
             return
@@ -405,6 +410,8 @@ class ProjectController:
         if self.edge_settings_panel is not None and hasattr(self.edge_settings_panel, "refresh_from_controller"):
             self.edge_settings_panel.refresh_from_controller(self)
 
+        self.update_current_tool_cursor()
+
     def get_edge_color_rgba(self) -> np.ndarray:
         return self._edge_color_rgba.copy()
 
@@ -414,6 +421,8 @@ class ProjectController:
         self._edge_color_rgba = arr
         if self.edge_settings_panel is not None and hasattr(self.edge_settings_panel, "refresh_from_controller"):
             self.edge_settings_panel.refresh_from_controller(self)
+        
+        self.update_current_tool_cursor()
 
     def get_brush_size(self) -> int:
         return int(self._brush_size)
@@ -426,6 +435,8 @@ class ProjectController:
 
         if self._brush_size_preview_callback is not None:
             self._brush_size_preview_callback(self._brush_size)
+
+        self.update_current_tool_cursor()
 
     def adjust_brush_size(self, delta: int) -> None:
         """
@@ -451,6 +462,8 @@ class ProjectController:
         if self.project is not None:
             self.project.brush_hardness = self._brush_hardness
             self.project.mark_dirty()
+        
+        self.update_current_tool_cursor()
 
     def get_brush_opacity(self) -> float:
         return float(self._brush_opacity)
@@ -460,6 +473,8 @@ class ProjectController:
         if self.project is not None:
             self.project.brush_opacity = self._brush_opacity
             self.project.mark_dirty()
+        
+        self.update_current_tool_cursor()
 
     def get_brush_flow(self) -> float:
         return float(self._brush_flow)
@@ -469,6 +484,8 @@ class ProjectController:
         if self.project is not None:
             self.project.brush_flow = self._brush_flow
             self.project.mark_dirty()
+        
+        self.update_current_tool_cursor()
 
     def set_layers_panel(self, panel: LayersPanel) -> None:
         """prepojí controller s panelom vrstiev"""
@@ -499,6 +516,8 @@ class ProjectController:
             self.current_tool = LassoTool(self, self.canvas)
         else:
             self.current_tool = None
+
+        self.update_current_tool_cursor()
 
     def reset_tools_to_default(self) -> None:
         """
@@ -551,6 +570,13 @@ class ProjectController:
         Zapne / vypne vizualizáciu damage_remaining_mask na canvase
         """
         self.show_damage_overlay = show
+        self.refresh_canvas()
+
+    def set_damage_overlay_opacity(self, opacity: float) -> None:
+        """
+        opacity je 0.0 – 1.0
+        """
+        self.damage_overlay_opacity = max(0.0, min(1.0, float(opacity)))
         self.refresh_canvas()
 
     def set_log_panel(self, panel: LogPanel) -> None:
@@ -650,7 +676,7 @@ class ProjectController:
                 if h_mask == h_img and w_mask == w_img:
                     #vybielený náhľad poškodených oblastí
                     overlay_color = np.array([255, 255, 255], dtype=np.float32)
-                    alpha = 0.6  # 0 = nič, 1 = úplne biele
+                    alpha = self.damage_overlay_opacity  # 0 = nič, 1 = úplne biele
 
                     region = remaining
                     orig = image_rgb[region].astype(np.float32)
@@ -878,7 +904,7 @@ class ProjectController:
         rgba = layer.image.astype(np.float32)
         rgb = rgba[..., :3]
         alpha = rgba[..., 3:4] / 255.0
-        bg = np.zeros_like(rgb) + 30.0  #tmavé pozadie
+        bg = np.zeros_like(rgb) + 222.0  #bledé pozadie
         out = rgb * alpha + bg * (1.0 - alpha)
         out = np.clip(out, 0, 255).astype(np.uint8)
 
@@ -1523,3 +1549,224 @@ class ProjectController:
         self.selection_region_map_cache_layer_id = layer_id
 
         return region_map
+    
+    def update_current_tool_cursor(self) -> None:
+        if self.canvas is None:
+            return
+        if self.current_tool is None:
+            self.canvas.unsetCursor()
+            return
+
+        cur = self.current_tool.get_cursor()
+        if cur is None:
+            self.canvas.unsetCursor()
+        else:
+            self.canvas.setCursor(cur)
+        
+    def _brush_radius_to_screen_px(self, radius_img_px: int) -> int:
+        zoom = 1.0
+        if self.canvas is not None and hasattr(self.canvas, "zoom_factor"):
+            zoom = float(self.canvas.zoom_factor)
+        return int(max(4, round(radius_img_px * zoom)))
+    
+    def _make_brush_cursor(self, radius_img_px: int, color_rgba: tuple[int, int, int, int], outline: QColor | None = None) -> QCursor:
+        #parametre z materials
+        hardness = float(self.get_brush_hardness())
+        opacity = float(self.get_brush_opacity())
+        flow = float(self.get_brush_flow())
+
+        r_screen = self._brush_radius_to_screen_px(radius_img_px)
+        r_screen = int(max(6, min(256, r_screen))) 
+        d = 2 * r_screen + 1
+
+        key = ("brush", d, color_rgba, round(hardness, 3), round(opacity, 3), round(flow, 3))
+        if key in self._cursor_cache:
+            return self._cursor_cache[key]
+
+        pm = QPixmap(d, d)
+        pm.fill(Qt.transparent)
+
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing, True)
+
+        #alfa -viditeľnosť
+        vis = float(opacity) * float(flow)
+        vis = max(0.02, vis) 
+        alpha_core = int(255 * vis)
+
+        #radius jadra podľa hardness
+        core_r = int(round(r_screen * hardness))
+        if core_r < 1:
+            core_r = 1
+        if core_r > r_screen:
+            core_r = r_screen
+
+        base = QColor(*color_rgba[:3])
+        for rr in range(r_screen, 0, -1):
+            if rr <= core_r:
+                a = alpha_core
+            else:
+                t = (rr - core_r) / max(1, (r_screen - core_r))
+                a = int(alpha_core * (1.0 - t))
+            c = QColor(base)
+            c.setAlpha(a)
+            p.setPen(Qt.NoPen)
+            p.setBrush(c)
+            p.drawEllipse(r_screen - rr, r_screen - rr, 2 * rr, 2 * rr)
+
+        #obrys pre viditeľnosť
+        if outline is None:
+            outline = QColor(0, 0, 0, 220)
+        pen = QPen(outline)
+        pen.setWidth(2)
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        p.drawEllipse(1, 1, d - 2, d - 2)
+
+        p.end()
+
+        cur = QCursor(pm, r_screen, r_screen)
+        self._cursor_cache[key] = cur
+        return cur
+
+    def _make_texture_cursor(self, radius_img_px: int) -> QCursor:
+        """
+        Texture kurzor -stamp sa generuje v IMAGE px (size_img), potom sa škáluje do SCREEN px podľa zoomu
+        """
+        ts = getattr(self, "texture_settings", None)
+        project = getattr(self, "project", None)
+        if ts is None or getattr(ts, "texture", None) is None or project is None:
+            #fallback na normálny brush kurzor
+            rgba = tuple(int(x) for x in self.get_current_color_rgba().tolist())
+            return self._make_brush_cursor(radius_img_px, rgba)
+
+        r_img = int(radius_img_px)
+        r_img = max(1, r_img)
+        size_img = 2 * r_img + 1
+
+        #pri zoome
+        zoom = 1.0
+        if getattr(self, "canvas", None) is not None and hasattr(self.canvas, "zoom_factor"):
+            zoom = float(self.canvas.zoom_factor)
+
+        size_screen = int(max(12, round(size_img * zoom)))
+
+        #materials parametre 
+        hardness = float(self.get_brush_hardness())
+        opacity = float(self.get_brush_opacity())
+        flow = float(self.get_brush_flow())
+
+        vis = opacity * flow
+        vis = max(0.02, vis)  #minimum
+
+        cur_color = self.get_current_color_rgba()
+        r, g, b, a = [int(x) for x in cur_color.tolist()]
+        key = (
+            "texture_cursor",
+            size_img,
+            size_screen,
+            getattr(ts.texture, "name", None),
+            round(float(ts.scale), 4),
+            round(float(ts.strength), 4),
+            round(float(getattr(ts, "rotation_deg", 0.0)), 4),
+            getattr(ts, "texture_style", "transparent"),
+            (r, g, b),
+            round(hardness, 4),
+            round(vis, 4),
+        )
+        if hasattr(self, "_cursor_cache") and key in self._cursor_cache:
+            return self._cursor_cache[key]
+
+        if hasattr(ts, "color"):
+            ts.color = (r, g, b)
+
+        #RGBA stamp v IMAGE px
+        stamp = generate_brush_stamp(ts, size=size_img, offset_x=0, offset_y=0)
+
+        stamp = np.ascontiguousarray(stamp, dtype=np.uint8)
+        h, w, ch = stamp.shape
+        if ch != 4:
+            rgba_fallback = (r, g, b, 255)
+            return self._make_brush_cursor(radius_img_px, rgba_fallback)
+
+        yy, xx = np.ogrid[:h, :w]
+        cx = w // 2
+        cy = h // 2
+        dist = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2)
+
+        core_r = max(1.0, hardness * r_img)
+        edge_r = float(r_img)
+
+        mask = np.ones((h, w), dtype=np.float32)
+        mask[dist > edge_r] = 0.0
+
+        soft_zone = (dist > core_r) & (dist <= edge_r)
+        mask[soft_zone] = (edge_r - dist[soft_zone]) / max(1e-6, (edge_r - core_r))
+
+        alpha = stamp[..., 3].astype(np.float32) / 255.0
+        alpha = alpha * mask * vis
+        stamp[..., 3] = np.clip(alpha * 255.0, 0, 255).astype(np.uint8)
+
+        bytes_per_line = stamp.strides[0]
+        qimg = QImage(stamp.data, w, h, bytes_per_line, QImage.Format_RGBA8888).copy()
+
+        pm = QPixmap.fromImage(qimg)
+
+        if size_screen != size_img:
+            pm = pm.scaled(size_screen, size_screen, Qt.KeepAspectRatio, Qt.FastTransformation)
+        
+        #obrys pre viditeľnosť
+        outline = QColor(0, 0, 0, 220)
+
+        p2 = QPainter(pm)
+        p2.setRenderHint(QPainter.Antialiasing, True)
+        pen = QPen(outline)
+        pen.setWidth(2)
+        p2.setPen(pen)
+        p2.setBrush(Qt.NoBrush)
+
+        # obrys po okraji pixmapy
+        p2.drawEllipse(1, 1, pm.width() - 2, pm.height() - 2)
+        p2.end()
+
+        cur = QCursor(pm, size_screen // 2, size_screen // 2)
+
+        if hasattr(self, "_cursor_cache"):
+            self._cursor_cache[key] = cur
+
+        return cur
+    
+    def _make_edge_cursor(self) -> QCursor:
+        size_img = int(self.get_edge_brush_size())
+        r_screen = self._brush_radius_to_screen_px(size_img)
+        r_screen = int(max(4, min(48, r_screen)))
+        d = 2 * r_screen + 1
+
+        col_arr = self.get_edge_color_rgba()
+        r, g, b, a = [int(x) for x in col_arr.tolist()]
+        key = ("edge", d, r, g, b, a)
+        if key in self._cursor_cache:
+            return self._cursor_cache[key]
+
+        pm = QPixmap(d, d)
+        pm.fill(Qt.transparent)
+
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing, True)
+
+        fill = QColor(r, g, b, 255)
+        p.setPen(Qt.NoPen)
+        p.setBrush(fill)
+        p.drawEllipse(1, 1, d - 2, d - 2)
+
+        pen = QPen(QColor(0, 0, 0, 220))
+        pen.setWidth(2)
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        p.drawEllipse(1, 1, d - 2, d - 2)
+
+        p.end()
+
+        cur = QCursor(pm, r_screen, r_screen)
+        self._cursor_cache[key] = cur
+        return cur
