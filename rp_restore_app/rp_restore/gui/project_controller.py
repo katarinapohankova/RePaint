@@ -101,6 +101,9 @@ class ProjectController:
 
         self.paint_mode: str = "brush"
 
+        self._pending_window_bbox: tuple[int,int,int,int] | None = None
+        self._pending_window_bbox_listener = None  
+
     def set_canvas(self, canvas: ImageCanvasWidget) -> None:
         self.canvas = canvas
 
@@ -561,6 +564,179 @@ class ProjectController:
 
         #refresh canvas
         self.refresh_canvas()
+
+    def get_active_selection_bbox(self) -> tuple[int, int, int, int] | None:
+        """
+        Vráti combined bbox aktuálneho selection
+        """
+        if self.active_selection is None or self.active_selection.is_empty():
+            if hasattr(self, "show_tool_message"):
+                self.show_tool_message("Nejprve vyberte poškozenou oblast")
+            return None
+        return self.active_selection.combined_bbox()
+
+    def request_manual_window_bbox(self, on_done, max_size: int = 1024) -> None:
+        """
+        Aktivuje v canvase režim ručného výberu okna
+        """
+        if self.canvas is None:
+            return
+        self.show_tool_message("Tahejte myší na plátně pro výběr okna (max 1024×1024)")
+
+        def _done(bbox):
+            #nastavíme pending bbox, aby sa dal posúvať
+            if bbox is not None:
+                self.set_pending_window_bbox(bbox)
+            on_done(bbox)
+
+        self.canvas.start_window_pick(on_done=_done, max_size=max_size)
+
+    def run_realistic_fill_window(self, window_bbox: tuple[int,int,int,int], use_mock: bool = True) -> None:
+        """
+        Spustí realistic fill pre zvolené okno
+        - ak je selection: aplikuje len do selection
+        - ak nie je selection: aplikuje do damage masky v okne
+        """
+        project = self.project
+        if project is None:
+            return
+
+        if project.damage_original_mask is None:
+            self.show_tool_message("Projekt nemá damage masku")
+            return
+
+        x, y, w, h = window_bbox
+        if w <= 0 or h <= 0:
+            self.show_tool_message("Neplatné okno")
+            return
+        if w > 1024 or h > 1024:
+            self.show_tool_message(f"Okno je příliš veliké ({w}×{h}). Maximum je 1024×1024")
+            return
+
+        dmg = project.damage_original_mask.astype(bool)
+        H, W = dmg.shape
+
+        #orezanie okna do hraníc obrazu
+        x0 = max(0, min(x, W))
+        y0 = max(0, min(y, H))
+        x1 = max(x0, min(x + w, W))
+        y1 = max(y0, min(y + h, H))
+
+        if x1 <= x0 or y1 <= y0:
+            self.show_tool_message("Okno je mimo obrazu")
+            return
+
+        ww = x1 - x0
+        wh = y1 - y0
+
+        #okno musí obsahovať aspoň 1 damage pixel
+        if not bool(dmg[y0:y1, x0:x1].any()):
+            self.show_tool_message("Zvolené okno neobsahuje žádné poškození")
+            return
+
+        #selection je voliteľná
+        has_selection = (self.active_selection is not None and not self.active_selection.is_empty())
+
+        if has_selection:
+            apply_mask_full = self.active_selection.combined_mask().astype(bool)
+            selected_mask = apply_mask_full
+        else:
+            #bez selection -aspoň damage v okne ako selected_mask
+            selected_mask = np.zeros_like(dmg, dtype=bool)
+            selected_mask[y0:y1, x0:x1] = dmg[y0:y1, x0:x1]
+
+            # a aplikovať budeme do damage (celého) — reálne len v okne
+            apply_mask_full = dmg
+
+        #vstup pre algoritmus (working composited)
+        current = project.get_current_composited_image()
+
+        #výber cieľovej PAINT vrstvy
+        target_layer = self.get_active_paint_layer_for_autofill()
+        if target_layer is None:
+            self.show_tool_message("Není dostupná paint vrstva")
+            return
+
+        #request pre runner (realistic mock)
+        request = AlgorithmRequest(
+            original_image=current,
+            current_image=current,
+            selected_mask=selected_mask,
+            remaining_mask=dmg,
+            algorithm_type=AlgorithmType.REALISTIC,
+            device="cpu",
+            mock=use_mock,
+            window_bbox=(x0, y0, ww, wh),
+        )
+
+        try:
+            result = AlgorithmRunner.run(request)
+        except Exception as e:
+            self.show_tool_message(f"Realistic fill zlyhal: {e}")
+            return
+
+        patch = result.output_patch
+        bx, by, bw, bh = result.bbox
+
+        #prevod patch na RGBA pre paint vrstvu
+        if patch.ndim != 3:
+            self.show_tool_message("Algoritmus vrátil neplatný výstup")
+            return
+
+        if patch.shape[0] != bh or patch.shape[1] != bw:
+            self.show_tool_message("Algoritmus vrátil patch se špatnými rozměry")
+            return
+
+        if patch.shape[2] == 3:
+            patch_rgba = np.zeros((bh, bw, 4), dtype=np.uint8)
+            patch_rgba[..., :3] = patch
+            patch_rgba[..., 3] = 255
+        else:
+            patch_rgba = patch.astype(np.uint8)
+
+        #maska aplikácie v okne (selection alebo damage)
+        local_apply = apply_mask_full[by:by+bh, bx:bx+bw]
+
+        before = target_layer.clone_subregion(bx, by, bw, bh)
+
+        sub = target_layer.image[by:by+bh, bx:bx+bw, :]
+        sub[local_apply] = patch_rgba[local_apply]
+
+        after = target_layer.clone_subregion(bx, by, bw, bh)
+
+        action = UndoAction(description="Algorithm realistic fill (window)", layer_id=target_layer.meta.id, layer_role=target_layer.meta.role, bbox=(bx, by, bw, bh), before=before, after=after)
+        project.undo_manager.push_action(action)
+
+        project.mark_region_as_filled_on_layer(target_layer.meta.id, selected_mask)
+
+        project.mark_dirty()
+        self.refresh_canvas()
+        self.set_pending_window_bbox(None)
+
+    def set_pending_window_bbox_listener(self, cb) -> None:
+        """Dialog si zaregistruje callback, aby dostával aktualizácie bboxu"""
+        self._pending_window_bbox_listener = cb
+
+    def clear_pending_window_bbox_listener(self) -> None:
+        self._pending_window_bbox_listener = None
+
+    def set_pending_window_bbox(self, bbox: tuple[int,int,int,int] | None) -> None:
+        self._pending_window_bbox = bbox
+        if self.canvas is not None:
+            self.canvas.set_pending_window_bbox(bbox)
+        if self._pending_window_bbox_listener is not None:
+            self._pending_window_bbox_listener(bbox)
+
+    def get_pending_window_bbox(self) -> tuple[int,int,int,int] | None:
+        return self._pending_window_bbox
+
+    def on_pending_window_bbox_changed(self, bbox: tuple[int,int,int,int]) -> None:
+        """Volá canvas pri drag"""
+        self._pending_window_bbox = bbox
+
+        #update dialógu
+        if self._pending_window_bbox_listener is not None:
+            self._pending_window_bbox_listener(bbox)
 
     def clear_selection(self) -> None:
         self.set_selection(None)

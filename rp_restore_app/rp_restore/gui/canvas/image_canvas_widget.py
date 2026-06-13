@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QPoint
-from PySide6.QtGui import QImage, QPainter, QPaintEvent, QTransform, QWheelEvent, QPen
-from PySide6.QtWidgets import QWidget
+from PySide6.QtCore import Qt, QPoint, QPointF, QRect
+from PySide6.QtGui import QColor, QImage, QPainter, QPaintEvent, QTransform, QWheelEvent, QPen
+from PySide6.QtWidgets import QWidget, QRubberBand
 
 from typing import List, Optional, TYPE_CHECKING
 
@@ -48,6 +48,18 @@ class ImageCanvasWidget(QWidget):
 
         self.lasso_preview_points: list[tuple[int, int]] = []
         self.show_lasso_preview: bool = False
+
+        #výber okna pre realistic fill
+        self._window_pick_active: bool = False
+        self._window_pick_max_size: int = 1024
+        self._window_pick_on_done = None 
+        self._window_pick_origin: QPoint | None = None
+        self._window_rubber = QRubberBand(QRubberBand.Rectangle, self)
+
+        self._pending_window_bbox: tuple[int, int, int, int] | None = None  
+        self._pending_window_dragging: bool = False
+        self._pending_window_drag_anchor: tuple[int, int] | None = None      
+        self._pending_window_drag_start_bbox: tuple[int, int, int, int] | None = None
 
     def set_image(self, image: QImage) -> None:
         """Nastaví nový obraz a prekreslí widget."""
@@ -159,6 +171,16 @@ class ImageCanvasWidget(QWidget):
             painter.setBrush(Qt.yellow)
             painter.drawEllipse(last_x - 2, last_y - 2, 4, 4)
 
+        #kreslenie pending okna (červený obrys)
+        if self._pending_window_bbox is not None:
+            x, y, w, h = self._pending_window_bbox
+            if w > 0 and h > 0:
+                pen = QPen(QColor(220, 40, 40, 255))
+                pen.setWidth(2)
+                painter.setPen(pen)
+                painter.setBrush(Qt.NoBrush)
+                painter.drawRect(x, y, w, h)
+
 
     def get_current_transform(self) -> QTransform:
         """
@@ -218,6 +240,28 @@ class ImageCanvasWidget(QWidget):
         if self.controller is None or self.current_image is None:
             return
         
+        if event.button() == Qt.LeftButton and self._pending_window_bbox is not None:
+            #prepočíta klik na image coords
+            ix, iy = self.widget_to_image(float(event.position().x()), float(event.position().y()))
+            px, py = int(ix), int(iy)
+
+            x, y, w, h = self._pending_window_bbox
+            inside = (x <= px <= x + w) and (y <= py <= y + h)
+
+            if inside:
+                #začneme drag
+                self._pending_window_dragging = True
+                self._pending_window_drag_anchor = (px, py)
+                self._pending_window_drag_start_bbox = self._pending_window_bbox
+                event.accept()
+                return
+        
+        if self._window_pick_active and event.button() == Qt.LeftButton:
+            self._window_pick_origin = event.pos()
+            self._window_rubber.setGeometry(QRect(self._window_pick_origin, self._window_pick_origin))
+            self._window_rubber.show()
+            return
+        
         if event.button() in (Qt.MiddleButton, Qt.RightButton):
             self._panning = True
             self._last_mouse_pos = event.pos()
@@ -230,6 +274,54 @@ class ImageCanvasWidget(QWidget):
 
     def mouseMoveEvent(self, event): 
         if self.controller is None or self.current_image is None:
+            return
+        
+        if self._pending_window_dragging and self._pending_window_drag_anchor is not None and self._pending_window_drag_start_bbox is not None:
+            ix, iy = self.widget_to_image(float(event.position().x()), float(event.position().y()))
+            px, py = int(ix), int(iy)
+
+            ax, ay = self._pending_window_drag_anchor
+            dx = px - ax
+            dy = py - ay
+
+            x0, y0, w0, h0 = self._pending_window_drag_start_bbox
+
+            #nový posun
+            new_x = x0 + dx
+            new_y = y0 + dy
+
+            #orezanie do hraníc obrázka
+            if self.current_image is not None:
+                img_w = self.current_image.width()
+                img_h = self.current_image.height()
+                new_x = max(0, min(new_x, img_w - w0))
+                new_y = max(0, min(new_y, img_h - h0))
+
+            self._pending_window_bbox = (new_x, new_y, w0, h0)
+            self.update()
+
+            #informuje controller (aby sa aktualizoval dialóg)
+            if self.controller is not None and hasattr(self.controller, "on_pending_window_bbox_changed"):
+                self.controller.on_pending_window_bbox_changed(self._pending_window_bbox)
+
+            event.accept()
+            return
+        
+        if self._window_pick_active and self._window_pick_origin is not None:
+            #QRubberBand kreslí vo widget coords
+            rect = QRect(self._window_pick_origin, event.pos()).normalized()
+
+            #clamp max_size v IMAGE coords (aby to zodpovedalo limitu 1024×1024)
+            #približný clamp vo widget coords podľa zoomu
+            max_w_widget = int(self._window_pick_max_size * self.zoom_factor)
+            max_h_widget = int(self._window_pick_max_size * self.zoom_factor)
+
+            if rect.width() > max_w_widget:
+                rect.setWidth(max_w_widget)
+            if rect.height() > max_h_widget:
+                rect.setHeight(max_h_widget)
+
+            self._window_rubber.setGeometry(rect)
             return
 
         if self._panning and self._last_mouse_pos is not None:
@@ -252,6 +344,20 @@ class ImageCanvasWidget(QWidget):
 
     def mouseReleaseEvent(self, event):  
         if self.controller is None or self.current_image is None:
+            return
+        
+        if event.button() == Qt.LeftButton and self._pending_window_dragging:
+            self._pending_window_dragging = False
+            self._pending_window_drag_anchor = None
+            self._pending_window_drag_start_bbox = None
+            event.accept()
+            return
+        
+        if self._window_pick_active and event.button() == Qt.LeftButton:
+            rect = self._window_rubber.geometry()
+            self._window_rubber.hide()
+            self._window_pick_origin = None
+            self._finish_window_pick(rect)
             return
         
         if self._panning and (event.button() == Qt.MiddleButton or event.button() == Qt.LeftButton):
@@ -382,4 +488,72 @@ class ImageCanvasWidget(QWidget):
         """
         self.lasso_preview_points = []
         self.show_lasso_preview = False
+        self.update()
+
+    def start_window_pick(self, on_done, max_size: int = 1024) -> None:
+        """
+        Aktivuje režim výberu obdĺžnika v canvase
+        """
+        self._window_pick_active = True
+        self._window_pick_max_size = int(max(1, max_size))
+        self._window_pick_on_done = on_done
+        self._window_pick_origin = None
+        self._window_rubber.hide()
+        self.setCursor(Qt.CrossCursor)
+
+    def cancel_window_pick(self) -> None:
+        self._window_pick_active = False
+        self._window_pick_origin = None
+        self._window_rubber.hide()
+        self.unsetCursor()
+        self._window_pick_on_done = None
+
+    def _finish_window_pick(self, rect_widget: QRect) -> None:
+        """
+        Prevedie QRect z widget coords na bbox v image coords a zavolá callback
+        """
+        if self.current_image is None:
+            self.cancel_window_pick()
+            return
+
+        #rohy vo widget coords
+        x0w = rect_widget.left()
+        y0w = rect_widget.top()
+        x1w = rect_widget.right()
+        y1w = rect_widget.bottom()
+
+        ix0, iy0 = self.widget_to_image(float(x0w), float(y0w))
+        ix1, iy1 = self.widget_to_image(float(x1w), float(y1w))
+
+        x0 = int(min(ix0, ix1))
+        y0 = int(min(iy0, iy1))
+        x1 = int(max(ix0, ix1))
+        y1 = int(max(iy0, iy1))
+
+        w = max(0, x1 - x0)
+        h = max(0, y1 - y0)
+
+        #clamp do hraníc obrázka
+        img_w = self.current_image.width()
+        img_h = self.current_image.height()
+
+        x0 = max(0, min(x0, img_w))
+        y0 = max(0, min(y0, img_h))
+        w = max(0, min(w, img_w - x0))
+        h = max(0, min(h, img_h - y0))
+
+        bbox = (x0, y0, w, h)
+
+        cb = self._window_pick_on_done
+        self.cancel_window_pick()
+
+        if cb is not None:
+            cb(bbox if (w > 0 and h > 0) else None)
+
+    def set_pending_window_bbox(self, bbox: tuple[int, int, int, int] | None) -> None:
+        """Nastaví (alebo zruší) okno, ktoré sa kreslí a dá sa posúvať."""
+        self._pending_window_bbox = bbox
+        self._pending_window_dragging = False
+        self._pending_window_drag_anchor = None
+        self._pending_window_drag_start_bbox = None
         self.update()

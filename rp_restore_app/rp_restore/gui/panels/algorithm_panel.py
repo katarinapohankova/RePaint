@@ -3,9 +3,11 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton
+from PySide6.QtCore import Qt
 
 from rp_restore.core.selection import Selection, SelectionSet
 from rp_restore.core.algorithm_runner import AlgorithmType
+from rp_restore.gui.realistic_fill_dialog import RealisticFillDialog
 
 
 class AlgorithmPanel(QWidget):
@@ -26,9 +28,6 @@ class AlgorithmPanel(QWidget):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(8)
 
-        # title = QLabel("Externé algoritmy")
-        # layout.addWidget(title)
-
         self.info_label = QLabel("Žiadna vybraná oblasť.")
         layout.addWidget(self.info_label)
 
@@ -42,22 +41,23 @@ class AlgorithmPanel(QWidget):
         self.btn_realistic.clicked.connect(self._on_realistic_clicked)
         self.btn_texture.clicked.connect(self._on_texture_clicked)
 
-        self._set_buttons_enabled(False)
+        self.btn_realistic.setEnabled(True)
+        self.btn_texture.setEnabled(False)
 
     def set_controller(self, controller: object) -> None:
         self._controller = controller
-
-    def _set_buttons_enabled(self, enabled: bool) -> None:
-        self.btn_realistic.setEnabled(enabled)
-        self.btn_texture.setEnabled(enabled)
 
     def refresh_from_selection(self, selection_set: SelectionSet | None) -> None:
         """
         Zavolá controller, keď sa zmení active_selection
         """
+        #Realistic je vždy dostupné
+        self.btn_realistic.setEnabled(True)
+
+        #Texture iba keď selection existuje
         if selection_set is None or selection_set.is_empty():
             self.info_label.setText("Žiadna vybraná oblasť")
-            self._set_buttons_enabled(False)
+            self.btn_texture.setEnabled(False)
             return
 
         x, y, w, h = selection_set.combined_bbox()
@@ -67,15 +67,31 @@ class AlgorithmPanel(QWidget):
             self.info_label.setText(f"Vybrán region: {w}×{h}")
         else:
             self.info_label.setText(f"Vybráno {num_regions} oblastí, společný bbox: {w}×{h}")
-        self._set_buttons_enabled(True)
-        self.current_selection_bbox = (x, y, w, h)
+        self.btn_texture.setEnabled(True)
 
     def _on_realistic_clicked(self) -> None:
         if self._controller is None:
             return
-        if hasattr(self._controller, "run_algorithm_on_selection"):
-            #zatiaľ v mock režime
-            self._controller.run_algorithm_on_selection(AlgorithmType.REALISTIC, use_mock=True)
+
+        dlg = RealisticFillDialog(controller=self._controller, parent=self) 
+        dlg.setAttribute(Qt.WA_DeleteOnClose, True)
+
+        def _on_accept() -> None:
+            res = dlg.get_result()
+            if res is None:
+                return
+            
+            res = dlg.get_result()
+            if res is None:
+                return
+
+            if hasattr(self._controller, "run_realistic_fill_window"):
+                self._controller.run_realistic_fill_window(res.bbox, use_mock=res.use_mock)
+
+        dlg.accepted.connect(_on_accept)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
 
     def _on_texture_clicked(self) -> None:
         if self._controller is None:
