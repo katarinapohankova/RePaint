@@ -332,6 +332,14 @@ class MainWindow(QMainWindow):
         self.tool_action_group.addAction(self.eraser_action)
         self.tool_actions[self.eraser_action] = "eraser"
 
+        self.blend_action = QAction("Blend", self)
+        self.blend_action.setShortcut("D")
+        self.blend_action.setCheckable(True)
+        self.blend_action.setToolTip("Rozmazává na aktivní paint vrstvě, nebo i na background vrstvě")
+        self.tools_toolbar.addAction(self.blend_action)
+        self.tool_action_group.addAction(self.blend_action)
+        self.tool_actions[self.blend_action] = "blend"
+
         self.fill_action = QAction("Výplň", self)
         self.fill_action.setShortcut("F")
         self.fill_action.setCheckable(True)
@@ -360,6 +368,14 @@ class MainWindow(QMainWindow):
         self.tools_toolbar.addAction(self.edge_action)
         self.tool_action_group.addAction(self.edge_action)
         self.tool_actions[self.edge_action] = "edge"
+
+        self.edge_blend_action = QAction("Zjemnit hranu", self)
+        self.edge_blend_action.setShortcut("M")
+        self.edge_blend_action.setCheckable(True)
+        self.edge_blend_action.setToolTip("Zjemní přechod přes existující hranu a odstraní ji")
+        self.tools_toolbar.addAction(self.edge_blend_action)
+        self.tool_action_group.addAction(self.edge_blend_action)
+        self.tool_actions[self.edge_blend_action] = "edge_blend"
 
         self.pipette_action = QAction("Pipeta", self)
         self.pipette_action.setShortcut("I")    #eyedropper

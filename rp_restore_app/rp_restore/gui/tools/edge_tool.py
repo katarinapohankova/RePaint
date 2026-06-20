@@ -22,7 +22,7 @@ class EdgeTool(BaseTool):
 
         self.is_drawing: bool = False
         self.is_erasing: bool = False
-        self.brush_size: int = controller.get_edge_brush_size()
+        self.brush_size = 1
         self.edge_color: np.ndarray = controller.get_edge_color_rgba()
         #self._reset_stroke_state()
 
@@ -122,7 +122,6 @@ class EdgeTool(BaseTool):
             self._draw_dot(layer, xx, yy)
 
     def _update_settings_from_controller(self) -> None:
-        self.brush_size = self.controller.get_edge_brush_size()
         self.edge_color = self.controller.get_edge_color_rgba()
 
     def on_mouse_press(self, img_x: int, img_y: int, buttons: Qt.MouseButtons, modifiers: Qt.KeyboardModifiers) -> None:

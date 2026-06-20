@@ -37,6 +37,7 @@ class UndoAction:
 
     is_undone: bool = False  #použijeme neskôr pri "undo on this layer"
 
+    extra_actions: Optional[List["UndoAction"]] = None
 
 class GlobalUndoManager:
     """
@@ -74,8 +75,26 @@ class GlobalUndoManager:
 
         self._sync_paint_layer_masks_after_apply(project, action)
 
+        if action.extra_actions:
+            for sub_action in action.extra_actions:
+                sub_layer = self._find_layer(project, sub_action.layer_id)
+                if sub_layer is None:
+                    continue
+                x, y, w, h = sub_action.bbox
+                sub_layer.restore_subregion(x, y, sub_action.before)
+                self._sync_paint_layer_masks_after_apply(project, sub_action)
+
     def _apply_after(self, project: "Project", action: UndoAction) -> None:
         """Aplikuje 'after' pixely akcie (používa sa pri redo)"""
+        if action.extra_actions:
+            for sub_action in action.extra_actions:
+                sub_layer = self._find_layer(project, sub_action.layer_id)
+                if sub_layer is None:
+                    continue
+                x, y, w, h = sub_action.bbox
+                sub_layer.restore_subregion(x, y, sub_action.after)
+                self._sync_paint_layer_masks_after_apply(project, sub_action)
+
         layer = self._find_layer(project, action.layer_id)
         if layer is None:
             return

@@ -30,6 +30,8 @@ from rp_restore.gui.tools.selection_tool import SelectionTool
 from rp_restore.gui.tools.edge_tool import EdgeTool
 from rp_restore.gui.tools.pipette_tool import PipetteTool
 from rp_restore.gui.tools.lasso_tool import LassoTool
+from rp_restore.gui.tools.edge_blend_tool import EdgeBlendTool
+from rp_restore.gui.tools.blend_tool import BlendTool
 from rp_restore.gui.mask_alignment_dialog import MaskAlignmentDialog
 from rp_restore.io import image_io
 from rp_restore.io.image_io import load_working_image
@@ -54,6 +56,9 @@ class ProjectController:
         self._brush_flow: float = 1.0
         self._brush_allow_overlap: bool = True
 
+        self._blend_strength: float = 0.5
+        self._blend_source_mode: str = "active_paint"
+
         self._cursor_cache: dict[tuple, QCursor] = {}
 
         self.selection_region_map_cache: RegionMap | None = None
@@ -63,8 +68,9 @@ class ProjectController:
         self.palette_panel = None
         
         self.edge_settings_panel: Optional[object] = None
-        self._edge_brush_size: int = 2
+        self._edge_brush_size: int = 1 #bude natvrdo nastavená na 1 bez možnosti zmeny
         self._edge_color_rgba: np.ndarray = np.array([0, 0, 0, 255], dtype=np.uint8)
+        self._edge_blend_buffer: int = 5
         #neskôr pribudnú ďalšie ako layers_panel, log_panel, tools_panel...
         self.active_layer_id: Optional[str] = None
         self.layers_panel: Optional[LayersPanel] = None
@@ -405,16 +411,6 @@ class ProjectController:
             self.materials_panel.refresh_from_project(self.project)
 
     #-Edge -hrúbka a farba
-    def get_edge_brush_size(self) -> int:
-        return int(self._edge_brush_size)
-
-    def set_edge_brush_size(self, size: int) -> None:
-        self._edge_brush_size = max(1, int(size))
-        if self.edge_settings_panel is not None and hasattr(self.edge_settings_panel, "refresh_from_controller"):
-            self.edge_settings_panel.refresh_from_controller(self)
-
-        self.update_current_tool_cursor()
-
     def get_edge_color_rgba(self) -> np.ndarray:
         return self._edge_color_rgba.copy()
 
@@ -439,6 +435,16 @@ class ProjectController:
         if self._brush_size_preview_callback is not None:
             self._brush_size_preview_callback(self._brush_size)
 
+        self.update_current_tool_cursor()
+
+    def get_edge_blend_buffer(self) -> int:
+        return int(self._edge_blend_buffer)
+
+    def set_edge_blend_buffer(self, value: int) -> None:
+        self._edge_blend_buffer = max(1, min(100, int(value)))
+
+        if self.edge_settings_panel is not None and hasattr(self.edge_settings_panel, "refresh_from_controller"):
+            self.edge_settings_panel.refresh_from_controller(self)
         self.update_current_tool_cursor()
 
     def adjust_brush_size(self, delta: int) -> None:
@@ -490,6 +496,29 @@ class ProjectController:
         
         self.update_current_tool_cursor()
 
+    def get_blend_strength(self) -> float:
+        return float(self._blend_strength)
+
+    def set_blend_strength(self, value: float) -> None:
+        self._blend_strength = max(0.0, min(1.0, float(value)))
+
+        if self.materials_panel is not None and hasattr(self.materials_panel, "set_blend_strength_value"):
+            self.materials_panel.set_blend_strength_value(int(round(self._blend_strength * 100)))
+        self.update_current_tool_cursor()
+
+    def get_blend_source_mode(self) -> str:
+        return getattr(self, "_blend_source_mode", "active_paint")
+
+
+    def set_blend_source_mode(self, mode: str) -> None:
+        if mode not in ("active_paint", "background_and_active_paint"):
+            mode = "active_paint"
+
+        self._blend_source_mode = mode
+
+        if self.materials_panel is not None and hasattr(self.materials_panel, "set_blend_source_mode_value"):
+            self.materials_panel.set_blend_source_mode_value(mode)
+
     def set_layers_panel(self, panel: LayersPanel) -> None:
         """prepojí controller s panelom vrstiev"""
         self.layers_panel = panel
@@ -517,6 +546,10 @@ class ProjectController:
             self.current_tool = PipetteTool(self, self.canvas)
         elif tool_type == "lasso":
             self.current_tool = LassoTool(self, self.canvas)
+        elif tool_type == "edge_blend":
+            self.current_tool = EdgeBlendTool(self, self.canvas)
+        elif tool_type == "blend":
+            self.current_tool = BlendTool(self, self.canvas)
         else:
             self.current_tool = None
 
@@ -825,7 +858,7 @@ class ProjectController:
                 self.set_active_layer(edge_id)
 
         #brush tool -> PAINT vrstva 
-        if tool_type == "brush":
+        if tool_type in ("brush", "edge_blend", "blend"):
             if self.active_layer_id is not None:
                 active = self.get_layer_by_id(self.active_layer_id)
                 if active is not None and active.meta.role == LayerRole.PAINT:
@@ -1913,7 +1946,7 @@ class ProjectController:
         return cur
     
     def _make_edge_cursor(self) -> QCursor:
-        size_img = int(self.get_edge_brush_size())
+        size_img = 1
         r_screen = self._brush_radius_to_screen_px(size_img)
         r_screen = int(max(4, min(48, r_screen)))
         d = 2 * r_screen + 1
@@ -1940,6 +1973,107 @@ class ProjectController:
         p.setPen(pen)
         p.setBrush(Qt.NoBrush)
         p.drawEllipse(1, 1, d - 2, d - 2)
+
+        p.end()
+
+        cur = QCursor(pm, r_screen, r_screen)
+        self._cursor_cache[key] = cur
+        return cur
+
+
+    def _make_edge_blend_cursor(self) -> QCursor:
+        """
+        kurzor pre nástroj zjemnenia hrany:
+        - malý vnútorný kruh -stroke_radius EdgeBlendToolu, teda kde sa zachytáva hrana
+        - veľký vonkajší kruh -buffer zjemnenia z EdgeSettingsPanelu
+        """
+        buffer = int(self.get_edge_blend_buffer())
+
+        stroke_radius = 2
+        if self.current_tool is not None and hasattr(self.current_tool, "stroke_radius"):
+            stroke_radius = int(getattr(self.current_tool, "stroke_radius", 2))
+
+        inner_radius_img = max(1, stroke_radius)
+        outer_radius_img = max(inner_radius_img + 1, buffer)
+
+        inner_radius_screen = int(max(3, min(128, self._brush_radius_to_screen_px(inner_radius_img))))
+        outer_radius_screen = int(max(inner_radius_screen + 4, min(300, self._brush_radius_to_screen_px(outer_radius_img))))
+
+        d = 2 * outer_radius_screen + 7
+        center = d // 2
+
+        key = ("edge_blend", inner_radius_screen, outer_radius_screen)
+        if key in self._cursor_cache:
+            return self._cursor_cache[key]
+
+        pm = QPixmap(d, d)
+        pm.fill(Qt.transparent)
+
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing, True)
+
+        #veľký kruh
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(QColor(0, 0, 0, 80)))
+        p.drawEllipse(center - outer_radius_screen, center - outer_radius_screen, 2 * outer_radius_screen, 2 * outer_radius_screen)
+
+        pen_outer = QPen(QColor(180, 180, 180, 140))
+        pen_outer.setWidth(2)
+        pen_outer.setStyle(Qt.DashLine)
+        p.setPen(pen_outer)
+        p.setBrush(Qt.NoBrush)
+        p.drawEllipse(center - outer_radius_screen, center - outer_radius_screen, 2 * outer_radius_screen, 2 * outer_radius_screen)
+
+        #malý kruh
+        pen_inner = QPen(QColor(255, 255, 255, 240))
+        pen_inner.setWidth(2)
+        p.setPen(pen_inner)
+        p.setBrush(QBrush(QColor(0, 0, 0, 90)))
+        p.drawEllipse(center - inner_radius_screen, center - inner_radius_screen, 2 * inner_radius_screen, 2 * inner_radius_screen)
+
+        p.end()
+
+        cur = QCursor(pm, center, center)
+        self._cursor_cache[key] = cur
+        return cur
+    
+    def _make_blend_cursor(self, radius_img_px: int) -> QCursor:
+        """
+        kurzor pre Blend nástroj
+        """
+        r_screen = self._brush_radius_to_screen_px(radius_img_px)
+        r_screen = int(max(6, min(256, r_screen)))
+        d = 2 * r_screen + 1
+
+        strength = float(self.get_blend_strength())
+        key = ("blend", d, round(strength, 3))
+
+        if key in self._cursor_cache:
+            return self._cursor_cache[key]
+
+        pm = QPixmap(d, d)
+        pm.fill(Qt.transparent)
+
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing, True)
+
+        # polopriehľadný neutrálny kurzor
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(QColor(0, 0, 0, 45)))
+        p.drawEllipse(1, 1, d - 2, d - 2)
+
+        pen = QPen(QColor(255, 255, 255, 210))
+        pen.setWidth(2)
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        p.drawEllipse(1, 1, d - 2, d - 2)
+
+        #vnútorný krížik
+        pen2 = QPen(QColor(255, 255, 255, 150))
+        pen2.setWidth(1)
+        p.setPen(pen2)
+        p.drawLine(r_screen, max(2, r_screen - 5), r_screen, min(d - 2, r_screen + 5))
+        p.drawLine(max(2, r_screen - 5), r_screen, min(d - 2, r_screen + 5), r_screen)
 
         p.end()
 

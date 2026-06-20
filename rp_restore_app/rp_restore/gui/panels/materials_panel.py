@@ -52,7 +52,7 @@ class MaterialsPanel(QWidget):
         layout.addLayout(row2)
 
         #---Brush / Eraser advanced settings
-        brush_box = QGroupBox("Štětec / guma")
+        brush_box = QGroupBox("Štětec / guma / blend")
         brush_layout = QVBoxLayout(brush_box)
 
         hardness_row = QHBoxLayout()
@@ -90,6 +90,37 @@ class MaterialsPanel(QWidget):
         brush_layout.addLayout(flow_row)
 
         layout.addWidget(brush_box)
+
+        blend_row = QHBoxLayout()
+        blend_row.addWidget(QLabel("Síla blendu:"))
+
+        self.blend_strength_slider = QSlider(Qt.Horizontal)
+        self.blend_strength_slider.setRange(0, 100)
+        self.blend_strength_slider.setValue(50)
+        self.blend_strength_slider.valueChanged.connect(self._on_blend_strength_changed)
+
+        blend_row.addWidget(self.blend_strength_slider)
+        brush_layout.addLayout(blend_row)
+
+        blend_source_row = QHBoxLayout()
+        blend_source_row.addWidget(QLabel("Zdroj blendu:"))
+
+        self.rb_blend_active_paint = QRadioButton("Paint vrstva")
+        self.rb_blend_bg_and_paint = QRadioButton("Background + paint vrstva")
+        self.rb_blend_active_paint.setChecked(True)
+
+        self.blend_source_group = QButtonGroup(self)
+        self.blend_source_group.setExclusive(True)
+        self.blend_source_group.addButton(self.rb_blend_active_paint)
+        self.blend_source_group.addButton(self.rb_blend_bg_and_paint)
+
+        blend_source_row.addWidget(self.rb_blend_active_paint)
+        blend_source_row.addWidget(self.rb_blend_bg_and_paint)
+
+        brush_layout.addLayout(blend_source_row)
+
+        self.rb_blend_active_paint.toggled.connect(self._on_blend_source_mode_changed)
+        self.rb_blend_bg_and_paint.toggled.connect(self._on_blend_source_mode_changed)
 
         #---Mode--- exkluzívne
         mode_box = QGroupBox("Režim")
@@ -196,7 +227,15 @@ class MaterialsPanel(QWidget):
     def refresh_from_project(self, project) -> None:
         if self._controller is None or project is None:
             return
+        #blend
+        if hasattr(self._controller, "get_blend_strength"):
+            self.blend_strength_slider.blockSignals(True)
+            self.blend_strength_slider.setValue(int(round(self._controller.get_blend_strength() * 100)))
+            self.blend_strength_slider.blockSignals(False)
 
+        if hasattr(self._controller, "get_blend_source_mode"):
+            self.set_blend_source_mode_value(self._controller.get_blend_source_mode())
+            
         #brush size
         if hasattr(self._controller, "get_brush_size"):
             self.brush_slider.blockSignals(True)
@@ -452,3 +491,35 @@ class MaterialsPanel(QWidget):
         self.brush_slider.blockSignals(True)
         self.brush_slider.setValue(int(size))
         self.brush_slider.blockSignals(False)
+
+    def _on_blend_strength_changed(self, value: int) -> None:
+        if self._controller is None:
+            return
+
+        if hasattr(self._controller, "set_blend_strength"):
+            self._controller.set_blend_strength(value / 100.0)
+
+    def set_blend_strength_value(self, value: int) -> None:
+        self.blend_strength_slider.blockSignals(True)
+        self.blend_strength_slider.setValue(int(value))
+        self.blend_strength_slider.blockSignals(False)
+
+    def _on_blend_source_mode_changed(self) -> None:
+        if self._controller is None:
+            return
+
+        mode = "background_and_active_paint" if self.rb_blend_bg_and_paint.isChecked() else "active_paint"
+
+        if hasattr(self._controller, "set_blend_source_mode"):
+            self._controller.set_blend_source_mode(mode)
+
+
+    def set_blend_source_mode_value(self, mode: str) -> None:
+        self.rb_blend_active_paint.blockSignals(True)
+        self.rb_blend_bg_and_paint.blockSignals(True)
+
+        self.rb_blend_active_paint.setChecked(mode == "active_paint")
+        self.rb_blend_bg_and_paint.setChecked(mode == "background_and_active_paint")
+
+        self.rb_blend_active_paint.blockSignals(False)
+        self.rb_blend_bg_and_paint.blockSignals(False)

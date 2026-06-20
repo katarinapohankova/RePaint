@@ -49,6 +49,8 @@ class ImageCanvasWidget(QWidget):
         self.lasso_preview_points: list[tuple[int, int]] = []
         self.show_lasso_preview: bool = False
 
+        self.setFocusPolicy(Qt.StrongFocus)
+
         #výber okna pre realistic fill
         self._window_pick_active: bool = False
         self._window_pick_max_size: int = 1024
@@ -239,6 +241,8 @@ class ImageCanvasWidget(QWidget):
     def mousePressEvent(self, event):  
         if self.controller is None or self.current_image is None:
             return
+        
+        self.setFocus(Qt.MouseFocusReason)
         
         if event.button() == Qt.LeftButton and self._pending_window_bbox is not None:
             #prepočíta klik na image coords

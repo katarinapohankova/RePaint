@@ -25,19 +25,16 @@ class EdgeSettingsPanel(QWidget):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(6)
 
-        # title = QLabel("Hrany")
-        # layout.addWidget(title)
-
-        #hrúbka
-        row_width = QHBoxLayout()
-        lbl_width = QLabel("hrúbka (px):")
-        self.spin_width = QSpinBox()
-        self.spin_width.setRange(1, 50)
-        self.spin_width.setValue(2)
-        self.spin_width.setToolTip("Nastaví hrúbku hrany (štětce pro Edge nástroj)")
-        row_width.addWidget(lbl_width)
-        row_width.addWidget(self.spin_width)
-        layout.addLayout(row_width)
+        #šírka zjemnenia hrany
+        row_blend = QHBoxLayout()
+        lbl_blend = QLabel("Zjemnění (px):")
+        self.spin_blend_width = QSpinBox()
+        self.spin_blend_width.setRange(1, 100)
+        self.spin_blend_width.setValue(5)
+        self.spin_blend_width.setToolTip("Šířka pásu, ve kterém se zjemní přechod po odstranění hrany")
+        row_blend.addWidget(lbl_blend)
+        row_blend.addWidget(self.spin_blend_width)
+        layout.addLayout(row_blend)
 
         #farba hrany
         row_color = QHBoxLayout()
@@ -62,10 +59,11 @@ class EdgeSettingsPanel(QWidget):
         layout.addWidget(self.btn_add_to_palette)
         layout.addStretch(1)
 
-        self.spin_width.valueChanged.connect(self._on_width_changed)
         self.btn_change_color.clicked.connect(self._on_change_color_clicked)
         self.btn_use_current.clicked.connect(self._on_use_current_clicked)
         self.btn_add_to_palette.clicked.connect(self._on_add_edge_color_to_palette_clicked)
+        self.spin_blend_width.valueChanged.connect(self._on_blend_width_changed)
+        self.spin_blend_width.editingFinished.connect(self._on_blend_width_editing_finished)
 
     #prepojenie s controllerom
 
@@ -82,10 +80,11 @@ class EdgeSettingsPanel(QWidget):
         if not hasattr(controller, "get_edge_brush_size") or not hasattr(controller, "get_edge_color_rgba"):
             return
 
-        width = controller.get_edge_brush_size()
-        self.spin_width.blockSignals(True)
-        self.spin_width.setValue(width)
-        self.spin_width.blockSignals(False)
+        if hasattr(controller, "get_edge_blend_buffer"):
+            blend_width = controller.get_edge_blend_buffer()
+            self.spin_blend_width.blockSignals(True)
+            self.spin_blend_width.setValue(blend_width)
+            self.spin_blend_width.blockSignals(False)
 
         color_arr = controller.get_edge_color_rgba()
         r, g, b, a = [int(x) for x in color_arr.tolist()]
@@ -99,12 +98,6 @@ class EdgeSettingsPanel(QWidget):
         )
 
     #---reakcie na UI---
-
-    def _on_width_changed(self, value: int) -> None:
-        if self._controller is None:
-            return
-        if hasattr(self._controller, "set_edge_brush_size"):
-            self._controller.set_edge_brush_size(value)
 
     def _on_change_color_clicked(self) -> None:
         if self._controller is None:
@@ -157,3 +150,21 @@ class EdgeSettingsPanel(QWidget):
 
         if hasattr(self._controller, "add_color_to_palette_rgba"):
             self._controller.add_color_to_palette_rgba((r, g, b, a), avoid_duplicates=True)
+
+    def _on_blend_width_changed(self, value: int) -> None:
+        if self._controller is None:
+            return
+
+        if hasattr(self._controller, "set_edge_blend_buffer"):
+            self._controller.set_edge_blend_buffer(value)
+
+    def _on_blend_width_editing_finished(self) -> None:
+        """
+        po potvrdení hodnoty Enterom alebo stratou focus vrátime focus na canvas, aby zase fungovali klávesové skratky
+        """
+        if self._controller is None:
+            return
+
+        canvas = getattr(self._controller, "canvas", None)
+        if canvas is not None:
+            canvas.setFocus(Qt.OtherFocusReason)
