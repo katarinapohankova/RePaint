@@ -339,15 +339,14 @@ class BrushTool(BaseTool):
 
         # po prvom bode – sync filled mask pre malú oblasť
         project = self.controller.project
-        if project is not None and self.controller.show_damage_overlay:
-            r = int(self.brush_size)
-            first_bbox = (img_x - r, img_y - r, 2 * r + 1, 2 * r + 1)
-            first_bbox = self._clamp_bbox_to_layer(layer, first_bbox)
-            if first_bbox is not None:
-                project.sync_layer_filled_mask_from_alpha(layer.meta.id, first_bbox)
+        r = int(self.brush_size)
+        fallback_bbox = (img_x - r, img_y - r, 2 * r + 1, 2 * r + 1)
+        first_bbox = self._clamp_bbox_to_layer(layer, fallback_bbox)
+        if project is not None and first_bbox is not None:
+            project.sync_layer_filled_mask_from_alpha(layer.meta.id, first_bbox, mode="assign")
 
         #a refresh
-        self.controller.refresh_canvas_region(first_bbox if first_bbox is not None else (img_x - r, img_y - r, 2*r+1, 2*r+1))
+        self.controller.refresh_canvas_region(first_bbox if first_bbox is not None else fallback_bbox)
 
         self._stroke_min_x = img_x
         self._stroke_max_x = img_x
@@ -385,7 +384,7 @@ class BrushTool(BaseTool):
             return
         
         project = self.controller.project
-        if project is not None and self.controller.show_damage_overlay:
+        if project is not None:
             project.sync_layer_filled_mask_from_alpha(layer.meta.id, step_bbox)
 
         #refresh tej oblasti

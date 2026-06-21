@@ -10,6 +10,16 @@ class Texture:
     name: str
     image: np.ndarray  #RGB alebo RGBA uint8
 
+    is_generated: bool = False  #true pri textúrach, ktoré vznikli uložením deformácie inej textúry
+    #názov pôvodnej textúry, z ktorej táto deformovaná textúra vznikla
+    source_texture_name: str | None = None
+    #deformácia, s ktorou bola táto textúra vytvorená
+    deformation_scale_x: float = 1.0
+    deformation_scale_y: float = 1.0
+
+    #pôvodné textúry sa deformovať dajú, uložené deformované varianty už nie
+    can_deform: bool = True
+
 
 @dataclass
 class TextureSettings:
@@ -18,6 +28,8 @@ class TextureSettings:
     color: Tuple[int, int, int] = (255, 255, 255)  #tint RGB
     strength: float = 1.0  #0..1
     rotation_deg: float = 0.0
+    deformation_scale_x: float = 1.0
+    deformation_scale_y: float = 1.0
     # "transparent" -cez alfa ako doteraz / "color" -plná textúra s odtieňmi
     texture_style: str = "transparent"
 
@@ -25,6 +37,47 @@ class TextureSettings:
 def _to_gray01(tex_rgb: np.ndarray) -> np.ndarray:
     return (0.299 * tex_rgb[..., 0] + 0.587 * tex_rgb[..., 1] + 0.114 * tex_rgb[..., 2])
 
+def clear_texture_cache(settings: TextureSettings) -> None:
+    """
+    Vymaže internú cache transformovanej textúry (po výbere inej textúry)
+    """
+    for attr in ("_cached_tex_key", "_cached_tex_rgb"):
+        if hasattr(settings, attr):
+            delattr(settings, attr)
+
+def deform_texture_image(image: np.ndarray, deformation_scale_x: float, deformation_scale_y: float) -> np.ndarray:
+    """
+    Vytvorí novú textúru natiahnutím pôvodného obrázka v osi x / y
+    """
+    if image.ndim != 3:
+        raise ValueError("Texture must be HxWxC")
+
+    if image.shape[2] not in (3, 4):
+        raise ValueError("Texture must have 3 or 4 channels")
+
+    h, w = image.shape[:2]
+
+    sx = float(max(0.05, deformation_scale_x))
+    sy = float(max(0.05, deformation_scale_y))
+
+    new_w = max(1, int(round(w * sx)))
+    new_h = max(1, int(round(h * sy)))
+
+    try:
+        import cv2
+
+        resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+        return resized.astype(np.uint8)
+    except Exception:
+        from PIL import Image
+
+        if image.shape[2] == 4:
+            pil = Image.fromarray(image.astype(np.uint8), mode="RGBA")
+        else:
+            pil = Image.fromarray(image.astype(np.uint8), mode="RGB")
+
+        pil = pil.resize((new_w, new_h), resample=Image.BILINEAR)
+        return np.array(pil).astype(np.uint8)
 
 def _get_transformed_texture_rgb(settings: TextureSettings) -> np.ndarray:
     """
@@ -34,26 +87,50 @@ def _get_transformed_texture_rgb(settings: TextureSettings) -> np.ndarray:
     if settings.texture is None:
         raise ValueError("TextureSettings.texture is None")
 
-    tex = settings.texture.image
-    if tex.ndim != 3:
-        raise ValueError("Texture must be HxWxC")
-    if tex.shape[2] == 4:
-        tex = tex[..., :3]
+    source = settings.texture.image
 
-    key = (id(tex), float(settings.scale), float(settings.rotation_deg))
+    if source.ndim != 3:
+        raise ValueError("Texture must be HxWxC")
+
+    if source.shape[2] not in (3, 4):
+        raise ValueError("Texture must have 3 or 4 channels")
+
+    texture_can_deform = bool(getattr(settings.texture, "can_deform", True))
+
+    effective_deform_x = (
+        float(getattr(settings, "deformation_scale_x", 1.0))
+        if texture_can_deform
+        else 1.0
+    )
+    effective_deform_y = (
+        float(getattr(settings, "deformation_scale_y", 1.0))
+        if texture_can_deform
+        else 1.0
+    )
+
+    key = id(source), tuple(source.shape), str(source.dtype), float(settings.scale), float(effective_deform_x), float(effective_deform_y), float(settings.rotation_deg)
 
     cached_key = getattr(settings, "_cached_tex_key", None)
     cached_tex = getattr(settings, "_cached_tex_rgb", None)
     if cached_key == key and cached_tex is not None:
         return cached_tex
 
+    if source.shape[2] == 4:
+        tex = source[..., :3]
+    else:
+        tex = source
+
     tex_f = tex.astype(np.float32) / 255.0
     th, tw, _ = tex_f.shape
 
     #scale: >1 = väčšie zrno (textúra sa "zväčší"), <1 = hustejšie
     scale = float(max(0.05, settings.scale))
-    new_w = max(1, int(round(tw * scale)))
-    new_h = max(1, int(round(th * scale)))
+
+    deform_x = float(max(0.05, getattr(settings, "deformation_scale_x", 1.0)))
+    deform_y = float(max(0.05, getattr(settings, "deformation_scale_y", 1.0)))
+
+    new_w = max(1, int(round(tw * scale * deform_x)))
+    new_h = max(1, int(round(th * scale * deform_y)))
 
     #resize
     if new_w != tw or new_h != th:

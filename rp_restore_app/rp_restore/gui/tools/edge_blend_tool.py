@@ -105,20 +105,6 @@ class EdgeBlendTool(BaseTool):
             yy = int(round(y0 + t * dy))
             self._stamp(xx, yy)
 
-    def _edge_union_alpha(self, edge_layers: List[Layer]) -> Optional[np.ndarray]:
-        """
-        Spojí alfa kanály všetkých EDGE vrstiev do jednej bool masky
-        """
-        if not edge_layers:
-            return None
-
-        union = None
-        for layer in edge_layers:
-            alpha = layer.image[..., 3] > 0
-            union = alpha if union is None else (union | alpha)
-
-        return union
-
     def on_mouse_press(self, img_x: int, img_y: int, buttons: Qt.MouseButtons, modifiers: Qt.KeyboardModifiers) -> None:
         if not (buttons & Qt.LeftButton):
             return
@@ -128,11 +114,11 @@ class EdgeBlendTool(BaseTool):
             self.controller.show_tool_message("Projekt nemá damage masku")
             return
 
-        if self._active_paint_layer is None:
+        if self._active_paint_layer() is None:
             self.controller.show_tool_message("Zjemnění hrany lze použít pouze na PAINT vrstvě")
             return
 
-        if not project.get_edge_layers():
+        if project.get_edge_layer() is None:
             self.controller.show_tool_message("V projektu není žádná EDGE vrstva s hranou")
             return
 
@@ -181,12 +167,12 @@ class EdgeBlendTool(BaseTool):
             return
 
         damage = project.damage_original_mask.astype(bool)
-        edge_layers = project.get_edge_layers()
-        edge_union = self._edge_union_alpha(edge_layers)
+        edge_layer = project.get_edge_layer()
 
-        if edge_union is None:
+        if edge_layer is None:
             self._reset()
             return
+        edge_union = edge_layer.image[..., 3] > 0
 
         stroke = self._stroke_mask > 0
         edge_hit = stroke & edge_union & damage
@@ -226,13 +212,12 @@ class EdgeBlendTool(BaseTool):
 
         #dočasne odstránime hranu z composited náhľadu, aby sa EDGE čiara nedostala do výpočtu zjemnenia
         prev_cc = getattr(project, "color_correction_enabled", False)
-        saved_edge_subimages = []
+        saved_edge_sub = None
 
         try:
-            for edge_layer in edge_layers:
-                edge_sub = edge_layer.image[y0:y1, x0:x1, :]
-                saved_edge_subimages.append((edge_layer, edge_sub.copy()))
-                edge_sub[edge_hit_c] = 0
+            edge_sub = edge_layer.image[y0:y1, x0:x1, :]
+            saved_edge_sub = edge_sub.copy()
+            edge_sub[edge_hit_c] = 0
 
             project.color_correction_enabled = False
             comp = project.composited_region((x0, y0, bw, bh))
@@ -240,8 +225,8 @@ class EdgeBlendTool(BaseTool):
         finally:
             project.color_correction_enabled = prev_cc
 
-            for edge_layer, saved_sub in saved_edge_subimages:
-                edge_layer.image[y0:y1, x0:x1, :] = saved_sub
+            if saved_edge_sub is not None:
+                edge_layer.image[y0:y1, x0:x1, :] = saved_edge_sub
 
         band_c, blended_c = blend_across_edge(composited_rgb=comp, damage_mask=damage_c, edge_remove_mask=edge_hit_c, filled_mask=filled_c, buffer=buffer)
 
@@ -253,11 +238,8 @@ class EdgeBlendTool(BaseTool):
         #pripravíme zmeny EDGE vrstvy
         extra_edge_actions: list[UndoAction] = []
 
-        for edge_layer in edge_layers:
-            sub_hit = edge_hit[y0:y1, x0:x1]
-            if not sub_hit.any():
-                continue
-
+        sub_hit = edge_hit[y0:y1, x0:x1]
+        if sub_hit.any():
             before_edge = edge_layer.image[y0:y1, x0:x1, :].copy()
 
             edge_sub = edge_layer.image[y0:y1, x0:x1, :]
@@ -265,10 +247,8 @@ class EdgeBlendTool(BaseTool):
 
             after_edge = edge_layer.image[y0:y1, x0:x1, :].copy()
 
-            if np.array_equal(before_edge, after_edge):
-                continue
-
-            extra_edge_actions.append(UndoAction(description="Zjemnění hrany – odstranění hrany", layer_id=edge_layer.meta.id, layer_role=edge_layer.meta.role, bbox=(x0, y0, bw, bh), before=before_edge, after=after_edge))
+            if not np.array_equal(before_edge, after_edge):
+                extra_edge_actions.append(UndoAction(description="Zjemnění hrany – odstranění hrany", layer_id=edge_layer.meta.id, layer_role=edge_layer.meta.role, bbox=(x0, y0, bw, bh), before=before_edge, after=after_edge))
 
             project.on_edge_layer_modified(edge_layer.meta.id)
 

@@ -354,7 +354,7 @@ class EraserTool(BaseTool):
     def _sync_mask_and_refresh(self, layer, bbox: tuple[int, int, int, int]) -> None:
         project = self.controller.project
         if project is not None:
-            project.sync_layer_filled_mask_from_alpha(layer.meta.id, bbox)
+            project.sync_layer_filled_mask_from_alpha(layer.meta.id, bbox, mode="assign")
 
         if hasattr(self.controller, "refresh_canvas_region"):
             self.controller.refresh_canvas_region(bbox)

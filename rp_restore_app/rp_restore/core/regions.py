@@ -78,7 +78,7 @@ class RegionMapChanges:
     changed_mask: np.ndarray
     merged_regions: List[Tuple[Set[int], int, Tuple[int, int, int, int]]]
 
-def build_region_map(damage_mask: np.ndarray, edge_layers: List[Layer]) -> RegionMap:
+def build_region_map(damage_mask: np.ndarray, edge_layer: Layer | None = None) -> RegionMap:
     """
     Rozdelí damage_mask na spojité oblasti, pričom hrany (EDGE vrstvy)
     fungujú ako bariéry
@@ -93,10 +93,8 @@ def build_region_map(damage_mask: np.ndarray, edge_layers: List[Layer]) -> Regio
 
     #bariéry z EDGE vrstiev
     barrier = np.zeros_like(damage_mask, dtype=bool)
-    for edge_layer in edge_layers:
-        #pixel je bariéra, ak má alfa > 0
-        alpha = edge_layer.image[..., 3]
-        barrier |= alpha > 0
+    if edge_layer is not None and edge_layer.image.shape[:2] == (h, w):
+        barrier = edge_layer.image[..., 3] > 0
 
     #len tie pixely, ktoré sú poškodené a nie sú bariéra
     valid = damage_mask & ~barrier

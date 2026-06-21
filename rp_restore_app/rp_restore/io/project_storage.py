@@ -143,7 +143,15 @@ class ProjectSerializer:
                 for name, tex in project.textures.items():
                     rel = f"textures/{name}.png"
                     zf.writestr(rel, _encode_png(tex.image))
-                    textures_meta.append({"name": name, "filename": rel})
+                    textures_meta.append({
+                        "name": name,
+                        "filename": rel,
+                        "is_generated": bool(getattr(tex, "is_generated", False)),
+                        "source_texture_name": getattr(tex, "source_texture_name", None),
+                        "deformation_scale_x": float(getattr(tex, "deformation_scale_x", 1.0)),
+                        "deformation_scale_y": float(getattr(tex, "deformation_scale_y", 1.0)),
+                        "can_deform": bool(getattr(tex, "can_deform", True)),
+                    })
 
             meta["textures"] = textures_meta
 
@@ -263,7 +271,15 @@ class ProjectLoader:
                     continue
                 img_rgba = _decode_png_to_rgba(data)
                 #uložíme RGB/RGBA
-                project.textures[name] = Texture(name=name, image=img_rgba)
+                project.textures[name] = Texture(
+                    name=name,
+                    image=img_rgba,
+                    is_generated=bool(info.get("is_generated", False)),
+                    source_texture_name=info.get("source_texture_name"),
+                    deformation_scale_x=float(info.get("deformation_scale_x", 1.0)),
+                    deformation_scale_y=float(info.get("deformation_scale_y", 1.0)),
+                    can_deform=bool(info.get("can_deform", True)),
+                )
 
             brush_settings = meta.get("brush_settings", {})
             if isinstance(brush_settings, dict):

@@ -22,6 +22,11 @@ class MaterialsPanel(QWidget):
         self._controller = None
         self._current_color = QColor(0, 0, 0)
         self._selected_texture_name: str | None = None
+        self._texture_buttons: dict[str, QToolButton] = {}
+
+        self._deform_status_timer = QTimer(self)
+        self._deform_status_timer.setSingleShot(True)
+        self._deform_status_timer.timeout.connect(self._clear_deformation_status)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -206,6 +211,58 @@ class MaterialsPanel(QWidget):
         r3.addWidget(self.rot_slider)
         tex_layout.addLayout(r3)
 
+        #deformácia textúry
+        deform_box = QGroupBox("Deformace textury")
+        deform_layout = QVBoxLayout(deform_box)
+
+        dx_row = QHBoxLayout()
+        dx_row.addWidget(QLabel("Šířka:"))
+
+        self.deform_x_slider = QSlider(Qt.Horizontal)
+        self.deform_x_slider.setRange(25, 400)
+        self.deform_x_slider.setValue(100)
+        self.deform_x_slider.valueChanged.connect(self._on_deform_x_changed)
+        dx_row.addWidget(self.deform_x_slider)
+
+        self.deform_x_value_label = QLabel("100 %")
+        self.deform_x_value_label.setFixedWidth(48)
+        dx_row.addWidget(self.deform_x_value_label)
+
+        deform_layout.addLayout(dx_row)
+
+        dy_row = QHBoxLayout()
+        dy_row.addWidget(QLabel("Výška:"))
+
+        self.deform_y_slider = QSlider(Qt.Horizontal)
+        self.deform_y_slider.setRange(25, 400)
+        self.deform_y_slider.setValue(100)
+        self.deform_y_slider.valueChanged.connect(self._on_deform_y_changed)
+        dy_row.addWidget(self.deform_y_slider)
+
+        self.deform_y_value_label = QLabel("100 %")
+        self.deform_y_value_label.setFixedWidth(48)
+        dy_row.addWidget(self.deform_y_value_label)
+
+        deform_layout.addLayout(dy_row)
+
+        deform_btn_row = QHBoxLayout()
+
+        self.btn_reset_deformation = QPushButton("Resetovat deformaci")
+        self.btn_reset_deformation.clicked.connect(self._on_reset_deformation_clicked)
+        deform_btn_row.addWidget(self.btn_reset_deformation)
+
+        self.btn_add_deformed_texture = QPushButton("Přidat mezi textury")
+        self.btn_add_deformed_texture.clicked.connect(self._on_add_deformed_texture_clicked)
+        deform_btn_row.addWidget(self.btn_add_deformed_texture)
+
+        deform_layout.addLayout(deform_btn_row)
+
+        self.deformation_status_label = QLabel("")
+        self.deformation_status_label.setStyleSheet("color: #d66;")
+        deform_layout.addWidget(self.deformation_status_label)
+
+        tex_layout.addWidget(deform_box)
+
         tex_layout.addWidget(QLabel("Náhled:"))
         self.preview = QLabel()
         self.preview.setFixedSize(180, 180)
@@ -271,12 +328,19 @@ class MaterialsPanel(QWidget):
             self.scale_slider.blockSignals(True)
             self.strength_slider.blockSignals(True)
             self.rot_slider.blockSignals(True)
+            self.deform_x_slider.blockSignals(True)
+            self.deform_y_slider.blockSignals(True)
             self.scale_slider.setValue(int(round(float(ts.scale) * 100)))
             self.strength_slider.setValue(int(round(float(ts.strength) * 100)))
             self.rot_slider.setValue(int(round(float(getattr(ts, "rotation_deg", 0.0)))))
+            self.deform_x_slider.setValue(int(round(float(getattr(ts, "deformation_scale_x", 1.0)) * 100)))
+            self.deform_y_slider.setValue(int(round(float(getattr(ts, "deformation_scale_y", 1.0)) * 100)))
             self.scale_slider.blockSignals(False)
             self.strength_slider.blockSignals(False)
             self.rot_slider.blockSignals(False)
+            self.deform_x_slider.blockSignals(False)
+            self.deform_y_slider.blockSignals(False)
+            self._update_deformation_value_labels()
 
             style = getattr(ts, "texture_style", "transparent")
 
@@ -288,6 +352,8 @@ class MaterialsPanel(QWidget):
 
             self.rb_texture_transparent.blockSignals(False)
             self.rb_texture_color.blockSignals(False)
+
+            self._update_deformation_controls_state()
 
         self._update_preview(project)
 
@@ -355,6 +421,8 @@ class MaterialsPanel(QWidget):
     def _rebuild_textures_grid(self, project) -> None:
         self._clear_layout(self.tex_grid_layout)
 
+        self._texture_buttons = {}
+
         textures = getattr(project, "textures", {})
         cols = 4
         thumb = 64
@@ -363,10 +431,11 @@ class MaterialsPanel(QWidget):
         if ts is not None and ts.texture is not None:
             self._selected_texture_name = ts.texture.name
 
-        names = sorted(textures.keys())
+        names = list(textures.keys())
 
-        for idx, name in enumerate(sorted(textures.keys())):
-            tex = textures[name].image  #RGBA
+        for idx, name in enumerate(names):
+            tex_obj = textures[name]
+            tex = tex_obj.image #RGBA
 
             h, w, _ = tex.shape
             qimg = QImage(tex.data, w, h, 4 * w, QImage.Format_RGBA8888).copy()
@@ -376,7 +445,14 @@ class MaterialsPanel(QWidget):
             btn.setIcon(QIcon(pix))
             btn.setIconSize(QSize(thumb, thumb))
             btn.setFixedSize(thumb + 10, thumb + 10)
-            btn.setToolTip(name)
+            tooltip = name
+            if getattr(tex_obj, "is_generated", False):
+                src = getattr(tex_obj, "source_texture_name", None)
+                sx = int(round(float(getattr(tex_obj, "deformation_scale_x", 1.0)) * 100))
+                sy = int(round(float(getattr(tex_obj, "deformation_scale_y", 1.0)) * 100))
+                tooltip += f"\nVznikla z: {src}\nŠířka: {sx}%\nVýška: {sy}%"
+
+            btn.setToolTip(tooltip)
 
             if self._selected_texture_name == name:
                 btn.setStyleSheet("border: 2px solid #4aa3ff;")
@@ -384,6 +460,7 @@ class MaterialsPanel(QWidget):
                 btn.setStyleSheet("border: 1px solid #555;")
 
             btn.clicked.connect(lambda checked=False, n=name: self._select_texture(n))
+            self._texture_buttons[name] = btn
 
             r = idx // cols
             c = idx % cols
@@ -415,10 +492,17 @@ class MaterialsPanel(QWidget):
     def _select_texture(self, name: str) -> None:
         if self._controller is None or self._controller.project is None:
             return
-        tex = self._controller.project.textures.get(name)
-        self._controller.texture_settings.texture = tex
         self._selected_texture_name = name
+        self._clear_deformation_status()
+
+        if hasattr(self._controller, "set_texture"):
+            self._controller.set_texture(name)
+        else:
+            tex = self._controller.project.textures.get(name)
+            self._controller.texture_settings.texture = tex
+
         self._rebuild_textures_grid(self._controller.project)
+        self._update_deformation_controls_state()
         self._update_preview(self._controller.project)
         if hasattr(self._controller, "update_current_tool_cursor"):
             self._controller.update_current_tool_cursor()
@@ -446,6 +530,134 @@ class MaterialsPanel(QWidget):
         self._update_preview(self._controller.project)
         if hasattr(self._controller, "update_current_tool_cursor"):
             self._controller.update_current_tool_cursor()
+    
+    def _update_deformation_value_labels(self) -> None:
+        self.deform_x_value_label.setText(f"{int(self.deform_x_slider.value())} %")
+        self.deform_y_value_label.setText(f"{int(self.deform_y_slider.value())} %")
+        
+    def _update_deformation_controls_state(self) -> None:
+        if self._controller is None:
+            return
+
+        ts = getattr(self._controller, "texture_settings", None)
+        tex = getattr(ts, "texture", None)
+
+        can_deform = bool(tex is not None and getattr(tex, "can_deform", True))
+
+        self.deform_x_slider.setEnabled(can_deform)
+        self.deform_y_slider.setEnabled(can_deform)
+        self.btn_reset_deformation.setEnabled(can_deform)
+
+        has_non_default = False
+        if ts is not None:
+            has_non_default = abs(float(getattr(ts, "deformation_scale_x", 1.0)) - 1.0) > 1e-6 or abs(float(getattr(ts, "deformation_scale_y", 1.0)) - 1.0) > 1e-6
+
+        self.btn_add_deformed_texture.setEnabled(can_deform and has_non_default)
+
+        if tex is not None and not can_deform:
+            self.deformation_status_label.setText("Tato textura je již uložená deformovaná varianta a nedá se dále deformovat")
+        elif not self.deformation_status_label.text().startswith("Taková deformovaná textura"):
+            self.deformation_status_label.setText("")
+
+    def _set_deformation_status(self, text: str, timeout_ms: int = 2200) -> None:
+        self.deformation_status_label.setText(text)
+
+        if timeout_ms > 0:
+            self._deform_status_timer.start(timeout_ms)
+
+    def _clear_deformation_status(self) -> None:
+        self.deformation_status_label.setText("")
+
+        if self._controller is not None:
+            self._update_deformation_controls_state()
+
+    def _flash_texture_button(self, texture_name: str) -> None:
+        btn = self._texture_buttons.get(texture_name)
+        if btn is None:
+            return
+
+        btn.setStyleSheet("border: 2px solid red;")
+
+        def _restore() -> None:
+            if self._selected_texture_name == texture_name:
+                btn.setStyleSheet("border: 2px solid #4aa3ff;")
+            else:
+                btn.setStyleSheet("border: 1px solid #555;")
+
+        QTimer.singleShot(700, _restore)
+
+    def _on_deform_x_changed(self, value: int) -> None:
+        if self._controller is None:
+            return
+
+        if hasattr(self._controller, "set_texture_deformation"):
+            self._controller.set_texture_deformation(scale_x=value / 100.0)
+
+        self._update_deformation_controls_state()
+        self._update_deformation_value_labels()
+        self._update_preview(self._controller.project)
+
+        if hasattr(self._controller, "update_current_tool_cursor"):
+            self._controller.update_current_tool_cursor()
+
+    def _on_deform_y_changed(self, value: int) -> None:
+        if self._controller is None:
+            return
+
+        if hasattr(self._controller, "set_texture_deformation"):
+            self._controller.set_texture_deformation(scale_y=value / 100.0)
+
+        self._update_deformation_controls_state()
+        self._update_deformation_value_labels()
+        self._update_preview(self._controller.project)
+
+        if hasattr(self._controller, "update_current_tool_cursor"):
+            self._controller.update_current_tool_cursor()
+
+    def _on_reset_deformation_clicked(self) -> None:
+        if self._controller is None:
+            return
+
+        if hasattr(self._controller, "reset_texture_deformation"):
+            self._controller.reset_texture_deformation()
+
+        self.deform_x_slider.blockSignals(True)
+        self.deform_y_slider.blockSignals(True)
+
+        self._update_deformation_value_labels()
+
+        self.deform_x_slider.setValue(100)
+        self.deform_y_slider.setValue(100)
+
+        self.deform_x_slider.blockSignals(False)
+        self.deform_y_slider.blockSignals(False)
+
+        self._update_deformation_controls_state()
+        self._update_preview(self._controller.project)
+
+        if hasattr(self._controller, "update_current_tool_cursor"):
+            self._controller.update_current_tool_cursor()
+
+    def _on_add_deformed_texture_clicked(self) -> None:
+        if self._controller is None:
+            return
+
+        if not hasattr(self._controller, "add_current_deformed_texture_to_project"):
+            return
+
+        success, new_name, duplicate_name = self._controller.add_current_deformed_texture_to_project()
+
+        if duplicate_name is not None:
+            self._set_deformation_status("Taková deformovaná textura už existuje")
+            self._flash_texture_button(duplicate_name)
+            return
+
+        if not success or new_name is None:
+            return
+
+        self._selected_texture_name = new_name
+        self.refresh_from_project(self._controller.project)
+        self._set_deformation_status("Deformovaná textura byla přidána mezi textury")
 
     def _update_preview(self, project) -> None:
         if self._controller is None:

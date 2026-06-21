@@ -118,9 +118,14 @@ class Project:
         """Vráti zoznam všetkých PAINT vrstiev"""
         return [l for l in self.layers if l.meta.role == LayerRole.PAINT]
 
-    def get_edge_layers(self) -> List[Layer]:
-        """Vráti zoznam všetkých EDGE vrstiev"""
-        return [l for l in self.layers if l.meta.role == LayerRole.EDGE]
+    def get_edge_layer(self) -> Optional[Layer]:
+        """
+        Vráti jedinú EDGE vrstvu projektu (projekt bude obsahovať iba jednu EDGE vrstvu)
+        """
+        for layer in self.layers:
+            if layer.meta.role == LayerRole.EDGE:
+                return layer
+        return None
 
     def get_layer_damage_remaining_mask(self, layer_id: str) -> np.ndarray | None:
         """
@@ -193,18 +198,17 @@ class Project:
             #alpha blending: out = rgb * a + base * (1 - a)
             base = rgb * alpha + base * (1.0 - alpha)
 
-        edge_layers = sorted(self.get_edge_layers(), key=lambda l: l.meta.order)
-        for layer in edge_layers:
-            if not layer.meta.visible:
-                continue
-            rgba = layer.image.astype(np.float32)
+        edge_layer = self.get_edge_layer()
 
-            if rgba.shape[0] != h or rgba.shape[1] != w:
-                continue
-            rgb = rgba[..., :3]
-            alpha = (rgba[..., 3:4] / 255.0) * float(layer.meta.opacity)
-            alpha = np.clip(alpha, 0.0, 1.0)
-            base = rgb * alpha + base * (1.0 - alpha)
+        if edge_layer is not None and edge_layer.meta.visible:
+            rgba = edge_layer.image.astype(np.float32)
+
+            if rgba.shape[0] == h and rgba.shape[1] == w:
+                rgb = rgba[..., :3]
+                alpha = (rgba[..., 3:4] / 255.0) * float(edge_layer.meta.opacity)
+                alpha = np.clip(alpha, 0.0, 1.0)
+
+                base = rgb * alpha + base * (1.0 - alpha)
         
         #výsledok pretypujeme na uint8
         out = np.clip(base, 0, 255).astype(np.uint8)
@@ -240,35 +244,43 @@ class Project:
         if x1 <= x0 or y1 <= y0:
             return np.zeros((1, 1, 3), dtype=np.uint8)
 
-        #začneme s RGB z background v danom výseku
-        base = bg_layer.image[y0:y1, x0:x1, :3].astype(np.float32)
+        #ak je background skrytý, podklad je čierny/prázdny
+        if not bg_layer.meta.visible:
+            base = np.zeros((y1 - y0, x1 - x0, 3), dtype=np.float32)
+        else:
+            base = bg_layer.image[y0:y1, x0:x1, :3].astype(np.float32)
 
         #PAINT vrstvy
-        for layer in self.get_paint_layers():
+        paint_layers = sorted(self.get_paint_layers(), key=lambda l: l.meta.order)
+
+        for layer in paint_layers:
             if not layer.meta.visible:
                 continue
+
             rgba = layer.image[y0:y1, x0:x1, :].astype(np.float32)
             if rgba.size == 0:
                 continue
+
             rgb = rgba[..., :3]
-            alpha = rgba[..., 3:4] / 255.0 * float(layer.meta.opacity) #(h, w, 1)
+            alpha = rgba[..., 3:4] / 255.0 * float(layer.meta.opacity)
             alpha = np.clip(alpha, 0.0, 1.0)
+
             base = rgb * alpha + base * (1.0 - alpha)
 
-        #EDGE vrstvy
-        for layer in self.get_edge_layers():
-            if not layer.meta.visible:
-                continue
-            rgba = layer.image
-            if rgba.shape[0] != H or rgba.shape[1] != W:
-                continue
-            sub = rgba[y0:y1, x0:x1, :].astype(np.float32)
-            if sub.size == 0:
-                continue
-            rgb = sub[..., :3]
-            alpha = sub[..., 3:4] / 255.0 * float(layer.meta.opacity)
-            alpha = np.clip(alpha, 0.0, 1.0)
-            base = rgb * alpha + base * (1.0 - alpha)
+        # #EDGE vrstvy
+        edge_layer = self.get_edge_layer()
+        if edge_layer is not None and edge_layer.meta.visible:
+            rgba = edge_layer.image
+
+            if rgba.shape[0] == H and rgba.shape[1] == W:
+                sub = rgba[y0:y1, x0:x1, :].astype(np.float32)
+
+                if sub.size > 0:
+                    rgb = sub[..., :3]
+                    alpha = sub[..., 3:4] / 255.0 * float(edge_layer.meta.opacity)
+                    alpha = np.clip(alpha, 0.0, 1.0)
+
+                    base = rgb * alpha + base * (1.0 - alpha)
 
         out = np.clip(base, 0, 255).astype(np.uint8)
 
@@ -323,10 +335,10 @@ class Project:
         """
         vráti masku zostávajúcich (nevyplnených) poškodených miest
         """
-        if self.damage_original_mask is None or self.damage_filled_mask is None:
+        if self.damage_original_mask is None:
             return None
 
-        filled = self._compute_filled_mask_from_layers()
+        filled = self._compute_filled_mask_from_layers(visible_only=False)
         if filled is None:
             #žiadne paint vrstvy –všetko pôvodné poškodenie je remaining
             return self.damage_original_mask.copy()
@@ -336,6 +348,20 @@ class Project:
         #synchronizácia damage_filled_mask (nech je aktuálna)
         self.damage_filled_mask = filled.copy()
         return remaining
+    
+    def get_damage_remaining_mask_for_visible_layers(self) -> np.ndarray | None:
+        """
+        Vráti masku poškodenia pre overlay
+        -táto verzia berie do úvahy iba viditeľné PAINT vrstvy, aby overlay zodpovedal tomu, čo je aktuálne v composited image
+        """
+        if self.damage_original_mask is None:
+            return None
+
+        filled_visible = self._compute_filled_mask_from_layers(visible_only=True)
+        if filled_visible is None:
+            return self.damage_original_mask.copy()
+
+        return self.damage_original_mask & ~filled_visible
 
     def mark_region_as_filled(self, region_mask: np.ndarray) -> None:
         """
@@ -377,8 +403,8 @@ class Project:
             return None
 
         if region_map is None:
-            edge_layers = self.get_edge_layers()
-            region_map = build_region_map(mask, edge_layers)
+            edge_layer = self.get_edge_layer()
+            region_map = build_region_map(mask, edge_layer)
 
         label_image = region_map.label_image
         region_id = int(label_image[y, x])
@@ -423,8 +449,8 @@ class Project:
 
         #ak region_map náhodou nie je region map, vytvoríme ho
         if region_map is None:
-            edge_layers = self.get_edge_layers()
-            region_map = build_region_map(mask, edge_layers)
+            edge_layer = self.get_edge_layer()
+            region_map = build_region_map(mask, edge_layer)
 
         #rasterizácia polygonu do bool masky
         poly_img = Image.new("L", (w, h), 0)
@@ -478,11 +504,11 @@ class Project:
         if damage_rem is None:
             return
 
-        edge_layers = self.get_edge_layers()
-        if not edge_layers:
+        edge_layer = self.get_edge_layer()
+        if edge_layer is None:
             return
 
-        new_map = build_region_map(damage_rem, edge_layers)
+        new_map = build_region_map(damage_rem, edge_layer)
 
         #prvýkrát len nastavíme cache
         if self._cached_region_map is None:
@@ -532,7 +558,7 @@ class Project:
                 affected_regions=region_refs,
             )
 
-    def _compute_filled_mask_from_layers(self) -> np.ndarray | None:
+    def _compute_filled_mask_from_layers(self, visible_only: bool = False) -> np.ndarray | None:
         """
         Vypočíta, ktoré pixely poškodenia sú aktuálne vyplnené
         podľa PAINT vrstiev (alfa > 0)
@@ -544,18 +570,15 @@ class Project:
         filled_union = np.zeros((h, w), dtype=bool)
 
         for layer in self.get_paint_layers():
+            if visible_only and not layer.meta.visible:
+                continue
             if layer.image.shape[0] != h or layer.image.shape[1] != w:
                 continue
             #preferujeme per-layer filled masku ak existuje
-            layers_mask = getattr(layer, "damage_filled_mask", None)
-            if layers_mask is not None:
-                if layers_mask.shape != (h, w):
-                    continue
-                filled_union |= layers_mask.astype(bool)
-                continue
-            
             alpha_filled = (layer.image[..., 3] > 0) & self.damage_original_mask
             filled_union |= alpha_filled
+
+            layer.damage_filled_mask = alpha_filled.astype(bool)
         
         filled_union &= self.damage_original_mask
         return filled_union

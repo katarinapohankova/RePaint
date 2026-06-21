@@ -8,6 +8,20 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QListWidget, QListWi
 
 from rp_restore.core.project_model import Project
 
+class ClickablePreviewLabel(QLabel):
+    """
+    QLabel, ktorý vyšle signál po kliknutí
+    -na malý náhľad vrstvy
+    """
+    clicked = Signal()
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+            event.accept()
+            return
+
+        super().mousePressEvent(event)
 
 class LayersPanel(QWidget):
     """
@@ -18,6 +32,7 @@ class LayersPanel(QWidget):
     visibility_changed = Signal(str, bool)   #(layer_id, visible)
     delete_layer_requested = Signal(str)    #(layer_id)
     opacity_changed = Signal(str, float)    #(layer_id, opacity_0_1)
+    preview_clicked = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -57,7 +72,10 @@ class LayersPanel(QWidget):
         self.preview_label = QLabel("Náhled vrstvy")
         layout.addWidget(self.preview_label)
 
-        self.preview_image = QLabel()
+        self.preview_image = ClickablePreviewLabel()
+        self.preview_image.clicked.connect(self.preview_clicked.emit)
+        self.preview_image.setCursor(Qt.PointingHandCursor)
+        self.preview_image.setToolTip("Kliknutím zobrazíte / skryjete zvětšený náhled vrstvy")
         self.preview_image.setFixedSize(180, 120)
         self.preview_image.setAlignment(Qt.AlignCenter)
         self.preview_image.setStyleSheet("border: 1px solid #555; background: #222;")

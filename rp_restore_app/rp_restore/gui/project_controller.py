@@ -15,7 +15,7 @@ from rp_restore.core.selection import Selection, SelectionSet
 from rp_restore.core.warnings import UserWarning
 from rp_restore.core.algorithm_runner import AlgorithmType, AlgorithmRequest, AlgorithmRunner
 from rp_restore.core.history import UndoAction
-from rp_restore.core.texture_brush import TextureSettings, Texture, generate_brush_stamp
+from rp_restore.core.texture_brush import TextureSettings, Texture, generate_brush_stamp, clear_texture_cache, deform_texture_image
 from rp_restore.core import mask_alignment
 from rp_restore.core.auto_fill import auto_fill_regions, AutoFillRegion
 from rp_restore.core.regions import RegionMap, build_region_map
@@ -102,13 +102,17 @@ class ProjectController:
         self._opacity_debounce_timer.setSingleShot(True)
         self._opacity_debounce_timer.timeout.connect(self._apply_opacity_debounced_refresh)
 
-        self.texture_settings = TextureSettings(texture=None, scale=1.0, color=(255, 255, 255), strength=1.0, texture_style="transparent")
+        self.texture_settings = TextureSettings(texture=None, scale=1.0, color=(255, 255, 255), strength=1.0, rotation_deg=0.0, deformation_scale_x=1.0, deformation_scale_y=1.0, texture_style="transparent")
         self.texture_mode_enabled: bool = False
 
         self.paint_mode: str = "brush"
 
         self._pending_window_bbox: tuple[int,int,int,int] | None = None
         self._pending_window_bbox_listener = None  
+
+        self._layer_preview_overlay_visible: bool = False
+        self._current_layer_preview_qimage: QImage | None = None
+        self._current_layer_preview_title: str = ""
 
     def set_canvas(self, canvas: ImageCanvasWidget) -> None:
         self.canvas = canvas
@@ -119,6 +123,7 @@ class ProjectController:
         self.project.undo_manager.on_change = self._on_undo_manager_changed
         self.invalidate_selection_region_map_cache()
         self.clear_auto_fill_preview()
+        self.hide_layer_preview_overlay()
 
         self.texture_settings.texture_style = getattr(project, "texture_style", "transparent")
 
@@ -154,12 +159,168 @@ class ProjectController:
     def set_texture(self, texture_name: str | None) -> None:
         if self.project is None:
             self.texture_settings.texture = None
+            self.texture_settings.deformation_scale_x = 1.0
+            self.texture_settings.deformation_scale_y = 1.0
+            clear_texture_cache(self.texture_settings)
             return
         if texture_name is None:
             self.texture_settings.texture = None
+            self.texture_settings.deformation_scale_x = 1.0
+            self.texture_settings.deformation_scale_y = 1.0
+            clear_texture_cache(self.texture_settings)
             return
         tex = self.project.textures.get(texture_name)
         self.texture_settings.texture = tex
+
+        if tex is not None and not getattr(tex, "can_deform", True):
+            #uložená deformovaná textúra sa už ďalej nedeformuje
+            #v paneli sa zobrazia hodnoty, s ktorými vznikla
+            self.texture_settings.deformation_scale_x = float(getattr(tex, "deformation_scale_x", 1.0))
+            self.texture_settings.deformation_scale_y = float(getattr(tex, "deformation_scale_y", 1.0))
+        else:
+            #pri pôvodnej textúre začína deformácia od 100 % / 100 %
+            self.texture_settings.deformation_scale_x = 1.0
+            self.texture_settings.deformation_scale_y = 1.0
+
+        clear_texture_cache(self.texture_settings)
+
+        if self.materials_panel is not None and hasattr(self.materials_panel, "refresh_from_project"):
+            self.materials_panel.refresh_from_project(self.project)
+        
+        self.update_current_tool_cursor()
+
+    def set_texture_deformation(self, scale_x: float | None = None, scale_y: float | None = None) -> None:
+        """
+        Nastaví dočasnú deformáciu aktuálne vybranej textúry
+        (iba pri pôvodných textúrach, nie pri už deformovaných)
+        """
+        tex = getattr(self.texture_settings, "texture", None)
+        if tex is None:
+            return
+
+        if not getattr(tex, "can_deform", True):
+            return
+
+        if scale_x is not None:
+            self.texture_settings.deformation_scale_x = max(0.25, min(4.0, float(scale_x)))
+
+        if scale_y is not None:
+            self.texture_settings.deformation_scale_y = max(0.25, min(4.0, float(scale_y)))
+
+        clear_texture_cache(self.texture_settings)
+
+    def reset_texture_deformation(self) -> None:
+        """
+        Vráti dočasnú deformáciu aktuálnej textúry na 100 % / 100 %
+        """
+        self.texture_settings.deformation_scale_x = 1.0
+        self.texture_settings.deformation_scale_y = 1.0
+        clear_texture_cache(self.texture_settings)
+
+    def _find_duplicate_deformed_texture(self, source_texture_name: str, deformation_scale_x: float, deformation_scale_y: float) -> Texture | None:
+        """
+        Nájde už existujúcu deformovanú textúru vytvorenú z rovnakej pôvodnej textúry s rovnakými hodnotami deformácie
+        """
+        if self.project is None:
+            return None
+
+        sx = round(float(deformation_scale_x), 4)
+        sy = round(float(deformation_scale_y), 4)
+
+        for tex in self.project.textures.values():
+            if not getattr(tex, "is_generated", False):
+                continue
+
+            if getattr(tex, "source_texture_name", None) != source_texture_name:
+                continue
+
+            tex_sx = round(float(getattr(tex, "deformation_scale_x", 1.0)), 4)
+            tex_sy = round(float(getattr(tex, "deformation_scale_y", 1.0)), 4)
+
+            if tex_sx == sx and tex_sy == sy:
+                return tex
+
+        return None
+
+    def _make_deformed_texture_name(self, source_name: str, scale_x: float, scale_y: float) -> str:
+        sx = int(round(float(scale_x) * 100))
+        sy = int(round(float(scale_y) * 100))
+        base_name = f"{source_name}_x{sx}_y{sy}"
+        return self._make_unique_texture_name(base_name)
+
+    def _insert_texture_after(self, source_name: str, new_texture: Texture) -> None:
+        """
+        Vloží novú textúru hneď za textúru, z ktorej vznikla
+        """
+        if self.project is None:
+            return
+
+        old_items = list(self.project.textures.items())
+        new_items: list[tuple[str, Texture]] = []
+        inserted = False
+
+        for name, tex in old_items:
+            new_items.append((name, tex))
+
+            if name == source_name:
+                new_items.append((new_texture.name, new_texture))
+                inserted = True
+
+        if not inserted:
+            new_items.append((new_texture.name, new_texture))
+
+        self.project.textures = dict(new_items)
+
+    def add_current_deformed_texture_to_project(self) -> tuple[bool, str | None, str | None]:
+        """
+        Uloží aktuálnu dočasne deformovanú textúru ako novú textúru projektu
+        -vracia:
+        (True, new_name, None)  -textúra bola vytvorená
+        (False, None, duplicate)    -taká textúra už existuje
+        (False, None, None) -textúru nemožno vytvoriť
+        """
+        if self.project is None:
+            return False, None, None
+
+        source_tex = getattr(self.texture_settings, "texture", None)
+        if source_tex is None:
+            return False, None, None
+
+        if not getattr(source_tex, "can_deform", True):
+            return False, None, None
+
+        sx = float(getattr(self.texture_settings, "deformation_scale_x", 1.0))
+        sy = float(getattr(self.texture_settings, "deformation_scale_y", 1.0))
+
+        if abs(sx - 1.0) < 1e-6 and abs(sy - 1.0) < 1e-6:
+            return False, None, None
+
+        duplicate = self._find_duplicate_deformed_texture(source_tex.name, sx, sy)
+        if duplicate is not None:
+            return False, None, duplicate.name
+
+        new_image = deform_texture_image(source_tex.image, deformation_scale_x=sx, deformation_scale_y=sy)
+
+        new_name = self._make_deformed_texture_name(source_tex.name, sx, sy)
+
+        new_tex = Texture(name=new_name, image=new_image, is_generated=True, source_texture_name=source_tex.name, deformation_scale_x=sx, deformation_scale_y=sy, can_deform=False)
+
+        self._insert_texture_after(source_tex.name, new_tex)
+
+        #nová textúra sa hneď vyberie
+        self.texture_settings.texture = new_tex
+        self.texture_settings.deformation_scale_x = sx
+        self.texture_settings.deformation_scale_y = sy
+        clear_texture_cache(self.texture_settings)
+
+        self.project.mark_dirty()
+
+        if self.materials_panel is not None and hasattr(self.materials_panel, "refresh_from_project"):
+            self.materials_panel.refresh_from_project(self.project)
+
+        self.update_current_tool_cursor()
+
+        return True, new_name, None
 
     def set_texture_scale(self, scale: float) -> None:
         self.texture_settings.scale = float(scale)
@@ -287,14 +448,8 @@ class ProjectController:
 
         tex = Texture(name=name, image=arr)
         self.project.textures[name] = tex
-
-        #hneď ju vyberieme ako aktuálnu textúru
-        self.texture_settings.texture = tex
-
         self.project.mark_dirty()
-
-        if self.materials_panel is not None and hasattr(self.materials_panel, "refresh_from_project"):
-            self.materials_panel.refresh_from_project(self.project)
+        self.set_texture(name)
 
     def _make_unique_texture_name(self, base_name: str) -> str:
         """
@@ -524,6 +679,47 @@ class ProjectController:
         self.layers_panel = panel
         panel.set_controller(self)
 
+        if hasattr(panel, "preview_clicked"):
+            panel.preview_clicked.connect(self.toggle_layer_preview_overlay)
+
+    def toggle_layer_preview_overlay(self) -> None:
+        """
+        Zapne alebo vypne veľký náhľad aktívnej vrstvy na canvase
+        """
+        if self._layer_preview_overlay_visible:
+            self.hide_layer_preview_overlay()
+        else:
+            self.show_layer_preview_overlay()
+
+
+    def show_layer_preview_overlay(self) -> None:
+        """
+        Zobrazí veľký náhľad aktívnej vrstvy na canvase
+        """
+        if self.canvas is None:
+            return
+
+        if self._current_layer_preview_qimage is None:
+            self.update_layer_preview()
+
+        if self._current_layer_preview_qimage is None:
+            return
+
+        self._layer_preview_overlay_visible = True
+
+        if hasattr(self.canvas, "set_layer_preview_overlay"):
+            self.canvas.set_layer_preview_overlay(self._current_layer_preview_qimage, self._current_layer_preview_title)
+
+
+    def hide_layer_preview_overlay(self) -> None:
+        """
+        Skryje veľký náhľad aktívnej vrstvy z canvasu
+        """
+        self._layer_preview_overlay_visible = False
+
+        if self.canvas is not None and hasattr(self.canvas, "clear_layer_preview_overlay"):
+            self.canvas.clear_layer_preview_overlay()
+            
     def set_current_tool(self, tool_type: str) -> None:
         """
         nastaví aktuálny nástroj podľa typu (brush, eraser, ...)
@@ -834,7 +1030,7 @@ class ProjectController:
         """
         if self.project is None:
             return None
-        return self.project.get_damage_remaining_mask()
+        return self.project.get_damage_remaining_mask_for_visible_layers()
     
     def _auto_switch_active_layer_for_tool(self, tool_type: str) -> None:
         """
@@ -853,9 +1049,9 @@ class ProjectController:
 
         #edge tool -> EDGE vrstva
         if tool_type == "edge":
-            edge_id = find_first(LayerRole.EDGE)
-            if edge_id is not None:
-                self.set_active_layer(edge_id)
+            edge_layer = self.project.get_edge_layer()
+            if edge_layer is not None:
+                self.set_active_layer(edge_layer.meta.id)
 
         #brush tool -> PAINT vrstva 
         if tool_type in ("brush", "edge_blend", "blend"):
@@ -938,7 +1134,7 @@ class ProjectController:
 
                     if h_sub == h_img and w_sub == w_img:
                         overlay_color = np.array([255, 255, 255], dtype=np.float32)
-                        alpha = 0.6
+                        alpha = self.damage_overlay_opacity
 
                         region = sub_mask
                         orig = region_rgb[region].astype(np.float32)
@@ -1012,12 +1208,16 @@ class ProjectController:
     
     def on_layer_visibility_changed(self, layer_id: str, visible: bool) -> None:
         layer = self.get_layer_by_id(layer_id)
-        if layer is None:
+        if layer is None or self.project is None:
             return
 
         layer.meta.visible = bool(visible)
+
+        self.invalidate_selection_region_map_cache()
         self.refresh_canvas()
         self.refresh_layers_panel()
+        self.update_layer_preview()
+
         self.project.mark_dirty()
 
     def on_layer_delete_requested(self, layer_id: str) -> bool:
@@ -1099,12 +1299,18 @@ class ProjectController:
             return
 
         if self.active_layer_id is None:
+            self._current_layer_preview_qimage = None
+            self._current_layer_preview_title = ""
+            self.hide_layer_preview_overlay()
             if hasattr(self.layers_panel, "set_preview"):
                 self.layers_panel.set_preview(None)
             return
 
         layer = self.get_layer_by_id(self.active_layer_id)
         if layer is None:
+            self._current_layer_preview_qimage = None
+            self._current_layer_preview_title = ""
+            self.hide_layer_preview_overlay()
             if hasattr(self.layers_panel, "set_preview"):
                 self.layers_panel.set_preview(None)
             return
@@ -1119,9 +1325,16 @@ class ProjectController:
 
         qimg = self._numpy_rgb_to_qimage(out)
 
+        self._current_layer_preview_qimage = qimg.copy()
+        self._current_layer_preview_title = layer.meta.name
+
         if hasattr(self.layers_panel, "set_preview"):
             #zmenší sa už v LayersPanel.set_preview, takže tu netreba
             self.layers_panel.set_preview(qimg)
+        
+        if self._layer_preview_overlay_visible and self.canvas is not None:
+            if hasattr(self.canvas, "set_layer_preview_overlay"):
+                self.canvas.set_layer_preview_overlay(self._current_layer_preview_qimage, self._current_layer_preview_title)
 
     def refresh_log_panel(self) -> None:
         if self.project is None or self.log_panel is None:
@@ -1341,8 +1554,8 @@ class ProjectController:
             damage_rem = self.project.get_layer_damage_remaining_mask(target_layer.meta.id)
             if damage_rem is None:
                 return 0
-            edge_layers = self.project.get_edge_layers()
-            region_map = build_region_map(damage_rem, edge_layers)
+            edge_layer = self.project.get_edge_layer()
+            region_map = build_region_map(damage_rem, edge_layer)
             regions_to_fill = self._build_autofill_regions_from_selection()
         elif mode == "preview":
             if self.auto_fill_region_map is None:
@@ -1602,8 +1815,8 @@ class ProjectController:
         if damage_rem is None:
             return
 
-        edge_layers = self.project.get_edge_layers()
-        region_map = build_region_map(damage_rem, edge_layers)
+        edge_layer = self.project.get_edge_layer()
+        region_map = build_region_map(damage_rem, edge_layer)
 
         candidate_ids = set(region_map.get_region_ids_smaller_than(self.auto_fill_threshold))
         self.auto_fill_region_map = region_map
@@ -1751,8 +1964,8 @@ class ProjectController:
         if mask is None:
             return None
 
-        edge_layers = self.project.get_edge_layers()
-        region_map = build_region_map(mask, edge_layers)
+        edge_layer = self.project.get_edge_layer()
+        region_map = build_region_map(mask, edge_layer)
 
         self.selection_region_map_cache = region_map
         self.selection_region_map_cache_layer_id = layer_id

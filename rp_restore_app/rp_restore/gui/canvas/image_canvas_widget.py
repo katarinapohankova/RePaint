@@ -33,6 +33,7 @@ class ImageCanvasWidget(QWidget):
         self.pan_x: int = 0
         self.pan_y: int = 0
         self._panning: bool = False
+        self._pan_button: Qt.MouseButton | None = None
         self._last_mouse_pos: QPoint | None = None
 
         self.controller = None
@@ -62,6 +63,9 @@ class ImageCanvasWidget(QWidget):
         self._pending_window_dragging: bool = False
         self._pending_window_drag_anchor: tuple[int, int] | None = None      
         self._pending_window_drag_start_bbox: tuple[int, int, int, int] | None = None
+
+        self.layer_preview_overlay_image: QImage | None = None
+        self.layer_preview_overlay_title: str = ""
 
     def set_image(self, image: QImage) -> None:
         """Nastaví nový obraz a prekreslí widget."""
@@ -107,6 +111,38 @@ class ImageCanvasWidget(QWidget):
 
         #vyplníme pozadie -čiernou
         painter.fillRect(self.rect(), Qt.black)
+
+        if self.is_layer_preview_overlay_active():
+            painter.fillRect(self.rect(), QColor(18, 18, 18, 255))
+
+            img = self.layer_preview_overlay_image
+            if img is None or img.isNull():
+                return
+
+            margin = 24
+            title_height = 32
+
+            target = self.rect().adjusted(margin, margin + title_height, -margin, -margin)
+
+            scaled = img.scaled(target.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+
+            x = target.x() + (target.width() - scaled.width()) // 2
+            y = target.y() + (target.height() - scaled.height()) // 2
+
+            if self.layer_preview_overlay_title:
+                painter.setPen(QColor(230, 230, 230))
+                painter.drawText(
+                    self.rect().adjusted(margin, margin, -margin, 0),
+                    Qt.AlignLeft | Qt.AlignTop,
+                    f"Náhled vrstvy: {self.layer_preview_overlay_title}",
+                )
+
+            painter.drawImage(QRect(x, y, scaled.width(), scaled.height()), scaled)
+
+            painter.setPen(QColor(180, 180, 180))
+            painter.drawRect(QRect(x, y, scaled.width(), scaled.height()))
+
+            return
 
         if self.current_image is None or self.current_image.isNull():
             return
@@ -243,7 +279,20 @@ class ImageCanvasWidget(QWidget):
             return
         
         self.setFocus(Qt.MouseFocusReason)
+
+        if self.is_layer_preview_overlay_active():
+            if event.button() == Qt.LeftButton:
+                if self.controller is not None and hasattr(self.controller, "hide_layer_preview_overlay"):
+                    self.controller.hide_layer_preview_overlay()
+                else:
+                    self.clear_layer_preview_overlay()
+
+            event.accept()
+            return
         
+        if event.button() == Qt.LeftButton and self._panning:
+            self._stop_panning()
+
         if event.button() == Qt.LeftButton and self._pending_window_bbox is not None:
             #prepočíta klik na image coords
             ix, iy = self.widget_to_image(float(event.position().x()), float(event.position().y()))
@@ -264,20 +313,28 @@ class ImageCanvasWidget(QWidget):
             self._window_pick_origin = event.pos()
             self._window_rubber.setGeometry(QRect(self._window_pick_origin, self._window_pick_origin))
             self._window_rubber.show()
+            event.accept()
             return
         
         if event.button() in (Qt.MiddleButton, Qt.RightButton):
             self._panning = True
+            self._pan_button = event.button()
             self._last_mouse_pos = event.pos()
+            event.accept()
             return
 
         xw = event.position().x()
         yw = event.position().y()
         ix, iy = self.widget_to_image(xw, yw)
         self.controller.on_canvas_mouse_press(int(ix), int(iy), event.buttons(), event.modifiers())
+        event.accept()
 
     def mouseMoveEvent(self, event): 
         if self.controller is None or self.current_image is None:
+            return
+        
+        if self.is_layer_preview_overlay_active():
+            event.accept()
             return
         
         if self._pending_window_dragging and self._pending_window_drag_anchor is not None and self._pending_window_drag_start_bbox is not None:
@@ -339,6 +396,7 @@ class ImageCanvasWidget(QWidget):
 
             self._last_mouse_pos = event.pos()
             self.update()
+            event.accept()
             return
 
         xw = event.position().x()
@@ -348,6 +406,10 @@ class ImageCanvasWidget(QWidget):
 
     def mouseReleaseEvent(self, event):  
         if self.controller is None or self.current_image is None:
+            return
+        
+        if self.is_layer_preview_overlay_active():
+            event.accept()
             return
         
         if event.button() == Qt.LeftButton and self._pending_window_dragging:
@@ -362,20 +424,26 @@ class ImageCanvasWidget(QWidget):
             self._window_rubber.hide()
             self._window_pick_origin = None
             self._finish_window_pick(rect)
+            event.accept()
             return
         
-        if self._panning and (event.button() == Qt.MiddleButton or event.button() == Qt.LeftButton):
-            self._panning = False
-            self._last_mouse_pos = None
+        if self._panning and event.button() == self._pan_button:
+            self._stop_panning()
+            event.accept()
             return
 
         xw = event.position().x()
         yw = event.position().y()
         ix, iy = self.widget_to_image(xw, yw)
         self.controller.on_canvas_mouse_release(int(ix), int(iy), event.buttons(), event.modifiers())
+        event.accept()
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         if self.current_image is None:
+            return
+        
+        if self.is_layer_preview_overlay_active():
+            event.accept()
             return
 
         #zoom okolo kurzoru
@@ -561,3 +629,37 @@ class ImageCanvasWidget(QWidget):
         self._pending_window_drag_anchor = None
         self._pending_window_drag_start_bbox = None
         self.update()
+
+    def set_layer_preview_overlay(self, image: QImage | None, title: str = "") -> None:
+        """
+        Zobrazí veľký náhľad aktívnej vrstvy namiesto bežného canvasu
+        """
+        if image is None or image.isNull():
+            self.clear_layer_preview_overlay()
+            return
+
+        self.layer_preview_overlay_image = image.copy()
+        self.layer_preview_overlay_title = title or ""
+        self.update()
+
+    def clear_layer_preview_overlay(self) -> None:
+        """
+        Skryje veľký náhľad vrstvy
+        """
+        self.layer_preview_overlay_image = None
+        self.layer_preview_overlay_title = ""
+        self.update()
+
+    def is_layer_preview_overlay_active(self) -> bool:
+        """
+        Vráti true, ak canvas práve zobrazuje veľký náhľad vrstvy
+        """
+        return self.layer_preview_overlay_image is not None and not self.layer_preview_overlay_image.isNull()
+    
+    def _stop_panning(self) -> None:
+        """
+        ukončí panning obrazu
+        """
+        self._panning = False
+        self._pan_button = None
+        self._last_mouse_pos = None
