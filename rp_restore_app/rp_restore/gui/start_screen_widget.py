@@ -44,14 +44,14 @@ class StartScreenWidget(QWidget):
         #tlačítka Nový / Otvoriť
         buttons_layout = QHBoxLayout()
         self.new_button = QPushButton("Nový projekt")
-        self.open_button = QPushButton("Otvoriť projekt")
+        self.open_button = QPushButton("Otevřít projekt")
 
         buttons_layout.addWidget(self.new_button)
         buttons_layout.addWidget(self.open_button)
         main_layout.addLayout(buttons_layout)
 
         #naposledy otvorené
-        recent_label = QLabel("Naposledy otvorené projekty:")
+        recent_label = QLabel("Naposledy otevřené projekty:")
         main_layout.addWidget(recent_label)
 
         self.recent_list = QListWidget()

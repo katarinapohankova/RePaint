@@ -19,6 +19,8 @@ from rp_restore.gui.panels.edge_settings_panel import EdgeSettingsPanel
 from rp_restore.gui.panels.materials_panel import MaterialsPanel
 from rp_restore.gui.panels.palette_panel import PalettePanel
 from rp_restore.gui.colorchecker_dialog import ColorCheckerDialog
+from rp_restore.report.pdf_report import generate_report
+from rp_restore.report.report_dialog import ReportDialog
 
 class MainWindow(QMainWindow):
     """
@@ -198,11 +200,11 @@ class MainWindow(QMainWindow):
         export_img_action.triggered.connect(self.on_export_image)
         file_menu.addAction(export_img_action)
 
-        # file_menu.addSeparator()
+        file_menu.addSeparator()
 
-        # export_report_action = QAction("Exportovat report…", self)
-        # export_report_action.triggered.connect(self.on_export_report)
-        # file_menu.addAction(export_report_action)
+        export_report_action = QAction("Exportovat report…", self)
+        export_report_action.triggered.connect(self.on_export_report)
+        file_menu.addAction(export_report_action)
 
         file_menu.addSeparator()
 
@@ -620,7 +622,7 @@ class MainWindow(QMainWindow):
         """
         zip_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Otvoriť projekt",
+            "Otevřít projekt",
             "",
             "RP projekty (*.zip);;Všetky súbory (*.*)",
         )
@@ -839,7 +841,7 @@ class MainWindow(QMainWindow):
 
         zip_path, _ = QFileDialog.getSaveFileName(
             self,
-            "Uložiť projekt ako",
+            "Uložit projekt ako",
             "",
             "RP projekty (*.zip);;Všetky súbory (*.*)",
         )
@@ -880,33 +882,37 @@ class MainWindow(QMainWindow):
             return "discard"
         return "cancel"
 
-    # def on_export_report(self) -> None:
-    #     """
-    #     Exportuje PDF report o aktuálnom projekte
-    #     """
-    #     if self.controller.project is None:
-    #         QMessageBox.information(self, "Žádný projekt", "Není otevřený žádný projekt")
-    #         return
+    def on_export_report(self) -> None:
+        """
+        Exportuje PDF report o projekte
+        """
+        if self.controller.project is None:
+            QMessageBox.information(self, "Žádný projekt", "Není otevřený žádný projekt")
+            return
 
-    #     pdf_path, _ = QFileDialog.getSaveFileName(
-    #         self,
-    #         "Uložit report jako",
-    #         "",
-    #         "PDF soubory (*.pdf);;Všechny soubory (*.*)",
-    #     )
-    #     if not pdf_path:
-    #         return
+        dialog = ReportDialog(self)
+        if dialog.exec() != QDialog.Accepted:
+            return
 
-    #     if not pdf_path.lower().endswith(".pdf"):
-    #         pdf_path += ".pdf"
+        pdf_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Uložit report jako",
+            "",
+            "PDF soubory (*.pdf);;Všechny soubory (*.*)",
+        )
+        if not pdf_path:
+            return
 
-    #     try:
-    #         generate_report(self.controller.project, pdf_path)
-    #     except Exception as e:
-    #         QMessageBox.critical(self, "Chyba při exportu reportu", str(e))
-    #         return
+        if not pdf_path.lower().endswith(".pdf"):
+            pdf_path += ".pdf"
 
-    #     self.statusBar().showMessage("Report byl úspěšně exportován.", 5000)
+        try:
+            generate_report(self.controller.project, pdf_path, metadata=dialog.metadata())
+        except Exception as e:
+            QMessageBox.critical(self, "Chyba při exportu reportu", str(e))
+            return
+
+        self.statusBar().showMessage("Report byl úspěšně exportován.", 5000)
 
     def on_toggle_damage_overlay(self, checked: bool) -> None:
         """

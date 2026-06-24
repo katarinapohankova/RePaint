@@ -1432,10 +1432,15 @@ class ProjectController:
         """
         Načíta projekt zo .zip súboru a nastaví ho ako aktuálny
         """
-        project = ProjectLoader.load_from_zip(zip_path)
+
+        zip_path_obj = Path(zip_path)
+
+        project = ProjectLoader.load_from_zip(zip_path_obj)
+        project.project_name = zip_path_obj.stem
         self.set_project(project)
-        self.current_project_path = zip_path
-        self.app_settings.add_recent_project(zip_path)
+        path_text = zip_path_obj.as_posix()
+        self.current_project_path = path_text
+        self.app_settings.add_recent_project(path_text)
         return project
 
     def save_project_as(self, zip_path: str) -> None:
@@ -1444,10 +1449,15 @@ class ProjectController:
         """
         if self.project is None:
             return
+        
+        zip_path_obj = Path(zip_path)
 
-        ProjectSerializer.save_to_zip(self.project, zip_path)
-        self.current_project_path = zip_path
-        self.app_settings.add_recent_project(zip_path)
+        self.project.project_name = zip_path_obj.stem
+
+        ProjectSerializer.save_to_zip(self.project, zip_path_obj)
+        path_text = zip_path_obj.as_posix()
+        self.current_project_path = path_text
+        self.app_settings.add_recent_project(path_text)
         self.project.mark_saved()
 
     def save_project(self) -> bool:
@@ -1462,8 +1472,14 @@ class ProjectController:
         if not self.current_project_path:
             return False
 
-        ProjectSerializer.save_to_zip(self.project, self.current_project_path)
-        self.app_settings.add_recent_project(self.current_project_path)
+        zip_path_obj = Path(self.current_project_path)
+        self.project.project_name = zip_path_obj.stem
+
+        ProjectSerializer.save_to_zip(self.project, zip_path_obj)
+        path_text = zip_path_obj.as_posix()
+        self.current_project_path = path_text
+        self.app_settings.add_recent_project(path_text)
+        
         self.project.mark_saved()
         return True
     
@@ -1487,7 +1503,7 @@ class ProjectController:
             parent = QApplication.activeWindow()
             zip_path, _ = QFileDialog.getSaveFileName(
                 parent,
-                "Uložiť projekt ako",
+                "Uložit projekt ako",
                 "",
                 "RP projekty (*.zip);;Všetky súbory (*.*)",
             )
