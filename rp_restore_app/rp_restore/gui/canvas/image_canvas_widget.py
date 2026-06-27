@@ -470,8 +470,8 @@ class ImageCanvasWidget(QWidget):
 
             #bude sa dať odzoomovať (4x)
             min_zoom = fit * 0.25
-            #a priblížiť (20x)
-            max_zoom = fit * 20.0
+            #zväčšíme možné priblíženie na 100 krát
+            max_zoom = fit * 100.0
         else:
             min_zoom = 0.01
             max_zoom = 100.0

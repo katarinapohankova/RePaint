@@ -13,7 +13,7 @@ from rp_restore.core.project_model import Project
 from rp_restore.config.settings import AppSettings
 from rp_restore.core.selection import Selection, SelectionSet
 from rp_restore.core.warnings import UserWarning
-from rp_restore.core.algorithm_runner import AlgorithmType, AlgorithmRequest, AlgorithmRunner
+from rp_restore.core.algorithm_runner import AlgorithmType, AlgorithmRequest, AlgorithmRunner, TextureAlgorithmParams
 from rp_restore.core.history import UndoAction
 from rp_restore.core.texture_brush import TextureSettings, Texture, generate_brush_stamp, clear_texture_cache, deform_texture_image
 from rp_restore.core import mask_alignment
@@ -95,6 +95,9 @@ class ProjectController:
 
         self._message_callback: Optional[Callable[[str], None]] = None
         
+        self._algorithm_progress_callback = None
+        self._algorithm_progress_clear_callback = None
+
         self._brush_size_preview_callback: Optional[Callable[[int], None]] = None
 
         #debounce pre opacity refresh (aby compositing nebežal pri každom ticku slidera)
@@ -682,6 +685,20 @@ class ProjectController:
         if hasattr(panel, "preview_clicked"):
             panel.preview_clicked.connect(self.toggle_layer_preview_overlay)
 
+    def set_algorithm_progress_callback(self, callback) -> None:
+        self._algorithm_progress_callback = callback
+
+    def set_algorithm_progress_clear_callback(self, callback) -> None:
+        self._algorithm_progress_clear_callback = callback
+
+    def _show_algorithm_progress(self, message: str, current: int | None = None, total: int | None = None) -> None:
+        if self._algorithm_progress_callback is not None:
+            self._algorithm_progress_callback(message, current, total)
+
+    def _clear_algorithm_progress(self) -> None:
+        if self._algorithm_progress_clear_callback is not None:
+            self._algorithm_progress_clear_callback()
+    
     def toggle_layer_preview_overlay(self) -> None:
         """
         Zapne alebo vypne veľký náhľad aktívnej vrstvy na canvase
@@ -804,13 +821,13 @@ class ProjectController:
             return None
         return self.active_selection.combined_bbox()
 
-    def request_manual_window_bbox(self, on_done, max_size: int = 1024) -> None:
+    def request_manual_window_bbox(self, on_done, max_size: int = 1440) -> None:
         """
         Aktivuje v canvase režim ručného výberu okna
         """
         if self.canvas is None:
             return
-        self.show_tool_message("Tahejte myší na plátně pro výběr okna (max 1024×1024)")
+        self.show_tool_message("Tahejte myší na plátně pro výběr okna (max 1440×1440)")
 
         def _done(bbox):
             #nastavíme pending bbox, aby sa dal posúvať
@@ -820,7 +837,7 @@ class ProjectController:
 
         self.canvas.start_window_pick(on_done=_done, max_size=max_size)
 
-    def run_realistic_fill_window(self, window_bbox: tuple[int,int,int,int], use_mock: bool = True) -> None:
+    def run_realistic_fill_window(self, window_bbox: tuple[int,int,int,int], use_mock: bool = False, partial_noise: float = 0.7, seed: int | None = None, use_composited_input: bool = False) -> None:
         """
         Spustí realistic fill pre zvolené okno
         - ak je selection: aplikuje len do selection
@@ -838,8 +855,8 @@ class ProjectController:
         if w <= 0 or h <= 0:
             self.show_tool_message("Neplatné okno")
             return
-        if w > 1024 or h > 1024:
-            self.show_tool_message(f"Okno je příliš veliké ({w}×{h}). Maximum je 1024×1024")
+        if w > 1440 or h > 1440:
+            self.show_tool_message(f"Okno je příliš veliké ({w}×{h}). Maximum je 1440×1440")
             return
 
         dmg = project.damage_original_mask.astype(bool)
@@ -868,17 +885,9 @@ class ProjectController:
 
         if has_selection:
             apply_mask_full = self.active_selection.combined_mask().astype(bool)
-            selected_mask = apply_mask_full
         else:
             #bez selection -aspoň damage v okne ako selected_mask
-            selected_mask = np.zeros_like(dmg, dtype=bool)
-            selected_mask[y0:y1, x0:x1] = dmg[y0:y1, x0:x1]
-
-            # a aplikovať budeme do damage (celého) — reálne len v okne
             apply_mask_full = dmg
-
-        #vstup pre algoritmus (working composited)
-        current = project.get_current_composited_image()
 
         #výber cieľovej PAINT vrstvy
         target_layer = self.get_active_paint_layer_for_autofill()
@@ -886,23 +895,58 @@ class ProjectController:
             self.show_tool_message("Není dostupná paint vrstva")
             return
 
-        #request pre runner (realistic mock)
+        #remaining maska pre konkrétnu paint vrstvu
+        #tým zabezpečíme, že realistic fill sa aplikuje iba tam, kde táto konkrétna vrstva ešte nemá vyplnené pixely
+        layer_remaining_full = project.get_layer_damage_remaining_mask(target_layer.meta.id)
+        if layer_remaining_full is None:
+            self.show_tool_message("Nepodařilo se zjistit remaining masku aktivní paint vrstvy")
+            return
+
+        #aplikovať chceme iba tam, kde selection/damage dovoľuje zásah a zároveň je to na tejto paint vrstve ešte nevyplnené
+        apply_mask_full = apply_mask_full & layer_remaining_full
+
+        #remote realistic algoritmus dostane iba výsek zvoleného okna
+        selected_mask_patch = apply_mask_full[y0:y1, x0:x1]
+
+        if not bool(selected_mask_patch.any()):
+            self.show_tool_message("Ve zvoleném okně už na této vrstvě není nic k doplnění")
+            return
+
+        #vstup pre algoritmus je buď výsek composited obrazu, alebo výsek pôvodného obrazu
+        if use_composited_input:
+            image_patch = project.composited_region((x0, y0, ww, wh))
+        else:
+            original = project.get_original_image()
+            if original is None:
+                self.show_tool_message("Nepodařilo se načíst původní obraz")
+                return
+            image_patch = original[y0:y1, x0:x1].copy()
+
+        #request pre runner
         request = AlgorithmRequest(
-            original_image=current,
-            current_image=current,
-            selected_mask=selected_mask,
-            remaining_mask=dmg,
+            original_image=image_patch,
+            current_image=image_patch,
+            selected_mask=selected_mask_patch,
+            remaining_mask=selected_mask_patch,
             algorithm_type=AlgorithmType.REALISTIC,
             device="cpu",
             mock=use_mock,
             window_bbox=(x0, y0, ww, wh),
+            partial_noise=partial_noise,
+            seed=seed,
+            progress_callback=self._show_algorithm_progress,
         )
+
+        self._show_algorithm_progress("Spouštím realistic fill...", None, None)
 
         try:
             result = AlgorithmRunner.run(request)
         except Exception as e:
+            self._clear_algorithm_progress()
             self.show_tool_message(f"Realistic fill zlyhal: {e}")
             return
+        finally:
+            self._clear_algorithm_progress()
 
         patch = result.output_patch
         bx, by, bw, bh = result.bbox
@@ -936,11 +980,14 @@ class ProjectController:
         action = UndoAction(description="Algorithm realistic fill (window)", layer_id=target_layer.meta.id, layer_role=target_layer.meta.role, bbox=(bx, by, bw, bh), before=before, after=after)
         project.undo_manager.push_action(action)
 
-        project.mark_region_as_filled_on_layer(target_layer.meta.id, selected_mask)
+        filled_mask = np.zeros_like(dmg, dtype=bool)
+        filled_mask[by:by + bh, bx:bx + bw] = local_apply
+        project.mark_region_as_filled_on_layer(target_layer.meta.id, filled_mask)
 
         project.mark_dirty()
         self.refresh_canvas()
         self.set_pending_window_bbox(None)
+        self.show_tool_message("Realistic fill byl dokončen")
 
     def set_pending_window_bbox_listener(self, cb) -> None:
         """Dialog si zaregistruje callback, aby dostával aktualizácie bboxu"""
@@ -1595,7 +1642,7 @@ class ProjectController:
 
         return count
     
-    def run_algorithm_on_selection(self, algorithm_type: AlgorithmType, use_mock: bool = False) -> None:
+    def run_algorithm_on_selection(self, algorithm_type: AlgorithmType, use_mock: bool = False, texture_params: TextureAlgorithmParams | None = None) -> None:
         """
         Spustí externý algoritmus na aktuálnej selection
         - pripraví AlgorithmRequest, zavolá AlgorithmRunner.run
@@ -1622,7 +1669,7 @@ class ProjectController:
         #device – zatiaľ natvrdo cpu, neskôr z konfigurácie
         device = "cpu"
 
-        request = AlgorithmRequest(original_image=original, current_image=current, selected_mask=selected_mask, remaining_mask=remaining_mask, algorithm_type=algorithm_type, device=device, mock=use_mock)
+        request = AlgorithmRequest(original_image=original, current_image=current, selected_mask=selected_mask, remaining_mask=remaining_mask, algorithm_type=algorithm_type, device=device, mock=use_mock, texture_params=texture_params)
 
         try:
             result = AlgorithmRunner.run(request)

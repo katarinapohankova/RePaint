@@ -51,3 +51,5 @@ texture_inpaint.spec
 
 user_readme.md
 user_readme2.md
+
+external_algorithms/texture_generation_pipeline/

@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton
+from PySide6.QtWidgets import QDialog, QWidget, QVBoxLayout, QLabel, QPushButton
 from PySide6.QtCore import Qt
 
 from rp_restore.core.selection import Selection, SelectionSet
-from rp_restore.core.algorithm_runner import AlgorithmType
+from rp_restore.core.algorithm_runner import AlgorithmType, TextureAlgorithmParams
 from rp_restore.gui.realistic_fill_dialog import RealisticFillDialog
+from rp_restore.gui.texture_fill_dialog import TextureFillDialog
 
 
 class AlgorithmPanel(QWidget):
@@ -80,13 +81,9 @@ class AlgorithmPanel(QWidget):
             res = dlg.get_result()
             if res is None:
                 return
-            
-            res = dlg.get_result()
-            if res is None:
-                return
 
             if hasattr(self._controller, "run_realistic_fill_window"):
-                self._controller.run_realistic_fill_window(res.bbox, use_mock=res.use_mock)
+                self._controller.run_realistic_fill_window(res.bbox, use_mock=res.use_mock, partial_noise=res.partial_noise, seed=res.seed, use_composited_input=res.use_composited_input)
 
         dlg.accepted.connect(_on_accept)
         dlg.show()
@@ -96,5 +93,22 @@ class AlgorithmPanel(QWidget):
     def _on_texture_clicked(self) -> None:
         if self._controller is None:
             return
+        
+        dlg = TextureFillDialog(controller=self._controller, parent=self)
+        if dlg.exec() != QDialog.Accepted:
+            return
+
+        res = dlg.get_result()
+        if res is None:
+            return
+
+        params = TextureAlgorithmParams(
+            texture_name=res.texture_name,
+            colors=res.colors,
+            global_scale=res.global_scale,
+            rotation=res.rotation,
+            seed=res.seed,
+        )
+
         if hasattr(self._controller, "run_algorithm_on_selection"):
-            self._controller.run_algorithm_on_selection(AlgorithmType.TEXTURE, use_mock=False)
+            self._controller.run_algorithm_on_selection(AlgorithmType.TEXTURE, use_mock=False, texture_params=params)

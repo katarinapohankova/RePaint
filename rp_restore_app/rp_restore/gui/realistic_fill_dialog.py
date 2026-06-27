@@ -4,16 +4,19 @@ from dataclasses import dataclass
 from typing import Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QRadioButton, QVBoxLayout, QLabel, QPushButton, QHBoxLayout, QDialogButtonBox
+from PySide6.QtWidgets import QDialog, QRadioButton, QVBoxLayout, QLabel, QPushButton, QHBoxLayout, QDialogButtonBox, QDoubleSpinBox, QSpinBox, QCheckBox
 
 
-MAX_WIN = 1024
+MAX_WIN = 1440
 
 
 @dataclass
 class RealisticFillDialogResult:
     bbox: tuple[int, int, int, int]  #(x, y, w, h)
     use_mock: bool
+    partial_noise: float
+    seed: Optional[int]
+    use_composited_input: bool
 
 
 class RealisticFillDialog(QDialog):
@@ -30,7 +33,7 @@ class RealisticFillDialog(QDialog):
 
         self._controller = controller
         self._bbox: Optional[tuple[int, int, int, int]] = None
-        self._use_mock: bool = True  #zatiaľ default (neskôr podľa dostupnosti algoritmu)
+        self._use_mock: bool = False 
 
         layout = QVBoxLayout(self)
 
@@ -40,6 +43,10 @@ class RealisticFillDialog(QDialog):
         )
         self.info.setWordWrap(True)
         layout.addWidget(self.info)
+
+        self.model_info = QLabel("*Model je primárně určený pro restaurování děl Albrechta Dürera.")
+        self.model_info.setWordWrap(True)
+        layout.addWidget(self.model_info)
 
         self.lbl_bbox = QLabel("Okno: (nezvolené)")
         layout.addWidget(self.lbl_bbox)
@@ -53,6 +60,47 @@ class RealisticFillDialog(QDialog):
 
         self.btn_use_selection.clicked.connect(self._on_use_selection_bbox)
         self.btn_pick_window.clicked.connect(self._on_pick_window)
+
+        partial_noise_help = (
+            "Partial noise určuje, ako výrazne môže algoritmus prepracovať maskovanú oblasť.\n"
+            "Nižšia hodnota viac zachováva pôvodnú štruktúru pod maskou.\n"
+            "Hodnota 1.0 znamená úplné dogenerovanie.\n"
+            "Ak pod maskou nie sú použiteľné pôvodné pixely, použite 1.0."
+        )
+
+        noise_row = QHBoxLayout()
+        partial_noise_label = QLabel("Partial noise:")
+        partial_noise_label.setToolTip(partial_noise_help)
+        noise_row.addWidget(partial_noise_label)
+
+        self.partial_noise_spin = QDoubleSpinBox()
+        self.partial_noise_spin.setRange(0.0, 1.0)
+        self.partial_noise_spin.setSingleStep(0.05)
+        self.partial_noise_spin.setDecimals(2)
+        self.partial_noise_spin.setValue(0.70)
+        noise_row.addWidget(self.partial_noise_spin)
+        self.partial_noise_spin.setToolTip(partial_noise_help)
+
+        layout.addLayout(noise_row)
+
+        seed_row = QHBoxLayout()
+
+        self.seed_checkbox = QCheckBox("Použít seed")
+        seed_row.addWidget(self.seed_checkbox)
+
+        self.seed_spin = QSpinBox()
+        self.seed_spin.setRange(0, 2_147_483_647)
+        self.seed_spin.setValue(111)
+        self.seed_spin.setEnabled(False)
+        seed_row.addWidget(self.seed_spin)
+
+        layout.addLayout(seed_row)
+
+        self.seed_checkbox.toggled.connect(self.seed_spin.setEnabled)
+
+        self.use_composited_checkbox = QCheckBox("Použít obraz s dokreslenými části ako vstup")
+        self.use_composited_checkbox.setChecked(False)
+        layout.addWidget(self.use_composited_checkbox)
 
         self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         layout.addWidget(self.buttons)
@@ -69,7 +117,14 @@ class RealisticFillDialog(QDialog):
     def get_result(self) -> Optional[RealisticFillDialogResult]:
         if self._bbox is None:
             return None
-        return RealisticFillDialogResult(bbox=self._bbox, use_mock=self._use_mock)
+        
+        seed: Optional[int]
+        if self.seed_checkbox.isChecked():
+            seed = int(self.seed_spin.value())
+        else:
+            seed = None
+
+        return RealisticFillDialogResult(bbox=self._bbox, use_mock=self._use_mock, partial_noise=float(self.partial_noise_spin.value()), seed=seed, use_composited_input=self.use_composited_checkbox.isChecked())
 
     def _update_ok_enabled(self) -> None:
         ok_btn = self.buttons.button(QDialogButtonBox.Ok)

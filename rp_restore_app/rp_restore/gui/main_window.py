@@ -4,7 +4,7 @@ import numpy as np
 from pathlib import Path
 from PySide6.QtCore import Qt, QTimer, QSize
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QCloseEvent, QCursor
-from PySide6.QtWidgets import QDialog, QHBoxLayout, QMainWindow, QSizePolicy, QSlider, QSpinBox, QStatusBar, QMessageBox, QDockWidget, QToolBar, QFileDialog, QLabel, QAbstractButton, QScrollArea, QWidget, QWidgetAction
+from PySide6.QtWidgets import QApplication, QDialog, QHBoxLayout, QMainWindow, QSizePolicy, QSlider, QSpinBox, QStatusBar, QMessageBox, QDockWidget, QToolBar, QFileDialog, QLabel, QAbstractButton, QScrollArea, QWidget, QWidgetAction, QProgressBar
 
 from rp_restore.config.settings import AppSettings
 from rp_restore.core.layers import Layer, LayerMeta, LayerRole
@@ -137,6 +137,20 @@ class MainWindow(QMainWindow):
         self._create_menus()
         self._create_toolbars()
         self.setStatusBar(QStatusBar(self))
+
+        self._algorithm_progress_label = QLabel("", self)
+        self._algorithm_progress_label.setVisible(False)
+
+        self._algorithm_progress_bar = QProgressBar(self)
+        self._algorithm_progress_bar.setVisible(False)
+        self._algorithm_progress_bar.setTextVisible(True)
+        self._algorithm_progress_bar.setFixedWidth(220)
+
+        self.statusBar().addPermanentWidget(self._algorithm_progress_label)
+        self.statusBar().addPermanentWidget(self._algorithm_progress_bar)
+        
+        self.controller.set_algorithm_progress_callback(self._show_algorithm_progress)
+        self.controller.set_algorithm_progress_clear_callback(self._clear_algorithm_progress)
 
         #overlay na krátke hlášky v strede okna
         self._toast_label = QLabel(self)
@@ -441,6 +455,27 @@ class MainWindow(QMainWindow):
         self.setCorner(Qt.BottomRightCorner, Qt.RightDockWidgetArea)
         self.setCorner(Qt.BottomLeftCorner, Qt.BottomDockWidgetArea)
         
+    def _show_algorithm_progress(self, message: str, current: int | None = None, total: int | None = None) -> None:
+        self._algorithm_progress_label.setText(message or "Probíhá realistic fill...")
+        self._algorithm_progress_label.setVisible(True)
+        self._algorithm_progress_bar.setVisible(True)
+
+        if current is not None and total is not None and total > 0:
+            self._algorithm_progress_bar.setRange(0, total)
+            self._algorithm_progress_bar.setValue(current)
+            self._algorithm_progress_bar.setFormat("%v/%m")
+        else:
+            self._algorithm_progress_bar.setRange(0, 0)
+
+        QApplication.processEvents()
+
+    def _clear_algorithm_progress(self) -> None:
+        self._algorithm_progress_label.clear()
+        self._algorithm_progress_label.setVisible(False)
+        self._algorithm_progress_bar.setVisible(False)
+        self._algorithm_progress_bar.setRange(0, 100)
+        self._algorithm_progress_bar.setValue(0)
+        QApplication.processEvents()
 
     def _show_tool_message(self, text: str) -> None:
         """

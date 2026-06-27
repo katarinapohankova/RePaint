@@ -33,6 +33,18 @@ class AlgorithmRequest:
     window_bbox: tuple[int,int,int,int] | None = None #(x,y,w,h) pre realistic
     device: str = "cpu" # "cpu" | "cuda"
     mock: bool = False  #True = nepúšťaj subprocess, sprav demo výstup
+    partial_noise: float = 0.7
+    seed: Optional[int] = None
+    progress_callback: Optional[callable] = None
+    texture_params: Optional[TextureAlgorithmParams] = None
+
+@dataclass
+class TextureAlgorithmParams:
+    texture_name: str = "texture_H"
+    colors: list[tuple[int, int, int]] | None = None
+    global_scale: float = 1.0
+    rotation: float = 0.0
+    seed: Optional[int] = None
 
 
 @dataclass
@@ -63,6 +75,11 @@ class AlgorithmRunner:
     # TEXTURE_CMD = ["python", "texture_inpaint.py"]
     _REPO_ROOT = Path(__file__).resolve().parents[2]  # rp_restore/core -> rp_restore -> repo root
     _ALGO_DIR_DEV = _REPO_ROOT / "external_algorithms"
+    _REMOTE_REALISTIC_MAX_PIXELS = 2_073_600
+    _REMOTE_REALISTIC_PROMPT = "DURER_RESTO"
+    _REMOTE_REALISTIC_NUM_INFERENCE_STEPS = 30
+    _REMOTE_REALISTIC_GUIDANCE_SCALE = 30.0
+    _REMOTE_REALISTIC_LORA_SCALE = 1.0
 
     # REALISTIC_CMD = [sys.executable, str(_ALGO_DIR / "realistic_inpaint.py")]  # zatiaľ placeholder
     # TEXTURE_CMD = [sys.executable, str(_ALGO_DIR / "texture_inpaint.py")]
@@ -71,6 +88,11 @@ class AlgorithmRunner:
     def run(cls, request: AlgorithmRequest) -> AlgorithmResult:
         if request.mock:
             return cls._run_mock(request)
+
+        if request.algorithm_type == AlgorithmType.REALISTIC:
+            return cls._run_remote_realistic(request)
+        if request.algorithm_type == AlgorithmType.TEXTURE:
+            return cls._run_texture_generator(request)
 
         return cls._run_external(request)
 
@@ -139,6 +161,278 @@ class AlgorithmRunner:
                 f"filled selection with fixed color {rgb_color.tolist()}"
             ],
         )
+    
+    @classmethod
+    def _run_texture_generator(cls, request: AlgorithmRequest) -> AlgorithmResult:
+        """
+        Spustí texture algoritmus z priečinka
+        - dočasne pridáme jeho priečinky do sys.path a nastavíme pracovný priečinok na priečinok algoritmu
+        -dočasne vypneme cv2.imshow/cv2.waitKey, aby aplikácia nezamrzla
+        (potom sa to upraví aby to fungovalo keď bude algoritmus ako python package)
+        """
+        current = cls._ensure_rgb(request.current_image)
+        h, w, _ = current.shape
+
+        selected_mask = request.selected_mask.astype(bool)
+        remaining_mask = request.remaining_mask.astype(bool)
+
+        if selected_mask.shape != (h, w) or remaining_mask.shape != (h, w):
+            raise ValueError("Texture masks must have the same shape as current_image")
+
+        apply_mask = selected_mask & remaining_mask
+
+        if not bool(apply_mask.any()):
+            raise ValueError("Selection does not contain any remaining damaged pixels")
+
+        ys, xs = np.where(apply_mask)
+        y_min = int(ys.min())
+        y_max = int(ys.max()) + 1
+        x_min = int(xs.min())
+        x_max = int(xs.max()) + 1
+
+        bbox = (x_min, y_min, x_max - x_min, y_max - y_min)
+
+        texture_params = request.texture_params or TextureAlgorithmParams()
+
+        colors = texture_params.colors
+        if not colors:
+            raise ValueError("Texture algorithm requires at least one color")
+
+        normalized_colors: list[tuple[int, int, int]] = []
+        for color in colors:
+            if len(color) < 3:
+                raise ValueError("Each texture color must be an RGB triplet")
+
+            r, g, b = color[:3]
+            normalized_colors.append((int(max(0, min(255, r))), int(max(0, min(255, g))), int(max(0, min(255, b)))))
+
+        texture_pipeline_dir = cls._get_algo_dir() / "texture_generation_pipeline"
+
+        if not texture_pipeline_dir.exists():
+            raise RuntimeError(f"Texture generation pipeline was not found: {texture_pipeline_dir}")
+
+        texture_pipeline_parent = texture_pipeline_dir.parent
+
+        old_cwd = Path.cwd()
+        added_paths: list[str] = []
+
+        #musí byť na sys.path aj samotný priečinok texture_generation_pipeline
+        for path in (texture_pipeline_parent, texture_pipeline_dir):
+            path_str = str(path)
+            if path_str not in sys.path:
+                sys.path.insert(0, path_str)
+                added_paths.append(path_str)
+
+        old_imshow = None
+        old_wait_key = None
+
+        try:
+            #počas behu ho spúšťame z jeho vlastného priečinka
+            os.chdir(texture_pipeline_dir)
+
+            try:
+                import cv2
+
+                old_imshow = cv2.imshow
+                old_wait_key = cv2.waitKey
+
+                #v aplikácii nechceme otvárať debug openCV okná
+                cv2.imshow = lambda *args, **kwargs: None
+                cv2.waitKey = lambda *args, **kwargs: 1
+            except Exception:
+                old_imshow = None
+                old_wait_key = None
+
+            try:
+                from external_algorithms.texture_generation_pipeline.texture_generator_pipeline import (Parameters, generate_infill)
+            except ImportError as e:
+                raise RuntimeError(
+                    "Texture generation pipeline could not be imported "
+                    f"import error: {e!r}"
+                ) from e
+
+            params = Parameters(
+                texture_name=texture_params.texture_name,
+                colors=normalized_colors,
+                count=len(normalized_colors),
+
+                #tieto parametre zatiaľ nechávame na konkrétnych hodnotách
+                scale_x=1.0,
+                scale_y=1.0,
+                density_x=0.0,
+                density_y=0.0,
+
+                rotation=float(texture_params.rotation),
+                global_scale=float(texture_params.global_scale),
+                seed=texture_params.seed,
+            )
+
+            mask_for_algorithm = np.where(apply_mask, 255, 0).astype(np.uint8)
+
+            output_full = generate_infill(current, mask_for_algorithm, params)
+
+            #pre istotu ošetríme aj prípad, keby algoritmus vrátil tuple
+            if isinstance(output_full, tuple):
+                output_full = output_full[0]
+
+            if output_full.ndim != 3 or output_full.shape[:2] != (h, w):
+                raise RuntimeError(f"Texture algorithm returned invalid output shape: {output_full.shape}")
+
+            output_rgb = output_full[..., :3].astype(np.uint8)
+
+            x, y, bw, bh = bbox
+            output_patch = output_rgb[y:y + bh, x:x + bw, :]
+
+            patch_rgba = np.zeros((bh, bw, 4), dtype=np.uint8)
+            patch_rgba[..., :3] = output_patch
+            patch_rgba[..., 3] = 255
+
+            return AlgorithmResult(
+                output_patch=patch_rgba,
+                bbox=bbox,
+                log_messages=[
+                    f"Texture: {texture_params.texture_name}",
+                    f"Colors: {normalized_colors}",
+                    f"global_scale: {texture_params.global_scale}",
+                    f"rotation: {texture_params.rotation}",
+                    f"seed: {texture_params.seed}",
+                ],
+            )
+
+        finally:
+            os.chdir(old_cwd)
+
+            if old_imshow is not None and old_wait_key is not None:
+                try:
+                    import cv2
+
+                    cv2.imshow = old_imshow
+                    cv2.waitKey = old_wait_key
+                except Exception:
+                    pass
+
+            for path_str in added_paths:
+                try:
+                    sys.path.remove(path_str)
+                except ValueError:
+                    pass
+
+    @classmethod
+    def _run_remote_realistic(cls, request: AlgorithmRequest) -> AlgorithmResult:
+        """
+        Spustí realistic fill cez remote klienta painting_inpaint.remote
+        V request.current_image už očakávame výsek obrazu
+        V request.selected_mask -výsek masky rovnakého rozmeru
+        (request.window_bbox sa používa iba interne, aby sme vedeli vrátiť patch na správne miesto v aplikácii)
+        """
+        if request.window_bbox is None:
+            raise ValueError("REALISTIC algorithm requires request.window_bbox")
+
+        image_patch = cls._ensure_rgb(request.current_image)
+        ph, pw, _ = image_patch.shape
+
+        mask_patch = request.selected_mask.astype(bool)
+        if mask_patch.shape != (ph, pw):
+            raise ValueError("selected_mask must have the same shape as current_image patch (H, W)")
+
+        if pw <= 0 or ph <= 0:
+            raise ValueError("Realistic fill patch has invalid size")
+
+        if pw * ph > cls._REMOTE_REALISTIC_MAX_PIXELS:
+            raise ValueError(
+                f"Realistic fill patch is too large ({pw}×{ph}) "
+                f"limit is {cls._REMOTE_REALISTIC_MAX_PIXELS} pixels"
+            )
+
+        if not bool(mask_patch.any()):
+            raise ValueError("Selected mask patch is empty")
+
+        partial_noise = max(0.0, min(1.0, float(request.partial_noise)))
+
+        try:
+            from painting_inpaint.remote import RestorationClient, RemoteRestorationError
+        except ImportError as e:
+            raise RuntimeError(
+                "Balík painting-inpaint-remote není nainstalovaný "
+            ) from e
+
+        base_tmp = Path(os.environ.get("LOCALAPPDATA", ".")) / "RP-Restore" / "tmp"
+        base_tmp.mkdir(parents=True, exist_ok=True)
+
+        tmpdir_path = base_tmp / f"remote_realistic_{uuid.uuid4().hex}"
+        tmpdir_path.mkdir(parents=True, exist_ok=True)
+
+        log_msgs: List[str] = []
+
+        try:
+            input_patch_path = tmpdir_path / "input_patch.png"
+            mask_patch_path = tmpdir_path / "mask_patch.png"
+
+            image_io.save_image(input_patch_path, image_patch)
+            image_io.save_mask(mask_patch_path, mask_patch)
+
+            def _on_progress(event) -> None:
+                """
+                Callback pre priebežné hlášky z algoritmu
+                Zatiaľ ich len ukladáme do logu výsledku
+                """
+                message = getattr(event, "message", None)
+                current_step = getattr(event, "current", None)
+                total_steps = getattr(event, "total", None)
+
+                if current_step is not None and total_steps is not None:
+                    if message:
+                        log_msgs.append(f"{message} ({current_step}/{total_steps})")
+                    else:
+                        log_msgs.append(f"Step {current_step}/{total_steps}")
+                elif message:
+                    log_msgs.append(str(message))
+
+                if request.progress_callback is not None:
+                    request.progress_callback(str(message) if message else "", current_step, total_steps)
+
+            client = RestorationClient.from_env(provider="modal")
+
+            try:
+                result = client.restore_file(
+                    str(input_patch_path),
+                    str(mask_patch_path),
+                    on_progress=_on_progress,
+                    prompt=cls._REMOTE_REALISTIC_PROMPT,
+                    partial_noise=partial_noise,
+                    num_inference_steps=cls._REMOTE_REALISTIC_NUM_INFERENCE_STEPS,
+                    guidance_scale=cls._REMOTE_REALISTIC_GUIDANCE_SCALE,
+                    seed=request.seed,
+                    lora_scale=cls._REMOTE_REALISTIC_LORA_SCALE,
+                    output_format="png",
+                )
+            except RemoteRestorationError as e:
+                raise RuntimeError(f"Remote realistic fill failed: {e}") from e
+
+            output_img = np.array(result.image.convert("RGBA"), dtype=np.uint8)
+
+            if output_img.shape[0] != ph or output_img.shape[1] != pw:
+                raise RuntimeError(
+                    f"Remote realistic output has wrong size "
+                    f"Expected ({ph}, {pw}), got {output_img.shape[:2]}"
+                )
+
+            status = getattr(result, "status", None)
+            job_id = getattr(result, "job_id", None)
+
+            if status is not None:
+                log_msgs.append(f"Remote status: {status}")
+            if job_id is not None:
+                log_msgs.append(f"Remote job id: {job_id}")
+
+            log_msgs.append(f"partial_noise: {partial_noise}")
+            if request.seed is not None:
+                log_msgs.append(f"seed: {request.seed}")
+
+            return AlgorithmResult(output_patch=output_img, bbox=request.window_bbox, log_messages=log_msgs)
+
+        finally:
+            shutil.rmtree(tmpdir_path, ignore_errors=True)
 
     #spustenie externého skriptu
     @classmethod
