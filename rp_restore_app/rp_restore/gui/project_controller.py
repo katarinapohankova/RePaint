@@ -321,15 +321,6 @@ class ProjectController:
 
         return True, new_name, None
 
-    def set_texture_scale(self, scale: float) -> None:
-        self.texture_settings.scale = float(scale)
-
-    def set_texture_color(self, rgb: tuple[int,int,int]) -> None:
-        self.texture_settings.color = rgb
-
-    def set_texture_strength(self, strength: float) -> None:
-        self.texture_settings.strength = float(strength)
-
     def set_texture_style(self, style: str) -> None:
         """
         Nastaví spôsob generovania textúry:
@@ -513,17 +504,7 @@ class ProjectController:
             self.materials_panel.refresh_from_project(self.project)
 
         self.update_current_tool_cursor()
-
-    def add_current_color_to_palette(self) -> None:
-        if self.project is None:
-            return
-        self.project.add_palette_color(self.project.get_current_color_rgba())
-        if self.palette_panel is not None and hasattr(self.palette_panel, "refresh_from_project"):
-            self.palette_panel.refresh_from_project(self.project)
-
-        if self.materials_panel is not None and hasattr(self.materials_panel, "refresh_from_project"):
-            self.materials_panel.refresh_from_project(self.project)
-   
+    
     def add_color_to_palette_rgba(self, color: tuple[int, int, int, int], avoid_duplicates: bool = True) -> None:
         """
         Pridá ľubovoľnú farbu do palety
@@ -773,15 +754,6 @@ class ProjectController:
         self.active_selection = None
         self.set_current_tool("brush")
 
-    def set_active_selection(self, selection) -> None:
-        """
-        nastaví aktuálnu selection
-        zatiaľ len uložíme do atribútu, neskôr pridáme highlight na canvase a info AlgorithmPanelu
-        """
-        self.active_selection = selection
-        if self.active_selection is not None and not self.active_selection.is_empty():
-            self.clear_auto_fill_preview()
-
     def has_active_selection(self) -> bool:
         """
         True ak existuje neprázdny výber oblastí
@@ -823,7 +795,7 @@ class ProjectController:
         """
         if self.canvas is None:
             return
-        self.show_tool_message("Tahejte myší na plátně pro výběr okna (max 1440×1440)")
+        self.show_tool_message("Tažením myší na plátně vyberte okno (max. 1440×1440)")
 
         def _done(bbox):
             #nastavíme pending bbox, aby sa dal posúvať
@@ -844,7 +816,7 @@ class ProjectController:
             return
 
         if project.damage_original_mask is None:
-            self.show_tool_message("Projekt nemá damage masku")
+            self.show_tool_message("Projekt nemá masku poškození")
             return
 
         x, y, w, h = window_bbox
@@ -865,7 +837,7 @@ class ProjectController:
         y1 = max(y0, min(y + h, H))
 
         if x1 <= x0 or y1 <= y0:
-            self.show_tool_message("Okno je mimo obrazu")
+            self.show_tool_message("Okno je mimo obraz")
             return
 
         ww = x1 - x0
@@ -888,14 +860,14 @@ class ProjectController:
         #výber cieľovej PAINT vrstvy
         target_layer = self.get_active_paint_layer_for_autofill()
         if target_layer is None:
-            self.show_tool_message("Není dostupná paint vrstva")
+            self.show_tool_message("Není dostupná vrstva malby")
             return
 
         #remaining maska pre konkrétnu paint vrstvu
         #tým zabezpečíme, že realistic fill sa aplikuje iba tam, kde táto konkrétna vrstva ešte nemá vyplnené pixely
         layer_remaining_full = project.get_layer_damage_remaining_mask(target_layer.meta.id)
         if layer_remaining_full is None:
-            self.show_tool_message("Nepodařilo se zjistit remaining masku aktivní paint vrstvy")
+            self.show_tool_message("Nepodařilo se zjistit zbývající masku aktivní vrstvy malby")
             return
 
         #aplikovať chceme iba tam, kde selection/damage dovoľuje zásah a zároveň je to na tejto paint vrstve ešte nevyplnené
@@ -933,13 +905,13 @@ class ProjectController:
             progress_callback=self._show_algorithm_progress,
         )
 
-        self._show_algorithm_progress("Spouštím realistic fill...", None, None)
+        self._show_algorithm_progress("Spouštím realistické doplnění...", None, None)
 
         try:
             result = AlgorithmRunner.run(request)
         except Exception as e:
             self._clear_algorithm_progress()
-            self.show_tool_message(f"Realistic fill zlyhal: {e}")
+            self.show_tool_message(f"Realistické doplnění selhalo: {e}")
             return
         finally:
             self._clear_algorithm_progress()
@@ -973,7 +945,7 @@ class ProjectController:
 
         after = target_layer.clone_subregion(bx, by, bw, bh)
 
-        action = UndoAction(description="Algorithm realistic fill (window)", layer_id=target_layer.meta.id, layer_role=target_layer.meta.role, bbox=(bx, by, bw, bh), before=before, after=after)
+        action = UndoAction(description="Realistické dopnění", layer_id=target_layer.meta.id, layer_role=target_layer.meta.role, bbox=(bx, by, bw, bh), before=before, after=after)
         project.undo_manager.push_action(action)
 
         filled_mask = np.zeros_like(dmg, dtype=bool)
@@ -983,7 +955,7 @@ class ProjectController:
         project.mark_dirty()
         self.refresh_canvas()
         self.set_pending_window_bbox(None)
-        self.show_tool_message("Realistic fill byl dokončen")
+        self.show_tool_message("Realistické doplnění bylo dokončeno")
 
     def set_pending_window_bbox_listener(self, cb) -> None:
         """Dialog si zaregistruje callback, aby dostával aktualizácie bboxu"""
@@ -1026,7 +998,7 @@ class ProjectController:
         """
         self.damage_overlay_opacity = max(0.0, min(1.0, float(opacity)))
         self.refresh_canvas()
-    
+
     def set_algorithm_panel(self, panel: object) -> None:
         """
         Prepojí controller s AlgorithmPanelom
@@ -1228,7 +1200,7 @@ class ProjectController:
         index = paint_count + 1
 
         layer_id = f"paint_{index}"
-        meta = LayerMeta(id=layer_id, name=f"Paint {index}", role=LayerRole.PAINT)
+        meta = LayerMeta(id=layer_id, name=f"Malba {index}", role=LayerRole.PAINT)
         new_layer = Layer(meta, new_image)
 
         self.project.add_layer(new_layer)
@@ -1272,14 +1244,14 @@ class ProjectController:
             return False
 
         if layer.meta.role != LayerRole.PAINT:
-            self.show_tool_message("This layer can't be deleted")
+            self.show_tool_message("Tuto vrstvu nelze smazat")
             return False
 
         try:
             self.project.remove_layer(layer_id)
             self.project.mark_dirty()
         except Exception as e:
-            self.show_tool_message(str(e))
+            self.show_tool_message(f"Vrstvu se nepodařilo smazať: {e}")
             return False
 
         #ak sme zmazali aktívnu vrstvu, nastavíme inú aktívnu
@@ -1415,15 +1387,15 @@ class ProjectController:
         
         working_arr, scale = load_working_image(image_path, max_size=4000)
 
-        bg_meta = LayerMeta(id="background", name="Background", role=LayerRole.BACKGROUND)
+        bg_meta = LayerMeta(id="background", name="Původní obraz", role=LayerRole.BACKGROUND)
         bg_layer = Layer(bg_meta, working_arr.copy())
 
         paint_img = np.zeros_like(working_arr, dtype=np.uint8)
-        paint_meta = LayerMeta(id="paint_1", name="Paint 1", role=LayerRole.PAINT)
+        paint_meta = LayerMeta(id="paint_1", name="Malba 1", role=LayerRole.PAINT)
         paint_layer = Layer(paint_meta, paint_img)
 
         edge_img = np.zeros_like(working_arr, dtype=np.uint8)
-        edge_meta = LayerMeta(id="edge_1", name="Edges 1", role=LayerRole.EDGE)
+        edge_meta = LayerMeta(id="edge_1", name="Hrany 1", role=LayerRole.EDGE)
         edge_layer = Layer(edge_meta, edge_img)
 
         project_name = Path(image_path).stem
@@ -1537,9 +1509,9 @@ class ProjectController:
             parent = QApplication.activeWindow()
             zip_path, _ = QFileDialog.getSaveFileName(
                 parent,
-                "Uložit projekt ako",
+                "Uložit projekt jako",
                 "",
-                "RP projekty (*.zip);;Všetky súbory (*.*)",
+                "RP projekty (*.zip);;Všechny soubory (*.*)",
             )
             if not zip_path:
                 return False
@@ -1550,7 +1522,7 @@ class ProjectController:
             try:
                 self.save_project_as(zip_path)
             except Exception as e:
-                self.show_tool_message(f"Chyba pri ukladaní: {e}")
+                self.show_tool_message(f"Chyba při ukládání: {e}")
                 return False
 
             #po úspechu mark_saved
@@ -1663,7 +1635,7 @@ class ProjectController:
         except Exception as e:
             #zatia+ to aspoň vypíšeme do konzoly
             print("Algorithm error:", e)
-            self.show_tool_message(f"Algorithm error: {e}")
+            self.show_tool_message(f"Chyba algoritmu: {e}")
             return
 
         #nájdeme cieľovú PAINT vrstvu
@@ -1708,7 +1680,7 @@ class ProjectController:
         #after
         after = target_layer.clone_subregion(x, y, w, h)
 
-        action = UndoAction(description=f"Algorithm {algorithm_type.value} fill", layer_id=target_layer.meta.id, layer_role=target_layer.meta.role, bbox=(x, y, w, h), before=before, after=after)
+        action = UndoAction(description=f"Doplnění algoritmem {algorithm_type.value} fill", layer_id=target_layer.meta.id, layer_role=target_layer.meta.role, bbox=(x, y, w, h), before=before, after=after)
 
         project.undo_manager.push_action(action)
 

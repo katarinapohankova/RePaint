@@ -101,33 +101,6 @@ def save_image(path: PathLike, arr: np.ndarray) -> None:
     else:
         img.save(path)
 
-
-def load_mask(path: PathLike, target_size: tuple[int, int] | None = None) -> np.ndarray:
-    """
-    Načíta masku poškodenia ako 2D bool pole
-    Všetko > 0 sa berie ako True -poškodené
-    """
-    path = Path(path)
-
-    with Image.open(path) as img:
-        #normalizujeme na RGB, aby sme vedeli detekovať biele pixely aj vo farebnej maske
-        img = img.convert("RGB")
-
-        if target_size is not None:
-            img = img.resize(target_size, resample=Image.NEAREST)
-
-        arr = np.array(img, dtype=np.uint8)
-
-    #biely pixel
-    r = arr[..., 0]
-    g = arr[..., 1]
-    b = arr[..., 2]
-
-    mask = (r == 255) & (g == 255) & (b == 255)
-
-    return mask
-
-
 def save_mask(path: PathLike, mask: np.ndarray) -> None:
     """
     Uloží 2D bool masku ako PNG 

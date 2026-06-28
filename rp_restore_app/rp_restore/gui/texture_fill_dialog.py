@@ -76,7 +76,7 @@ class _TextureColorRow(QWidget):
         self.lbl_rgb.setText(f"({r}, {g}, {b})")
 
     def _on_change_clicked(self) -> None:
-        color = QColorDialog.getColor(self._color, self, f"Vyber barvu {self._index}", options=QColorDialog.DontUseNativeDialog)
+        color = QColorDialog.getColor(self._color, self, f"Vyberte barvu {self._index}", options=QColorDialog.DontUseNativeDialog)
         if not color.isValid():
             return
 
@@ -95,7 +95,7 @@ class TextureFillDialog(QDialog):
     def __init__(self, controller: object, parent=None) -> None:
         super().__init__(parent)
 
-        self.setWindowTitle("Texture fill – parametry")
+        self.setWindowTitle("Texturové doplnění – parametry")
         self._controller = controller
         self._color_rows: list[_TextureColorRow] = []
 
@@ -180,7 +180,7 @@ class TextureFillDialog(QDialog):
 
         note = QLabel(
             "parametry scale_x, scale_y, density_x a density_y "
-            "jsou zatím ponechané na interních hodnotách algoritmu"
+            "jsou zatím ponechány na interních hodnotách algoritmu"
         )
         note.setWordWrap(True)
         layout.addWidget(note)

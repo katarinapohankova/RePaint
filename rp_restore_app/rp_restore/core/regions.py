@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Tuple, Set
+from typing import Dict, List, Tuple
 
 import numpy as np
 
@@ -30,10 +30,6 @@ class RegionMap:
     def get_region_mask(self, region_id: int) -> np.ndarray:
         """Vráti 2D bool masku pre danú oblasť"""
         return self.label_image == region_id
-
-    def get_regions_smaller_than(self, threshold: int) -> List[RegionInfo]:
-        """Vráti zoznam oblastí, ktorých area < threshold (v počte pixelov)"""
-        return [r for r in self.regions.values() if r.area < threshold]
     
     def get_region_id_at(self, x: int, y: int) -> int:
         """

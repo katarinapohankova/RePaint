@@ -9,7 +9,6 @@ from typing import List, Optional
 import numpy as np
 
 import subprocess
-import tempfile
 import sys
 import os
 import uuid

@@ -3,8 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QRadioButton, QVBoxLayout, QLabel, QPushButton, QHBoxLayout, QDialogButtonBox, QDoubleSpinBox, QSpinBox, QCheckBox
+from PySide6.QtWidgets import QDialog, QRadioButton, QVBoxLayout, QLabel, QHBoxLayout, QDialogButtonBox, QDoubleSpinBox, QSpinBox, QCheckBox
 
 
 MAX_WIN = 1440
@@ -23,13 +22,13 @@ class RealisticFillDialog(QDialog):
     """
     Dialóg pre Realistic fill
     - používateľ si buď vezme bbox z aktuálneho selection, alebo si vyberie okno ručne cez canvas
-    - okno musí byť max 1024x1024
+    - okno musí byť max 1440x1440
     - ak okno neobsahuje žiadne poškodenie, nedovolíme spustiť
     """
 
     def __init__(self, controller: object, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Realistic fill – nastavení okna")
+        self.setWindowTitle("Realistické doplnění – nastavení okna")
 
         self._controller = controller
         self._bbox: Optional[tuple[int, int, int, int]] = None
@@ -38,7 +37,7 @@ class RealisticFillDialog(QDialog):
         layout = QVBoxLayout(self)
 
         self.info = QLabel(
-            "Vyberte okno pro realistic fill\n"
+            "Vyberte okno pro realistické doplnění\n"
             f"Maximální velikost okna je {MAX_WIN}×{MAX_WIN}"
         )
         self.info.setWordWrap(True)
@@ -52,7 +51,7 @@ class RealisticFillDialog(QDialog):
         layout.addWidget(self.lbl_bbox)
 
         btn_row = QHBoxLayout()
-        self.btn_use_selection = QRadioButton("Použít bbox zo selection")
+        self.btn_use_selection = QRadioButton("Použít ohraničení výběru")
         self.btn_pick_window = QRadioButton("Vybrat okno ručně…")
         btn_row.addWidget(self.btn_use_selection)
         btn_row.addWidget(self.btn_pick_window)
@@ -62,14 +61,14 @@ class RealisticFillDialog(QDialog):
         self.btn_pick_window.clicked.connect(self._on_pick_window)
 
         partial_noise_help = (
-            "Partial noise určuje, ako výrazne môže algoritmus prepracovať maskovanú oblasť.\n"
-            "Nižšia hodnota viac zachováva pôvodnú štruktúru pod maskou.\n"
-            "Hodnota 1.0 znamená úplné dogenerovanie.\n"
-            "Ak pod maskou nie sú použiteľné pôvodné pixely, použite 1.0."
+            "Parametr míra dogenerování určuje, jak výrazně může algoritmus přepracovat maskovanou oblast.\n"
+            "Nižší hodnota více zachovává původní strukturu pod maskou.\n"
+            "Hodnota 1.0 znamená úplné dogenerování.\n"
+            "Pokud pod maskou nejsou použitelné původní pixely, použijte hodnotu 1.0."
         )
 
         noise_row = QHBoxLayout()
-        partial_noise_label = QLabel("Partial noise:")
+        partial_noise_label = QLabel("Míra dogenerování:")
         partial_noise_label.setToolTip(partial_noise_help)
         noise_row.addWidget(partial_noise_label)
 
@@ -98,7 +97,7 @@ class RealisticFillDialog(QDialog):
 
         self.seed_checkbox.toggled.connect(self.seed_spin.setEnabled)
 
-        self.use_composited_checkbox = QCheckBox("Použít obraz s dokreslenými části ako vstup")
+        self.use_composited_checkbox = QCheckBox("Použít obraz s dokreslenými částmi jako vstup")
         self.use_composited_checkbox.setChecked(False)
         layout.addWidget(self.use_composited_checkbox)
 

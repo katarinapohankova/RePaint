@@ -191,7 +191,7 @@ class BlendTool(BaseTool):
 
         layer = self._get_active_paint_layer()
         if layer is None:
-            self.controller.show_tool_message("Blend lze použít pouze na PAINT vrstvě")
+            self.controller.show_tool_message("Rozmazání lze použít pouze na vrstvě malby")
             return
 
         self.brush_size = self.controller.get_brush_size()

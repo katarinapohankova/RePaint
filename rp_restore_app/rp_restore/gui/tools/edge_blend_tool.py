@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Optional
 
 import numpy as np
 from PySide6.QtCore import Qt
@@ -11,7 +11,7 @@ except Exception:
     cv2 = None
 
 from rp_restore.core.history import UndoAction
-from rp_restore.core.layers import Layer, LayerRole
+from rp_restore.core.layers import LayerRole
 from rp_restore.core.edge_blend import blend_across_edge
 from rp_restore.gui.tools.base_tool import BaseTool
 
@@ -111,15 +111,15 @@ class EdgeBlendTool(BaseTool):
 
         project = self._project()
         if project is None or project.damage_original_mask is None:
-            self.controller.show_tool_message("Projekt nemá damage masku")
+            self.controller.show_tool_message("Projekt nemá masku poškození")
             return
 
         if self._active_paint_layer() is None:
-            self.controller.show_tool_message("Zjemnění hrany lze použít pouze na PAINT vrstvě")
+            self.controller.show_tool_message("Zjemnění hrany lze použít pouze na vrstvě malby")
             return
 
         if project.get_edge_layer() is None:
-            self.controller.show_tool_message("V projektu není žádná EDGE vrstva s hranou")
+            self.controller.show_tool_message("V projektu není žádná vrstva hran")
             return
 
         h, w = project.damage_original_mask.shape

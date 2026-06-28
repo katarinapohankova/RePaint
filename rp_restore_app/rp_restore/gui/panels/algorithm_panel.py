@@ -5,7 +5,7 @@ from typing import Optional
 from PySide6.QtWidgets import QDialog, QWidget, QVBoxLayout, QLabel, QPushButton
 from PySide6.QtCore import Qt
 
-from rp_restore.core.selection import Selection, SelectionSet
+from rp_restore.core.selection import SelectionSet
 from rp_restore.core.algorithm_runner import AlgorithmType, TextureAlgorithmParams
 from rp_restore.gui.realistic_fill_dialog import RealisticFillDialog
 from rp_restore.gui.texture_fill_dialog import TextureFillDialog
@@ -29,11 +29,11 @@ class AlgorithmPanel(QWidget):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(8)
 
-        self.info_label = QLabel("Žiadna vybraná oblasť.")
+        self.info_label = QLabel("Není vybrána žádná oblast.")
         layout.addWidget(self.info_label)
 
-        self.btn_realistic = QPushButton("Realistic fill")
-        self.btn_texture = QPushButton("Texture fill")
+        self.btn_realistic = QPushButton("Realistické doplnění")
+        self.btn_texture = QPushButton("Texturové doplnění")
 
         layout.addWidget(self.btn_realistic)
         layout.addWidget(self.btn_texture)
@@ -57,7 +57,7 @@ class AlgorithmPanel(QWidget):
 
         #Texture iba keď selection existuje
         if selection_set is None or selection_set.is_empty():
-            self.info_label.setText("Žiadna vybraná oblasť")
+            self.info_label.setText("Není vybrána žádná oblast")
             self.btn_texture.setEnabled(False)
             return
 
@@ -65,9 +65,9 @@ class AlgorithmPanel(QWidget):
         num_regions = len(selection_set.selections)
 
         if num_regions == 1:
-            self.info_label.setText(f"Vybrán region: {w}×{h}")
+            self.info_label.setText(f"Vybrána oblast: {w}×{h}")
         else:
-            self.info_label.setText(f"Vybráno {num_regions} oblastí, společný bbox: {w}×{h}")
+            self.info_label.setText(f"Vybráno {num_regions} oblastí, společný ohraničující obdélník: {w}×{h}")
         self.btn_texture.setEnabled(True)
 
     def _on_realistic_clicked(self) -> None:

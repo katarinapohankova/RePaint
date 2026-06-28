@@ -48,8 +48,8 @@ class LayersPanel(QWidget):
 
         #self.list_widget.setSelectionMode(QListWidget.SingleSelection)
         buttons_row = QHBoxLayout()
-        self.btn_add_paint = QPushButton("Nová paint vrstva")
-        self.btn_rename = QPushButton("Premenovať vrstvu")
+        self.btn_add_paint = QPushButton("Nová vrstva malby")
+        self.btn_rename = QPushButton("Přejmenovat vrstvu")
         buttons_row.addWidget(self.btn_add_paint)
         buttons_row.addWidget(self.btn_rename)
         layout.addLayout(buttons_row)
@@ -161,7 +161,7 @@ class LayersPanel(QWidget):
             if meta.role.value == "paint":
                 delete_btn = QToolButton()
                 delete_btn.setText("🗑")
-                delete_btn.setToolTip("Smazat paint vrstvu")
+                delete_btn.setToolTip("Smazat vrstvu malby")
                 delete_btn.clicked.connect(lambda _=False, layer_id=meta.id: self.delete_layer_requested.emit(layer_id))
                 row_layout.addWidget(delete_btn)
 
@@ -235,8 +235,8 @@ class LayersPanel(QWidget):
 
         new_name, ok = QInputDialog.getText(
             self,
-            "Premenovať vrstvu",
-            "Nový názov vrstvy:",
+            "Přejmenovat vrstvu",
+            "Nový název vrstvy:",
             text=old_name,
         )
         if not ok or not new_name.strip():

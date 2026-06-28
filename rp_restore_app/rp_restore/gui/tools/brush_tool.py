@@ -318,7 +318,7 @@ class BrushTool(BaseTool):
         self._update_from_controller()
 
         if layer is None:
-            self.controller.show_tool_message("Brush sa dá použiť len na PAINT vrstvách")
+            self.controller.show_tool_message("Štětec lze použít pouze na vrstvých malby")
             return
         #vždy pri začiatku ťahu si vezmeme aktuálnu farbu z panelu
         self._update_color_from_controller()

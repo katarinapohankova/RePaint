@@ -3,7 +3,6 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 
 from rp_restore.gui.tools.base_tool import BaseTool
-from rp_restore.core.selection import SelectionSet
 from rp_restore.core.layers import LayerRole
 
 
@@ -25,7 +24,7 @@ class LassoTool(BaseTool):
         
         layer = self._get_active_paint_layer()
         if layer is None:
-            self.controller.show_tool_message("Laso se dá použít jenom na PAINT vrstvě")
+            self.controller.show_tool_message("Laso lze použít pouze na vrstvě malby")
             return
 
         self.is_drawing = True

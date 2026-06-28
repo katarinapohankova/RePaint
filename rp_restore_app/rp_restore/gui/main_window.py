@@ -93,7 +93,7 @@ class MainWindow(QMainWindow):
         self.materials_dock.setWidget(self.materials_scroll)
         self.addDockWidget(Qt.RightDockWidgetArea, self.materials_dock)
 
-        #prepojenie controller - layers_panel, log_panel
+        #prepojenie controller - layers_panel
         self.controller.set_layers_panel(self.layers_panel)
         self.controller.set_algorithm_panel(self.algorithm_panel)
         self.controller.set_edge_settings_panel(self.edge_settings_panel)
@@ -165,7 +165,7 @@ class MainWindow(QMainWindow):
     def _create_menus(self) -> None:
         menu_bar = self.menuBar()
 
-        file_menu = menu_bar.addMenu("&File")
+        file_menu = menu_bar.addMenu("&Soubor")
 
         new_beta_action = QAction("Nový projekt (beta)", self)
         new_beta_action.setShortcut("Ctrl+Shift+N")
@@ -189,7 +189,7 @@ class MainWindow(QMainWindow):
         save_action.triggered.connect(self.on_save_project)
         file_menu.addAction(save_action)
 
-        save_as_action = QAction("Uložit projekt ako...", self)
+        save_as_action = QAction("Uložit projekt jako...", self)
         save_as_action.setShortcut("Ctrl+Shift+S")
         save_as_action.triggered.connect(self.on_save_project_as)
         file_menu.addAction(save_as_action)
@@ -218,14 +218,14 @@ class MainWindow(QMainWindow):
         file_menu.addAction(exit_action)
 
         #undo/redo
-        edit_menu = menu_bar.addMenu("&Edit")
+        edit_menu = menu_bar.addMenu("&Úpravy")
 
-        self.undo_action = QAction("Undo", self)
+        self.undo_action = QAction("Zpět", self)
         self.undo_action.setShortcuts([QKeySequence.Undo])
         self.undo_action.triggered.connect(self.on_undo_triggered)
         edit_menu.addAction(self.undo_action)
 
-        self.redo_action = QAction("Redo", self)
+        self.redo_action = QAction("Znovu", self)
         self.redo_action.setShortcuts([QKeySequence.Redo])
         self.redo_action.triggered.connect(self.on_redo_triggered)
         edit_menu.addAction(self.redo_action)
@@ -247,7 +247,7 @@ class MainWindow(QMainWindow):
         decrease_brush_action.triggered.connect(lambda: self.controller.adjust_brush_size(-1))
         edit_menu.addAction(decrease_brush_action)
 
-        view_menu = menu_bar.addMenu("&View")
+        view_menu = menu_bar.addMenu("&Zobrazení")
 
         def _add_dock_toggle(view_menu, title: str, dock):
             action = QAction(title, self)
@@ -275,7 +275,7 @@ class MainWindow(QMainWindow):
         #default 35%
         opacity_slider.setValue(35)
 
-        opacity_slider.setToolTip("Priehľadnosť poškodených oblastí")
+        opacity_slider.setToolTip("Průhlednost poškozených oblastí")
 
         opacity_slider.valueChanged.connect(lambda v: self.controller.set_damage_overlay_opacity(v / 100.0))
         opacity_action.setDefaultWidget(opacity_slider)
@@ -334,10 +334,10 @@ class MainWindow(QMainWindow):
         self.tool_action_group.addAction(self.eraser_action)
         self.tool_actions[self.eraser_action] = "eraser"
 
-        self.blend_action = QAction("Blend", self)
+        self.blend_action = QAction("Rozmazání", self)
         self.blend_action.setShortcut("D")
         self.blend_action.setCheckable(True)
-        self.blend_action.setToolTip("Rozmazává na aktivní paint vrstvě, nebo i na background vrstvě")
+        self.blend_action.setToolTip("Rozmazává na aktivní paint vrstvě, nebo i na původním obrazu")
         self.tools_toolbar.addAction(self.blend_action)
         self.tool_action_group.addAction(self.blend_action)
         self.tool_actions[self.blend_action] = "blend"
@@ -382,12 +382,12 @@ class MainWindow(QMainWindow):
         self.pipette_action = QAction("Pipeta", self)
         self.pipette_action.setShortcut("I")    #eyedropper
         self.pipette_action.setCheckable(True)
-        self.pipette_action.setToolTip("pipeta -vyber barvu z obrazu")
+        self.pipette_action.setToolTip("Pipeta -vybere barvu z obrazu")
         self.tools_toolbar.addAction(self.pipette_action)
         self.tool_action_group.addAction(self.pipette_action)
         self.tool_actions[self.pipette_action] = "pipette"
 
-        self.auto_fill_action = QAction("Auto-výplň mini \n (px)", self)
+        self.auto_fill_action = QAction("Auto-výplň malých oblastí \n (px)", self)
         self.auto_fill_action.triggered.connect(self.on_auto_fill_small_regions)
         self.tools_toolbar.addAction(self.auto_fill_action)
 
@@ -437,12 +437,11 @@ class MainWindow(QMainWindow):
             [200, 220, 380],
             Qt.Vertical,
         )
-        # self.log_dock.show()
         self.setCorner(Qt.BottomRightCorner, Qt.RightDockWidgetArea)
         self.setCorner(Qt.BottomLeftCorner, Qt.BottomDockWidgetArea)
         
     def _show_algorithm_progress(self, message: str, current: int | None = None, total: int | None = None) -> None:
-        self._algorithm_progress_label.setText(message or "Probíhá realistic fill...")
+        self._algorithm_progress_label.setText(message or "Probíhá realistické doplnění...")
         self._algorithm_progress_label.setVisible(True)
         self._algorithm_progress_bar.setVisible(True)
 
@@ -578,8 +577,6 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.canvas)
         if hasattr(self, "layers_dock"):
             self.layers_dock.show()
-        # if hasattr(self, "log_dock"):
-        #     self.log_dock.show()
         if hasattr(self, "algorithm_dock"):
             self.algorithm_dock.show()
         if hasattr(self, "brush_action"): 
@@ -617,7 +614,7 @@ class MainWindow(QMainWindow):
         reply = QMessageBox.question(
             self,
             "Smazat vrstvu",
-            "Naozaj chceš smazat tuhle paint vrstvu?\nTahle akce nejde vrátit zpět",
+            "Opravdu chcete smazat tuto vrstvu malby?\nTuto akci nelze vrátit zpět",
             QMessageBox.Yes | QMessageBox.No,
         )
         if reply != QMessageBox.Yes:
@@ -625,14 +622,7 @@ class MainWindow(QMainWindow):
 
         ok = self.controller.on_layer_delete_requested(layer_id)
         if not ok:
-            QMessageBox.warning(self, "Smazat vrstvu", "Vrstvu sa nepodarilo smazat")
-
-    def on_new_project_requested(self) -> None:
-        """vytvorí jednoduchý projekt a prepne do workspace"""
-        project = self._create_beta_project()
-        self.controller.set_project(project)
-        self.show_workspace()
-        self._update_colorchecker_actions()
+            QMessageBox.warning(self, "Smazat vrstvu", "Vrstvu se nepodařilo smazat")
 
     def on_open_project_requested(self) -> None:
         """
@@ -643,7 +633,7 @@ class MainWindow(QMainWindow):
             self,
             "Otevřít projekt",
             "",
-            "RP projekty (*.zip);;Všetky súbory (*.*)",
+            "RP projekty (*.zip);;Všechny soubory (*.*)",
         )
         if not zip_path:
             return
@@ -656,7 +646,7 @@ class MainWindow(QMainWindow):
             self.update_undo_redo_actions()
             self._update_colorchecker_actions()
         except Exception as e:
-            QMessageBox.critical(self, "Chyba pri otváraní projektu", str(e))
+            QMessageBox.critical(self, "Chyba při otevírání projektu", str(e))
             self.show_start_screen()
             return
 
@@ -676,13 +666,13 @@ class MainWindow(QMainWindow):
                 self.texture_panel.refresh_from_controller()
             self._update_colorchecker_actions()
         except Exception as e:
-            QMessageBox.critical(self, "Chyba pri otváraní projektu", str(e))
+            QMessageBox.critical(self, "Chyba při otevírání projektu", str(e))
             self.show_start_screen()
             return
 
     def on_export_image(self) -> None:
         if self.controller.project is None:
-            QMessageBox.information(self, "Žándý projekt", "Není otevřený žádný projekt")
+            QMessageBox.information(self, "Žádný projekt", "Není otevřen žádný projekt")
             return
 
         path, selected_filter = QFileDialog.getSaveFileName(
@@ -731,7 +721,7 @@ class MainWindow(QMainWindow):
         self.controller.refresh_canvas_region(bbox)
         self.controller.refresh_layers_panel()
 
-        self._show_toast_message("Undo", 1500)
+        self._show_toast_message("Vráceno zpět", 1500)
         self.update_undo_redo_actions()
 
     def on_redo_triggered(self) -> None:
@@ -750,7 +740,7 @@ class MainWindow(QMainWindow):
         self.controller.refresh_canvas_region(bbox)
         self.controller.refresh_layers_panel()
 
-        self._show_toast_message("Redo", 1500)
+        self._show_toast_message("Znovu provedeno", 1500)
         self.update_undo_redo_actions()
 
     def update_undo_redo_actions(self) -> None:
@@ -779,7 +769,7 @@ class MainWindow(QMainWindow):
 
     def on_colorchecker_dialog(self) -> None:
         if self.controller.project is None:
-            QMessageBox.information(self, "Žiadny projekt", "Nie je otvorený žiadny projekt.")
+            QMessageBox.information(self, "Žádný projekt", "Není otevřen žádný projekt")
             return
 
         dlg = ColorCheckerDialog(self)
@@ -788,7 +778,7 @@ class MainWindow(QMainWindow):
 
         result = dlg.get_result()
         if result is None:
-            QMessageBox.warning(self, "ColorChecker", "Nebola spočítaná korekcia.")
+            QMessageBox.warning(self, "ColorChecker", "Korekce nebyla spočítána")
             return
 
         #uložíme do projektu
@@ -804,9 +794,9 @@ class MainWindow(QMainWindow):
         """
         img_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Vyber základný obrázok",
+            "Vyberte základní obrázek",
             "",
-            "Obrázky (*.png *.jpg *.jpeg *.tif *.tiff);;Všetky súbory (*.*)",
+            "Obrázky (*.png *.jpg *.jpeg *.tif *.tiff);;Všechny soubory (*.*)",
         )
         if not img_path:
             return
@@ -828,7 +818,7 @@ class MainWindow(QMainWindow):
                 self.texture_panel.refresh_from_controller()
             self.update_undo_redo_actions()
         except Exception as e:
-            QMessageBox.critical(self, "Chyba pri vytváraní projektu", str(e))
+            QMessageBox.critical(self, "Chyba pri vytváření projektu", str(e))
             self.controller.close_project()
             self.show_start_screen()
             return
@@ -839,7 +829,7 @@ class MainWindow(QMainWindow):
         Uloží projekt na existujúcu cestu, alebo spustí Uložiť ako...
         """
         if self.controller.project is None:
-            QMessageBox.information(self, "Žiadny projekt", "Nie je otvorený žiadny projekt")
+            QMessageBox.information(self, "Žádný projekt", "Není otevřen žádný projekt")
             return
 
         if not self.controller.save_project():
@@ -848,21 +838,21 @@ class MainWindow(QMainWindow):
             return
 
         #self.start_screen.set_recent_projects(self.app_settings.get_recent_projects())
-        self.statusBar().showMessage("Projekt uložený", 3000)
+        self.statusBar().showMessage("Projekt byl uložen", 3000)
 
     def on_save_project_as(self) -> None:
         """
         Uloží projekt do nového .zip súboru
         """
         if self.controller.project is None:
-            QMessageBox.information(self, "Žiadny projekt", "Nie je otvorený žiadny projekt")
+            QMessageBox.information(self, "Žádný projekt", "Není otevřen žádný projekt")
             return
 
         zip_path, _ = QFileDialog.getSaveFileName(
             self,
-            "Uložit projekt ako",
+            "Uložit projekt jako",
             "",
-            "RP projekty (*.zip);;Všetky súbory (*.*)",
+            "RP projekty (*.zip);;Všechny soubory (*.*)",
         )
         if not zip_path:
             return
@@ -873,11 +863,11 @@ class MainWindow(QMainWindow):
         try:
             self.controller.save_project_as(zip_path)
         except Exception as e:
-            QMessageBox.critical(self, "Chyba pri ukladaní projektu", str(e))
+            QMessageBox.critical(self, "Chyba při ukládání projektu", str(e))
             return
 
         #self.start_screen.set_recent_projects(self.app_settings.get_recent_projects())
-        self.statusBar().showMessage("Projekt uložený", 3000)
+        self.statusBar().showMessage("Projekt byl uložen", 3000)
 
     def ask_to_save_before_close(self) -> str:
         """
@@ -993,7 +983,7 @@ class MainWindow(QMainWindow):
         Spustí automatické vyplnenie malých poškodených oblastí
         """
         if self.controller.project is None:
-            QMessageBox.information(self, "Žiadny projekt", "Nie je otvorený žiadny projekt")
+            QMessageBox.information(self, "Žádný projekt", "Není otevřen žádný projekt")
             return
 
         threshold = self.controller.auto_fill_threshold
@@ -1003,36 +993,14 @@ class MainWindow(QMainWindow):
         if count == 0:
             QMessageBox.information(
                 self,
-                "Auto-fill",
-                "Nenašli sa žiadne malé oblasti na vyplnenie",
+                "Auto-výplň",
+                "Nebyly nalezeny žádné malé oblasti k vyplnění",
             )
         else:
             self.statusBar().showMessage(
-                f"automaticky vyplnených oblastí: {count}",
+                f"Automaticky vyplněných oblastí: {count}",
                 5000,
             )
-
-    def _on_auto_fill_slider_changed(self, value: int) -> None:
-        """
-        Keď sa zmení slider, prepíšeme spinbox a controller threshold
-        """
-        if self.auto_fill_spinbox is not None and self.auto_fill_spinbox.value() != value:
-            self.auto_fill_spinbox.blockSignals(True)
-            self.auto_fill_spinbox.setValue(value)
-            self.auto_fill_spinbox.blockSignals(False)
-
-        self.controller.set_auto_fill_threshold(value)
-
-    def _on_auto_fill_spinbox_changed(self, value: int) -> None:
-        """
-        Keď sa zmení spinbox, prepíšeme slider a controller threshold
-        """
-        if self.auto_fill_slider is not None and self.auto_fill_slider.value() != value:
-            self.auto_fill_slider.blockSignals(True)
-            self.auto_fill_slider.setValue(value)
-            self.auto_fill_slider.blockSignals(False)
-
-        self.controller.set_auto_fill_threshold(value)
 
     def _sync_auto_fill_slider_to_spinbox_only(self, value: int) -> None:
         if self.auto_fill_spinbox is not None and self.auto_fill_spinbox.value() != value:
@@ -1082,21 +1050,21 @@ class MainWindow(QMainWindow):
 
         meta = LayerMeta(
             id="background",
-            name="Background",
+            name="Původní obraz",
             role=LayerRole.BACKGROUND,
         )
         bg_layer = Layer(meta, image)
 
         #paint vrstva -zatiaľ celá priehľadná
         paint_image = np.zeros((height, width, 4), dtype=np.uint8)
-        paint_meta = LayerMeta(id="paint_1", name="Paint 1", role=LayerRole.PAINT)
+        paint_meta = LayerMeta(id="paint_1", name="Malba 1", role=LayerRole.PAINT)
         paint_layer = Layer(paint_meta, paint_image)
 
         edge_image = np.zeros((height, width, 4), dtype=np.uint8)
-        edge_meta = LayerMeta(id="edge_1", name="Edges 1", role=LayerRole.EDGE)
+        edge_meta = LayerMeta(id="edge_1", name="Hrany 1", role=LayerRole.EDGE)
         edge_layer = Layer(edge_meta, edge_image)
 
-        project = Project("beta project")
+        project = Project("Beta projekt")
         project.add_layer(bg_layer)
         project.add_layer(paint_layer)
         project.add_layer(edge_layer)

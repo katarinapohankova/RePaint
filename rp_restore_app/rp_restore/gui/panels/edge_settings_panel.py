@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import Optional
 
-import numpy as np
-
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout, QSpinBox, QPushButton, QColorDialog 

@@ -70,7 +70,7 @@ class FillTool(BaseTool):
         layer = self._get_active_paint_layer()
         if layer is None:
             #aktívna vrstva nie je PAINT 
-            self.controller.show_tool_message("Fill sa dá použiť len na PAINT vrstvách")
+            self.controller.show_tool_message("Výplň lze použít pouze na vrstvách malby")
             return
 
         #z projektu si vypýtame selection (podľa damage_remaining_mask)
@@ -90,13 +90,13 @@ class FillTool(BaseTool):
         #per-layer remaining mask
         remaining = project.get_layer_damage_remaining_mask(layer.meta.id)
         if remaining is None:
-            self.controller.show_tool_message("Chybí damage maska alebo aktivní vrstva není PAINT")
+            self.controller.show_tool_message("CChybí maska poškození nebo aktivní vrstva není vrstva malby")
             return
         
         #iba to čo na tejto vrstve ešte nie je vyplnené
         effective_mask = region_mask & remaining 
         if not effective_mask.any():
-            self.controller.show_tool_message("Tahle oblast již byla na této vrstvě vyplněná")
+            self.controller.show_tool_message("Tato oblast již byla na této vrstvě vyplněna")
             return
         
         #before – uložíme subregion
@@ -111,7 +111,7 @@ class FillTool(BaseTool):
         ts = getattr(self.controller, "texture_settings", None)
         if paint_mode == "texture":
             if ts is None or ts.texture is None:
-                self.controller.show_tool_message("Není zvolená konkrétní textura")
+                self.controller.show_tool_message("Není vybrána žádná textura")
                 return
             pattern = generate_fill_pattern(ts, w=w, h=h, offset_x=x, offset_y=y) #seed=(x * 73856093) ^ (y * 19349663) )
             self._blend_pattern_into(sub_img, pattern, local_mask)

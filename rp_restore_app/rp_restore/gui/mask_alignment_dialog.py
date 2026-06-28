@@ -402,8 +402,7 @@ class MaskAlignmentDialog(QDialog):
     def _on_mask_coarse_click(self, x: float, y: float) -> None:
         if self.pending_image_point is None:
             QMessageBox.information(self, "Info",
-                "Nejprve klikni na stejný detail na levém obrázku (obraz), "
-                "potom na pravém (maska)",
+                "Nejprve klikněte na stejný detail na levém obrázku (obraz), potom na pravém obrázku (maska)",
             )
             #hrubý klik na maske ignorujeme, dokým nemáme bod na obraze
             return

@@ -8,7 +8,7 @@ import numpy as np
 from .history import UndoAction
 from .layers import Layer, LayerRole
 from .project_model import Project
-from .regions import build_region_map, RegionMap
+from .regions import RegionMap
 
 
 @dataclass

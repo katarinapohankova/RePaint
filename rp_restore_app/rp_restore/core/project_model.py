@@ -15,7 +15,6 @@ from .regions import RegionMap, build_region_map
 from rp_restore.io.image_io import load_image
 from rp_restore.core.texture_brush import Texture
 from rp_restore.core.color_correction import apply_color_correction
-from rp_restore.core.regions import build_region_map, RegionMap
 
 
 class Project:
@@ -48,12 +47,6 @@ class Project:
         #undo/redo manažér 
         self.undo_manager: GlobalUndoManager = GlobalUndoManager()
 
-        #warningy a logy
-        # self.log_manager: LogManager = LogManager()
-
-        #cace pre poslednú region mapu -pre porovnanie pri zmene hrán
-        # self._cached_region_map: RegionMap | None = None
-
         #paleta farieb a aktuálna farba (RGBA)
         self.palette_colors: list[tuple[int, int, int, int]] = []
         self.current_color_rgba: tuple[int, int, int, int] = (0, 0, 0, 255)  #default bude čierna
@@ -64,7 +57,7 @@ class Project:
         self.brush_flow: float = 1.0
         self.brush_allow_overlap: bool = True
 
-        self.textures: dict[str, "Texture"] = {}
+        self.textures: dict[str, Texture] = {}
         self.texture_style: str = "transparent"
 
         self.color_correction_matrix: np.ndarray | None = None
@@ -361,18 +354,6 @@ class Project:
 
         return self.damage_original_mask & ~filled_visible
 
-    def mark_region_as_filled(self, region_mask: np.ndarray) -> None:
-        """
-        označí daný region v damage maske ako vyplnený
-        """
-        if self.damage_filled_mask is None:
-            return
-
-        if region_mask.shape != self.damage_filled_mask.shape:
-            raise ValueError("region_mask must have same shape as damage mask")
-
-        self.damage_filled_mask |= region_mask.astype(bool)
-
     def get_selection_from_click(self, x: int, y: int, layer_id: str | None = None, region_map: RegionMap | None = None) -> Selection | None:
         """
         ak v bode (x, y) je pixel poškodený (true), spraví flood-fill a vráti Selection (region_mask + bbox)
@@ -604,9 +585,6 @@ class Project:
 
     def get_palette_colors(self) -> list[tuple[int, int, int, int]]:
         return list(self.palette_colors)
-
-    def clear_palette(self) -> None:
-        self.palette_colors.clear()
 
     #----ColorChecker korekcia---------
     def set_color_correction_matrix(self, matrix: np.ndarray | None) -> None:

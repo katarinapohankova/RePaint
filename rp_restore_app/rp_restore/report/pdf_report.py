@@ -231,7 +231,7 @@ def _add_title_page(story: list, project: Project, metadata: ReportMetadata, sty
 
 def _add_input_data_section(story: list, project: Project, styles: dict[str, ParagraphStyle]) -> None:
     story.append(Paragraph("Vstupní data", styles["h1"]))
-    story.append(Paragraph("Původní obraz a damage maska, ze kterých návrh rekonstrukce vychází.", styles["body"]))
+    story.append(Paragraph("Původní obraz a maska poškození, ze kterých návrh rekonstrukce vychází.", styles["body"]))
 
     original = _project_original_rgb(project)
     damage = _damage_original_mask(project)
@@ -241,10 +241,10 @@ def _add_input_data_section(story: list, project: Project, styles: dict[str, Par
         images.append(("Původní obraz", original))
 
     if damage is not None:
-        images.append(("Damage maska", _mask_to_rgb(damage)))
+        images.append(("Maska poškození", _mask_to_rgb(damage)))
 
     if original is not None and damage is not None and damage.shape == original.shape[:2]:
-        images.append(("Původní obraz s damage overlay", _apply_overlay(original, damage, alpha=0.35)))
+        images.append(("Původní obraz se zvýrazněným poškozením", _apply_overlay(original, damage, alpha=0.35)))
 
     _add_image_grid(story, images, styles)
     story.append(PageBreak())
@@ -262,8 +262,8 @@ def _add_result_section(story: list, project: Project, styles: dict[str, Paragra
         images.append(("Aktuální obraz", composited))
 
     if composited is not None and remaining_visible is not None and remaining_visible.shape == composited.shape[:2]:
-        images.append(("Aktuální obraz s damage overlay", _apply_overlay(composited, remaining_visible, alpha=0.35)))
-        images.append(("Zbývající damage maska", _mask_to_rgb(remaining_visible)))
+        images.append(("Aktuální obraz se zvýrazněným poškozením", _apply_overlay(composited, remaining_visible, alpha=0.35)))
+        images.append(("Zbývající maska poškození", _mask_to_rgb(remaining_visible)))
 
     _add_image_grid(story, images, styles)
 
@@ -281,10 +281,10 @@ def _add_result_section(story: list, project: Project, styles: dict[str, Paragra
     coverage = (filled_pixels / damage_pixels * 100.0) if damage_pixels > 0 else 0.0
 
     rows = [
-        ("Celková plocha damage masky", f"{damage_pixels} px"),
-        ("Vyplněná část ve viditelných PAINT vrstvách", f"{filled_pixels} px"),
+        ("Celková plocha masky poškození", f"{damage_pixels} px"),
+        ("Vyplněná část ve viditelných vrstvách malby", f"{filled_pixels} px"),
         ("Zbývající nevyplněná část", f"{remaining_pixels} px"),
-        ("Pokrytí damage masky", f"{coverage:.1f} %"),
+        ("Pokrytí masky poškození", f"{coverage:.1f} %"),
     ]
     story.append(_info_table(rows, styles))
     story.append(PageBreak())
@@ -516,12 +516,12 @@ def _get_edge_layers(project: Project) -> list[Layer]:
 
 def _layer_block(layer: Layer, styles: dict[str, ParagraphStyle]) -> list:
     visibility = "viditelná" if layer.meta.visible else "skrytá"
-    title = f"{layer.meta.name} ({layer.meta.role.value})"
+    title = f"{layer.meta.name} ({_layer_role_label(layer.meta.role)})"
 
     rows = [
-        ("Typ", layer.meta.role.value),
+        ("Typ", _layer_role_label(layer.meta.role)),
         ("Viditelnost", visibility),
-        ("Opacity", f"{float(layer.meta.opacity) * 100:.0f} %"),
+        ("Průhlednost", f"{float(layer.meta.opacity) * 100:.0f} %"),
     ]
 
     info = _info_table(rows, styles, col_widths=[3.8 * cm, 4.2 * cm])
@@ -541,6 +541,14 @@ def _layer_block(layer: Layer, styles: dict[str, ParagraphStyle]) -> list:
 
     return [KeepTogether([Paragraph(_escape_paragraph(title), styles["h2"]), table, Spacer(1, 0.25 * cm)])]
 
+def _layer_role_label(role: LayerRole) -> str:
+    if role == LayerRole.BACKGROUND:
+        return "Původní obraz"
+    if role == LayerRole.PAINT:
+        return "Malba"
+    if role == LayerRole.EDGE:
+        return "Hrany"
+    return str(role.value)
 
 def _layer_count_rows(project: Project) -> list[tuple[str, str]]:
     return [("Počet vrstev celkem", str(len(project.layers)))]

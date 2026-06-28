@@ -91,7 +91,7 @@ class PalettePanel(QWidget):
         self._palette_swatch_widgets = []
 
         if not palette:
-            self.palette_label.setText("Paleta: (prázdna)")
+            self.palette_label.setText("Paleta: (prázdná)")
             return
 
         self.palette_label.setText("Paleta:")

@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-from typing import Optional
-
-import numpy as np
 from PySide6.QtCore import Qt, QSize, QTimer
 from PySide6.QtGui import QColor, QPixmap, QImage, QIcon
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QSlider, QColorDialog, QGridLayout, QToolButton, QRadioButton, QButtonGroup, QGroupBox, QFrame, QScrollArea, QCheckBox
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QSlider, QGridLayout, QToolButton, QRadioButton, QButtonGroup, QGroupBox, QCheckBox
 
 from rp_restore.core.texture_brush import generate_brush_stamp
 
@@ -20,7 +17,6 @@ class MaterialsPanel(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._controller = None
-        self._current_color = QColor(0, 0, 0)
         self._selected_texture_name: str | None = None
         self._texture_buttons: dict[str, QToolButton] = {}
 
@@ -57,7 +53,7 @@ class MaterialsPanel(QWidget):
         layout.addLayout(row2)
 
         #---Brush / Eraser advanced settings
-        brush_box = QGroupBox("Štětec / guma / blend")
+        brush_box = QGroupBox("Štětec / guma / rozmazání")
         brush_layout = QVBoxLayout(brush_box)
 
         hardness_row = QHBoxLayout()
@@ -97,7 +93,7 @@ class MaterialsPanel(QWidget):
         layout.addWidget(brush_box)
 
         blend_row = QHBoxLayout()
-        blend_row.addWidget(QLabel("Síla blendu:"))
+        blend_row.addWidget(QLabel("Síla rozmazání:"))
 
         self.blend_strength_slider = QSlider(Qt.Horizontal)
         self.blend_strength_slider.setRange(0, 100)
@@ -108,10 +104,10 @@ class MaterialsPanel(QWidget):
         brush_layout.addLayout(blend_row)
 
         blend_source_row = QHBoxLayout()
-        blend_source_row.addWidget(QLabel("Zdroj blendu:"))
+        blend_source_row.addWidget(QLabel("Zdroj rozmazání:"))
 
-        self.rb_blend_active_paint = QRadioButton("Paint vrstva")
-        self.rb_blend_bg_and_paint = QRadioButton("Background + paint vrstva")
+        self.rb_blend_active_paint = QRadioButton("Vrstva malby")
+        self.rb_blend_bg_and_paint = QRadioButton("Původní obraz + vrstva malby")
         self.rb_blend_active_paint.setChecked(True)
 
         self.blend_source_group = QButtonGroup(self)
