@@ -10,10 +10,8 @@ from .layers import Layer, LayerRole
 
 from .history import UndoAction, GlobalUndoManager
 
-from .warnings import UserWarning
-from .warnings import LogManager, WarningType, RegionReference
 from .selection import Selection, SelectionSet
-from .regions import RegionMap, build_region_map, compare_region_maps
+from .regions import RegionMap, build_region_map
 from rp_restore.io.image_io import load_image
 from rp_restore.core.texture_brush import Texture
 from rp_restore.core.color_correction import apply_color_correction
@@ -51,10 +49,10 @@ class Project:
         self.undo_manager: GlobalUndoManager = GlobalUndoManager()
 
         #warningy a logy
-        self.log_manager: LogManager = LogManager()
+        # self.log_manager: LogManager = LogManager()
 
         #cace pre poslednú region mapu -pre porovnanie pri zmene hrán
-        self._cached_region_map: RegionMap | None = None
+        # self._cached_region_map: RegionMap | None = None
 
         #paleta farieb a aktuálna farba (RGBA)
         self.palette_colors: list[tuple[int, int, int, int]] = []
@@ -492,71 +490,6 @@ class Project:
 
         return SelectionSet(selections=selections)
 
-    #---------zmeny hrán ---------
-    def on_edge_layer_modified(self, edge_layer_id: str) -> None:
-        """
-        Zavolá sa po úprave EDGE vrstvy 
-        -prepočíta RegionMap na damage_remaining_mask
-        -porovná s predchádzajúcou verziou
-        -podľa rozdielov vytvorí warningy
-        """
-        damage_rem = self.get_damage_remaining_mask()
-        if damage_rem is None:
-            return
-
-        edge_layer = self.get_edge_layer()
-        if edge_layer is None:
-            return
-
-        new_map = build_region_map(damage_rem, edge_layer)
-
-        #prvýkrát len nastavíme cache
-        if self._cached_region_map is None:
-            self._cached_region_map = new_map
-            return
-
-        old_map = self._cached_region_map
-        changes = compare_region_maps(old_map, new_map)
-        self._cached_region_map = new_map
-
-        if not changes.changed_mask.any():
-            return
-
-        #zmena hrán zasahuje už vyplnené oblasti
-        filled = self._compute_filled_mask_from_layers()
-        if filled is not None:
-            affected_mask = changes.changed_mask & filled
-            if affected_mask.any():
-                ys, xs = np.where(affected_mask)
-                y_min = int(ys.min())
-                y_max = int(ys.max())
-                x_min = int(xs.min())
-                x_max = int(xs.max())
-                bbox = (x_min, y_min, x_max - x_min + 1, y_max - y_min + 1)
-
-                region_refs: list[RegionReference] = []
-                for layer in self.get_paint_layers():
-                    region_refs.append(RegionReference(layer_id=layer.meta.id, bbox=bbox, region_id=None, seed_point=None))
-
-                self.log_manager.add_warning(
-                    warning_type=WarningType.EDGE_MODIFIED_TOUCHING_FILLS,
-                    message="zmena hrán zasiahla už vyplnené oblasti",
-                    details="Upravili ste hrany v blízkosti už vyplnených poškodených častí",
-                    affected_regions=region_refs,
-                )
-
-        #zlúčené oblasti
-        for old_ids, new_id, bbox in changes.merged_regions:
-            region_refs: list[RegionReference] = []
-            for layer in self.get_paint_layers():
-                region_refs.append(RegionReference(layer_id=layer.meta.id, bbox=bbox, region_id=new_id, seed_point=None))
-
-            self.log_manager.add_warning(
-                warning_type=WarningType.EDGE_DELETED_REGIONS_MERGED,
-                message="Úprava hrán zlúčila viac poškodených oblastí do jednej",
-                details=f"Oblasti {sorted(old_ids)} boli zlúčené do oblasti {new_id}.",
-                affected_regions=region_refs,
-            )
 
     def _compute_filled_mask_from_layers(self, visible_only: bool = False) -> np.ndarray | None:
         """

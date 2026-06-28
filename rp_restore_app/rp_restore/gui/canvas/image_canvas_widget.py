@@ -4,14 +4,9 @@ from PySide6.QtCore import Qt, QPoint, QPointF, QRect
 from PySide6.QtGui import QColor, QImage, QPainter, QPaintEvent, QTransform, QWheelEvent, QPen
 from PySide6.QtWidgets import QWidget, QRubberBand
 
-from typing import List, Optional, TYPE_CHECKING
-
 import numpy as np
 
-from .overlay_highlight import draw_region_highlights, draw_selection_highlight
-
-if TYPE_CHECKING:
-    from rp_restore.core.warnings import RegionReference
+from .overlay_highlight import draw_selection_highlight #draw_region_highlights,
 from rp_restore.core.regions import RegionMap
 
 class ImageCanvasWidget(QWidget):
@@ -39,7 +34,6 @@ class ImageCanvasWidget(QWidget):
         self.controller = None
 
         self.selection_mask: np.ndarray | None = None
-        self._highlight_regions: List["RegionReference"] = []
 
         self.setMinimumSize(400, 300)
         self.setAutoFillBackground(True)
@@ -81,13 +75,6 @@ class ImageCanvasWidget(QWidget):
         Nastaví masku selection (v image súradniciach)
         """
         self.selection_mask = mask
-        self.update()
-
-    def set_highlight_for_regions(self, regions: Optional[List["RegionReference"]]) -> None:
-        """
-        Nastaví zoznam regionov na zvýraznenie -podľa warningu...
-        """
-        self._highlight_regions = regions or []
         self.update()
 
     def patch_region(self, patch: QImage, x: int, y: int) -> None:
@@ -187,10 +174,6 @@ class ImageCanvasWidget(QWidget):
         #selection overlay –polopriehľadná maska
         if self.selection_mask is not None:
             draw_selection_highlight(painter, self.selection_mask)
-        
-        #overlay highlight (warningy / selection)
-        if self._highlight_regions:
-            draw_region_highlights(painter, self._highlight_regions)
 
         #lasso overlay
         if self.show_lasso_preview and len(self.lasso_preview_points) >= 2:

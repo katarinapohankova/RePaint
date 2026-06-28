@@ -4,15 +4,14 @@ from typing import Optional, Callable
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtGui import QBrush, QColor, QCursor, QImage, QPainter, QPen, QPixmap, QRadialGradient
+from PySide6.QtGui import QBrush, QColor, QCursor, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QDialog, QFileDialog
 from PySide6.QtCore import Qt, QTimer
 
 from rp_restore.core.layers import Layer, LayerMeta, LayerRole
 from rp_restore.core.project_model import Project
 from rp_restore.config.settings import AppSettings
-from rp_restore.core.selection import Selection, SelectionSet
-from rp_restore.core.warnings import UserWarning
+from rp_restore.core.selection import SelectionSet
 from rp_restore.core.algorithm_runner import AlgorithmType, AlgorithmRequest, AlgorithmRunner, TextureAlgorithmParams
 from rp_restore.core.history import UndoAction
 from rp_restore.core.texture_brush import TextureSettings, Texture, generate_brush_stamp, clear_texture_cache, deform_texture_image
@@ -21,7 +20,6 @@ from rp_restore.core.auto_fill import auto_fill_regions, AutoFillRegion
 from rp_restore.core.regions import RegionMap, build_region_map
 from rp_restore.gui.canvas.image_canvas_widget import ImageCanvasWidget
 from rp_restore.gui.panels.layers_panel import LayersPanel
-from rp_restore.gui.panels.log_panel import LogPanel
 from rp_restore.gui.tools.base_tool import BaseTool
 from rp_restore.gui.tools.brush_tool import BrushTool
 from rp_restore.gui.tools.eraser_tool import EraserTool
@@ -74,7 +72,6 @@ class ProjectController:
         #neskôr pribudnú ďalšie ako layers_panel, log_panel, tools_panel...
         self.active_layer_id: Optional[str] = None
         self.layers_panel: Optional[LayersPanel] = None
-        self.log_panel: Optional[LogPanel] = None
         self.current_tool: Optional[BaseTool] = None
         self.active_selection: SelectionSet | None = None
         self.auto_fill_preview_active: bool = False
@@ -150,7 +147,6 @@ class ProjectController:
             self.canvas.fit_to_window()
 
         self.refresh_layers_panel()
-        self.refresh_log_panel()
         if self.palette_panel is not None and hasattr(self.palette_panel, "refresh_from_project"):
             self.palette_panel.refresh_from_project(project)
         if self.materials_panel is not None and hasattr(self.materials_panel, "refresh_from_project"):
@@ -1030,10 +1026,6 @@ class ProjectController:
         """
         self.damage_overlay_opacity = max(0.0, min(1.0, float(opacity)))
         self.refresh_canvas()
-
-    def set_log_panel(self, panel: LogPanel) -> None:
-        self.log_panel = panel
-        panel.set_controller(self)
     
     def set_algorithm_panel(self, panel: object) -> None:
         """
@@ -1382,11 +1374,6 @@ class ProjectController:
         if self._layer_preview_overlay_visible and self.canvas is not None:
             if hasattr(self.canvas, "set_layer_preview_overlay"):
                 self.canvas.set_layer_preview_overlay(self._current_layer_preview_qimage, self._current_layer_preview_title)
-
-    def refresh_log_panel(self) -> None:
-        if self.project is None or self.log_panel is None:
-            return
-        self.log_panel.refresh_from_project(self.project)
 
     def on_canvas_mouse_press(self, img_x: int, img_y: int, buttons: Qt.MouseButtons, modifiers: Qt.KeyboardModifier) -> None:
         if buttons & Qt.LeftButton:
@@ -1739,29 +1726,6 @@ class ProjectController:
         )
 
         self.refresh_canvas()
-
-
-    def focus_warning(self, warning_id: int) -> None:
-        """
-        Reaguje na klik na warning v LogPaneli
-        - nastaví aktívnu vrstvu podľa prvého RegionReference a nastaví highlight v canvase
-        """
-        if self.project is None or self.canvas is None:
-            return
-
-        w = self.project.log_manager.find_by_id(warning_id)
-        if w is None:
-            return
-
-        regions = w.affected_regions
-
-        if regions:
-            #nastavíme aktívnu vrstvu podľa prvého odkazu
-            first = regions[0]
-            self.set_active_layer(first.layer_id)
-
-        #highlight v canvase
-        self.canvas.set_highlight_for_regions(regions)
 
     def can_undo(self) -> bool:
         return self.project is not None and self.project.can_undo()

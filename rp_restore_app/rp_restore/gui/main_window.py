@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 from pathlib import Path
 from PySide6.QtCore import Qt, QTimer, QSize
-from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QCloseEvent, QCursor
+from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QCloseEvent
 from PySide6.QtWidgets import QApplication, QDialog, QHBoxLayout, QMainWindow, QSizePolicy, QSlider, QSpinBox, QStatusBar, QMessageBox, QDockWidget, QToolBar, QFileDialog, QLabel, QAbstractButton, QScrollArea, QWidget, QWidgetAction, QProgressBar
 
 from rp_restore.config.settings import AppSettings
@@ -13,7 +13,6 @@ from rp_restore.gui.canvas.image_canvas_widget import ImageCanvasWidget
 from rp_restore.gui.project_controller import ProjectController
 from rp_restore.gui.start_screen_widget import StartScreenWidget
 from rp_restore.gui.panels.layers_panel import LayersPanel
-from rp_restore.gui.panels.log_panel import LogPanel
 from rp_restore.gui.panels.algorithm_panel import AlgorithmPanel
 from rp_restore.gui.panels.edge_settings_panel import EdgeSettingsPanel
 from rp_restore.gui.panels.materials_panel import MaterialsPanel
@@ -69,14 +68,6 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.LeftDockWidgetArea, self.palette_dock)
 
         self.splitDockWidget(self.layers_dock, self.palette_dock, Qt.Vertical)
-        
-
-        #Log panel 
-        self.log_panel = LogPanel(self)
-        self.log_dock = QDockWidget("Log", self)
-        self.log_dock.setObjectName("LogDock")
-        self.log_dock.setWidget(self.log_panel)
-        self.addDockWidget(Qt.BottomDockWidgetArea, self.log_dock)
 
         #algorithm panel 
         self.algorithm_panel = AlgorithmPanel(self)
@@ -104,7 +95,6 @@ class MainWindow(QMainWindow):
 
         #prepojenie controller - layers_panel, log_panel
         self.controller.set_layers_panel(self.layers_panel)
-        self.controller.set_log_panel(self.log_panel)
         self.controller.set_algorithm_panel(self.algorithm_panel)
         self.controller.set_edge_settings_panel(self.edge_settings_panel)
         self.controller.set_materials_panel(self.materials_panel)
@@ -112,7 +102,6 @@ class MainWindow(QMainWindow):
 
         #na začiatku (start screen) dock schováme
         self.layers_dock.hide()
-        self.log_dock.hide()
         self.algorithm_dock.hide()
         self.edge_settings_dock.hide()
         self.palette_dock.hide()
@@ -313,9 +302,6 @@ class MainWindow(QMainWindow):
 
         if hasattr(self, "palette_dock"):
             _add_dock_toggle(view_menu, "Paleta", self.palette_dock)
-
-        if hasattr(self, "log_dock"):
-            _add_dock_toggle(view_menu, "Log", self.log_dock)
 
         if hasattr(self, "algorithm_dock"):
             _add_dock_toggle(view_menu, "Algoritmy", self.algorithm_dock)
@@ -567,8 +553,6 @@ class MainWindow(QMainWindow):
         #schováme dock panely (kým nie je otvorený projekt)
         if hasattr(self, "layers_dock"):
             self.layers_dock.hide()
-        if hasattr(self, "log_dock"):
-            self.log_dock.hide()
         if hasattr(self, "algorithm_dock"):
             self.algorithm_dock.hide()
         if hasattr(self, "color_dock"): 

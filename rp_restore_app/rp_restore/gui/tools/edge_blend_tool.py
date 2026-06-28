@@ -250,8 +250,6 @@ class EdgeBlendTool(BaseTool):
             if not np.array_equal(before_edge, after_edge):
                 extra_edge_actions.append(UndoAction(description="Zjemnění hrany – odstranění hrany", layer_id=edge_layer.meta.id, layer_role=edge_layer.meta.role, bbox=(x0, y0, bw, bh), before=before_edge, after=after_edge))
 
-            project.on_edge_layer_modified(edge_layer.meta.id)
-
         #zjemnenie zapíšeme do aktívnej PAINT vrstvy
         before_paint = active.image[y0:y1, x0:x1, :].copy()
 
@@ -277,7 +275,6 @@ class EdgeBlendTool(BaseTool):
         if hasattr(self.controller, "invalidate_selection_region_map_cache"):
             self.controller.invalidate_selection_region_map_cache()
 
-        self.controller.refresh_log_panel()
         self.controller.refresh_canvas_region((x0, y0, bw, bh))
 
         self._reset()

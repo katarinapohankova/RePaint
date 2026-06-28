@@ -233,12 +233,6 @@ class EdgeTool(BaseTool):
 
         self.controller.project.undo_manager.push_action(action)
 
-        #info Projecte o zmene hrán -region map diff + warningy
-        self.controller.project.on_edge_layer_modified(layer.meta.id)  
-
-        #refresh log panelu, aby sa warningy zobrazili
-        self.controller.refresh_log_panel()
-
         self.controller.invalidate_selection_region_map_cache()
 
         #refresh canvasu len v bboxe
