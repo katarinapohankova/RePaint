@@ -9,13 +9,13 @@ from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushBu
 
 def numpy_to_qimage(arr: np.ndarray) -> QImage:
     """
-    Konvertuje numpy (H, W, 3/4) uint8 na QImage (RGB888)
+    Konvertuje numpy obraz na QImage vo formáte RGB888
     """
     if arr.ndim == 2:
         #grayscale -> pseudo-RGB
         h, w = arr.shape
         rgb = np.stack([arr] * 3, axis=-1)
-    else:
+    elif arr.ndim == 3:
         h, w, c = arr.shape
         if c == 3:
             rgb = arr
@@ -24,6 +24,8 @@ def numpy_to_qimage(arr: np.ndarray) -> QImage:
             rgb = arr[..., :3]
         else:
             raise ValueError(f"Unsupported channel count: {c}")
+    else:
+        raise ValueError("Array must be 2D grayscale or 3D RGB/RGBA")
 
     #zaistíme typ uint8
     if rgb.dtype != np.uint8:
@@ -55,21 +57,24 @@ class ClickableImageWidget(QWidget):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
     def set_image(self, image: QImage) -> None:
+        """Nastaví obrázok a zruší predchádzajúce body"""
         self._image = image
         self._points.clear()
         self._draw_rect = None
         self.update()
 
     def clear_points(self) -> None:
+        """Vymaže všetky zobrazené body"""
         self._points.clear()
         self.update()
 
     def add_point(self, x: float, y: float) -> None:
+        """Pridá bod v súradniciach obrázka"""
         self._points.append(QPointF(x, y))
         self.update()
 
-    #výpočet, kde je obraz v rámci widgetu
     def _compute_draw_rect(self) -> Optional[QRect]:
+        """Vypočíta obdĺžnik, do ktorého sa obrázok vykreslí vo widgete"""
         if self._image is None:
             return None
 
@@ -84,6 +89,7 @@ class ClickableImageWidget(QWidget):
         return QRect(x, y, scaled_size.width(), scaled_size.height())
 
     def _widget_to_image(self, x: int, y: int) -> Optional[Tuple[float, float]]:
+        """Prevedie súradnice widgetu na súradnice obrázka"""
         if self._image is None or self._draw_rect is None:
             return None
 
@@ -96,9 +102,13 @@ class ClickableImageWidget(QWidget):
 
         img_x = u * self._image.width()
         img_y = v * self._image.height()
+
+        img_x = max(0.0, min(float(self._image.width() - 1), img_x))
+        img_y = max(0.0, min(float(self._image.height() - 1), img_y))
         return img_x, img_y
 
     def _image_to_widget(self, img_x: float, img_y: float) -> Optional[Tuple[int, int]]:
+        """Prevedie súradnice obrázka na súradnice widgetu"""
         if self._image is None or self._draw_rect is None:
             return None
 
@@ -111,8 +121,8 @@ class ClickableImageWidget(QWidget):
         y = rect.top() + int(round(v * rect.height()))
         return x, y
 
-    #Qt eventy
     def paintEvent(self, event) -> None: 
+        """Vykreslí obrázok a označené body"""
         painter = QPainter(self)
 
         if self._image is None:
@@ -138,6 +148,7 @@ class ClickableImageWidget(QWidget):
             painter.drawEllipse(x - 4, y - 4, 8, 8)
 
     def mousePressEvent(self, event) -> None:
+        """Spracuje kliknutie do obrázka a odošle obrazové súradnice"""
         if event.button() != Qt.LeftButton:
             return
         if self._image is None:
@@ -187,8 +198,8 @@ class PairRefinementDialog(QDialog):
 
         self._build_ui()
 
-    #pomocné orezanie okolo hrubého bodu
     def _crop_around(self, img: QImage, approx_x: float, approx_y: float) -> Tuple[QImage, int, int]:
+        """Vráti výrez obrázka okolo približne označeného bodu"""
         img_w = img.width()
         img_h = img.height()
 
@@ -207,6 +218,7 @@ class PairRefinementDialog(QDialog):
         return cropped, x0, y0
 
     def _build_ui(self) -> None:
+        """Vytvorí obsah dialógu pre spresnenie páru bodov"""
         layout = QVBoxLayout(self)
 
         info_label = QLabel(
@@ -261,20 +273,24 @@ class PairRefinementDialog(QDialog):
         self.resize(800, 500)
 
     def _on_img_click(self, local_x: float, local_y: float) -> None:
+        """Uloží spresnený bod na obraze"""
         #mapujeme späť do súradníc pôvodného obrazu
-        self._refined_image_point = ( self._img_x0 + local_x, self._img_y0 + local_y)
+        self._refined_image_point = (self._img_x0 + local_x, self._img_y0 + local_y)
         self.img_status.setText("Bod na obraze: vybrán")
         self._update_ok_enabled()
 
     def _on_mask_click(self, local_x: float, local_y: float) -> None:
+        """Uloží spresnený bod na maske"""
         self._refined_mask_point = (self._mask_x0 + local_x, self._mask_y0 + local_y)
         self.mask_status.setText("Bod na masce: vybrán")
         self._update_ok_enabled()
 
     def _update_ok_enabled(self) -> None:
+        """Povolí OK až po výbere oboch bodov"""
         self.ok_button.setEnabled(self._refined_image_point is not None and self._refined_mask_point is not None)
 
     def get_refined_points(self) -> Tuple[Optional[Tuple[float, float]], Optional[Tuple[float, float]]]:
+        """Vráti spresnený bod na obraze a na maske"""
         return self._refined_image_point, self._refined_mask_point
 
 
@@ -282,11 +298,11 @@ class PairRefinementDialog(QDialog):
 class MaskAlignmentDialog(QDialog):
     """
     Dialóg na zarovnanie masky k obrazu pomocou párov bodov
-    - užívateľ klikne hrubý bod na obraze (vľavo)
-    - klikne hrubý bod na maske (vpravo)
-    - otvorí sa PairRefinementDialog s dvoma priblíženými výrezmi, v ktorom vyberie presný bod na obraze aj na maske a potvrdí
+    - používateľ klikne hrubý bod na obraze vľavo
+    - klikne hrubý bod na maske vpravo
+    - v otvorenom okne vyberie presný bod v oboch výrezoch a potvrdí OK
     - po potvrdení vznikne jeden pár bodov
-    (počet párov musí byť aspoň 4, počet bodov na obraze = počet bodov na maske)
+    počet párov musí byť aspoň 4 a počet bodov na obraze aj maske musí byť rovnaký
     """
 
     def __init__(self, image_arr: np.ndarray, mask_arr: np.ndarray, parent: QWidget | None = None) -> None:
@@ -310,10 +326,11 @@ class MaskAlignmentDialog(QDialog):
         self._build_ui()
 
     def _build_ui(self) -> None:
+        """Vytvorí hlavné rozhranie dialógu"""
         layout = QVBoxLayout(self)
 
         info_label = QLabel(
-            "Vyberte 4–10 dobře rozpoznatelných bodů (detaily) na obraze a na masce.\n"
+            "Vyberte 4-20 dobře rozpoznatelných bodů (detaily) na obraze a na masce.\n"
             "Postup pro každý bod:\n"
             "   1) Klikněte na detail na levém obrázku (obraz)\n"
             "   2) Klikněte na stejný detail na pravém obrázku (maska)\n"
@@ -392,19 +409,24 @@ class MaskAlignmentDialog(QDialog):
 
     #pre hrubé kliky
     def _on_image_coarse_click(self, x: float, y: float) -> None:
+        """Uloží hrubý bod na obraze"""
         #ak už máme pending bod na obraze, nahradíme ho novým
         self.pending_image_point = (x, y)
+        self._redraw_points()
+        self.image_widget.add_point(x, y)
 
         #ak už bol pending mask bod, otvoríme refine dialog
         if self.pending_mask_point is not None:
             self._open_pair_refine_dialog()
 
     def _on_mask_coarse_click(self, x: float, y: float) -> None:
+        """Uloží hrubý bod na maske alebo upozorní na zlé poradie kliknutia"""
         if self.pending_image_point is None:
             QMessageBox.information(self, "Info",
                 "Nejprve klikněte na stejný detail na levém obrázku (obraz), potom na pravém obrázku (maska)",
             )
             #hrubý klik na maske ignorujeme, dokým nemáme bod na obraze
+            self._redraw_points()
             return
 
         self.pending_mask_point = (x, y)
@@ -412,6 +434,7 @@ class MaskAlignmentDialog(QDialog):
         self._open_pair_refine_dialog()
 
     def _open_pair_refine_dialog(self) -> None:
+        """Otvorí dialóg na presné určenie jedného páru bodov"""
         if self.pending_image_point is None or self.pending_mask_point is None:
             return
 
@@ -422,7 +445,7 @@ class MaskAlignmentDialog(QDialog):
             img_pt, mask_pt = dlg.get_refined_points()
             if img_pt is not None and mask_pt is not None:
                 if len(self.image_points) >= self.max_points:
-                    QMessageBox.warning(self,"Varování",
+                    QMessageBox.warning(self, "Varování",
                         f"Bylo dosaženo maximálního počtu bodů ({self.max_points})",
                     )
                 else:
@@ -438,6 +461,7 @@ class MaskAlignmentDialog(QDialog):
 
 
     def _on_clear_points(self) -> None:
+        """Vymaže všetky potvrdené aj rozpracované body"""
         self.image_points = []
         self.mask_points = []
         self.pending_image_point = None
@@ -464,11 +488,13 @@ class MaskAlignmentDialog(QDialog):
         self._update_ok_enabled()
 
     def _update_status_labels(self) -> None:
+        """Aktualizuje počet potvrdených párov bodov"""
         n_pairs = len(self.image_points)
         self.image_status.setText(f"Páry bodů: {n_pairs}")
         self.mask_status.setText(f"Páry bodů: {n_pairs}")
 
     def _update_ok_enabled(self) -> None:
+        """Povolí OK až pri dostatočnom počte párov bodov"""
         n_img = len(self.image_points)
         n_mask = len(self.mask_points)
         enabled = n_img >= self.min_points and n_mask >= self.min_points and n_img == n_mask
@@ -476,7 +502,7 @@ class MaskAlignmentDialog(QDialog):
 
     def get_points(self) -> Tuple[List[Tuple[float, float]], List[Tuple[float, float]]]:
         """
-        Vracia (body_na_obraze, body_na_maske) – v súradniciach obrázkov
-        - poradie bodov je dôležité (predpokladá sa rovnaký postup klikov
+        Vráti body na obraze a na maske v poradí, v akom boli potvrdené
+        poradie bodov je dôležité, lebo podľa neho sa počíta homografia
         """
         return list(self.image_points), list(self.mask_points)

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from typing import List, Tuple
 from dataclasses import dataclass
 
 import numpy as np
@@ -13,48 +12,44 @@ from .regions import RegionMap
 
 @dataclass
 class AutoFillRegion:
-    """
-    Jedna oblasť určená na auto-fill
-    region_id: id toho regiónu
-    bbox: (x, y, w, h)
-    """
+    """Popis jednej oblasti, ktorá sa má automaticky vyplniť"""
     region_id: int
-    bbox: Tuple[int, int, int, int]
+    bbox: tuple[int, int, int, int]
 
 
-def _compute_region_mean_color(composited_rgb: np.ndarray, damage_remaining_mask: np.ndarray, bbox: Tuple[int, int, int, int], padding: int = 8) -> np.ndarray | None:
-    """
-    Spočíta priemernú farbu okolia v bboxe oblasti
-    -berie len tie pixely v bboxe, ktoré nie sú poškodené
-    vráti RGB uint8 alebo None, ak sa nenašli žiadne vhodné pixely
-    """
-    x, y, w, h = bbox
-    img_h, img_w = damage_remaining_mask.shape
 
-    x0 = max(0, x - padding)
-    y0 = max(0, y - padding)
-    x1 = min(img_w, x + w + padding)
-    y1 = min(img_h, y + h + padding)
+def auto_fill_regions(project: Project, target_layer: Layer, region_map: RegionMap, regions_to_fill: list[AutoFillRegion]) -> int:
+    """Vyplní viacero oblastí na cieľovej PAINT vrstve ako jeden undo krok"""
+    if project is None or target_layer.meta.role != LayerRole.PAINT:
+        return 0
 
-    sub_rgb = composited_rgb[y0:y1, x0:x1, :]
-    sub_damage = damage_remaining_mask[y0:y1, x0:x1]
+    if not regions_to_fill:
+        return 0
 
-    #vhodné pixely 
-    good_mask = ~sub_damage
-    good_pixels = sub_rgb[good_mask]
+    composited_before = project.composited_image()
+    #pre auto-fill použijeme jeden spoločný undo krok
+    before_all = target_layer.image.copy()
+    filled_count = 0
 
-    if good_pixels.size == 0:
-        return None
+    for region in regions_to_fill:
+        ok = _fill_single_region(project=project, target_layer=target_layer, region_map=region_map, region_id=region.region_id, bbox=region.bbox, composited_rgb=composited_before)
+        if ok:
+            filled_count += 1
 
-    mean_color = good_pixels.mean(axis=0).astype(np.uint8)
-    return mean_color
+    if filled_count == 0:
+        return 0
 
+    #celá vrstva po auto-fille
+    after_all = target_layer.image.copy()
+    layer_h, layer_w, _ = target_layer.image.shape
+    bbox_all = (0, 0, layer_w, layer_h)
+    action = UndoAction(description=f"Auto-fill {filled_count} regions", layer_id=target_layer.meta.id, layer_role=target_layer.meta.role, bbox=bbox_all, before=before_all, after=after_all)
+    project.undo_manager.push_action(action)
 
-def _fill_single_region(project: Project, target_layer: Layer, region_map: RegionMap, region_id: int, bbox: Tuple[int, int, int, int], composited_rgb: np.ndarray) -> bool:
-    """
-    Vyplní jednu oblasť na target_layer
-    -vráti True, ak sa oblasť podarilo vyplniť
-    """
+    return filled_count
+
+def _fill_single_region(project: Project, target_layer: Layer, region_map: RegionMap, region_id: int, bbox: tuple[int, int, int, int], composited_rgb: np.ndarray) -> bool:
+    """Vyplní jeden región priemernou farbou z jeho okolia"""
     if project is None or target_layer.meta.role != LayerRole.PAINT:
         return False
 
@@ -90,34 +85,25 @@ def _fill_single_region(project: Project, target_layer: Layer, region_map: Regio
     return True
 
 
-def auto_fill_regions(project: Project, target_layer: Layer, region_map: RegionMap, regions_to_fill: List[AutoFillRegion]) -> int:
-    """
-    Vyplní zoznam konkrétnych oblastí po jednej (ale undo je len jeden krok pre všetky)
-    """
-    if project is None or target_layer.meta.role != LayerRole.PAINT:
-        return 0
+def _compute_region_mean_color(composited_rgb: np.ndarray, damage_remaining_mask: np.ndarray, bbox: tuple[int, int, int, int], padding: int = 8) -> np.ndarray | None:
+    """Spočíta priemernú farbu z nepoškodených pixelov okolo regiónu"""
+    x, y, w, h = bbox
+    img_h, img_w = damage_remaining_mask.shape
 
-    if not regions_to_fill:
-        return 0
+    x0 = max(0, x - padding)
+    y0 = max(0, y - padding)
+    x1 = min(img_w, x + w + padding)
+    y1 = min(img_h, y + h + padding)
 
-    composited_before = project.composited_image()
-    #celá vrstva pre jedno undo
-    before_all = target_layer.image.copy()
-    filled_count = 0
+    sub_rgb = composited_rgb[y0:y1, x0:x1, :]
+    sub_damage = damage_remaining_mask[y0:y1, x0:x1]
 
-    for region in regions_to_fill:
-        ok = _fill_single_region(project=project, target_layer=target_layer, region_map=region_map, region_id=region.region_id, bbox=region.bbox, composited_rgb=composited_before)
-        if ok:
-            filled_count += 1
+    #berieme iba pixely, ktoré v pôvodnej remaining maske nie sú poškodené
+    good_mask = ~sub_damage
+    good_pixels = sub_rgb[good_mask]
 
-    if filled_count == 0:
-        return 0
+    if good_pixels.size == 0:
+        return None
 
-    #celá vrstva po auto-fille
-    after_all = target_layer.image.copy()
-    layer_h, layer_w, _ = target_layer.image.shape
-    bbox_all = (0, 0, layer_w, layer_h)
-    action = UndoAction(description=f"Auto-fill {filled_count} regions", layer_id=target_layer.meta.id, layer_role=target_layer.meta.role, bbox=bbox_all, before=before_all, after=after_all)
-    project.undo_manager.push_action(action)
-
-    return filled_count
+    mean_color = good_pixels.mean(axis=0).astype(np.uint8)
+    return mean_color

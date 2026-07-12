@@ -13,7 +13,8 @@ from rp_restore.gui.tools.base_tool import BaseTool
 
 class EraserTool(BaseTool):
     """
-    guma -maže na aktívnej PAINT vrstve, nastaví alfa kanál na 0 (priehľadné) a undo funguje rovnako ako pri štetci
+    Nástroj na gumovanie pixelov na aktívnej PAINT vrstve
+    znižuje alfa kanál a undo funguje podobne ako pri štetci
     """
 
     def __init__(self, controller, canvas) -> None:
@@ -35,9 +36,11 @@ class EraserTool(BaseTool):
         self._stroke_max_y: Optional[int] = None
 
     def _update_from_controller(self) -> None:
+        """Načíta aktuálnu veľkosť gumy z controlleru"""
         self.brush_size = self.controller.get_brush_size()
 
     def _get_active_paint_layer(self):
+        """Načíta aktuálnu veľkosť gumy z controlleru"""
         project = self.controller.project
         if project is None or self.controller.active_layer_id is None:
             return None
@@ -52,7 +55,7 @@ class EraserTool(BaseTool):
     
     def _opacity_limit_u8(self) -> int:
         """
-        Krytí = maximálne množstvo vymazania v rámci jedného súvislého ťahu
+        Vráti maximálne množstvo gumovania v rámci jedného súvislého ťahu
         """
         opacity = 1.0
         if hasattr(self.controller, "get_brush_opacity"):
@@ -62,7 +65,7 @@ class EraserTool(BaseTool):
 
     def _commit_current_pass(self) -> None:
         """
-        Uzavrie aktuálny pass do committed erase masky
+        Uzavrie aktuálny pass do celkovej masky gumovania
         """
         if self._pass_erase_u8 is None:
             return
@@ -87,7 +90,7 @@ class EraserTool(BaseTool):
     def _maybe_start_new_pass(self, layer, dx: int, dy: int) -> None:
         """
         Pri výraznej zmene smeru začne nový pass
-        -nový pass môže pridať ďalšie gumovanie, ale stále iba do hranice Krytí
+        nový pass môže pridať ďalšie gumovanie, ale stále iba do hranice krytia
         """
         length = float((dx * dx + dy * dy) ** 0.5)
         if length < 1.0:
@@ -110,6 +113,9 @@ class EraserTool(BaseTool):
         self._last_dir = new_dir
 
     def _make_soft_mask(self, sh: int, sw: int, cx: int, cy: int, radius: int) -> np.ndarray:
+        """
+        Vytvorí masku gumy podľa nastavenej tvrdosti
+        """
         hardness = 1.0
         if hasattr(self.controller, "get_brush_hardness"):
             hardness = float(self.controller.get_brush_hardness())
@@ -132,7 +138,7 @@ class EraserTool(BaseTool):
     def _render_erase_from_stroke_mask(self, layer, x0: int, y0: int, x1: int, y1: int) -> None:
         """
         Renderuje aktuálny stav gumy z pôvodného before_image
-        -aby sa nehromadilo množstvo gumy nad Krytí
+        vďaka tomu sa gumovanie v jednom passe nehromadí nad nastavené krytie
         """
         if self._before_image is None or self._pass_erase_u8 is None:
             return
@@ -176,6 +182,7 @@ class EraserTool(BaseTool):
         sub[clear, 3] = 0
 
     def _erase_dot(self, layer, x: int, y: int) -> None:
+        """Pridá jeden odtlačok gumy do aktuálnej erase masky"""
         h, w, _ = layer.image.shape
         r = self.brush_size
 
@@ -215,6 +222,7 @@ class EraserTool(BaseTool):
         self._render_erase_from_stroke_mask(layer, x_min, y_min, x_max, y_max)
 
     def _erase_line(self, layer, x0: int, y0: int, x1: int, y1: int) -> None:
+        """Gumuje úsek medzi dvoma bodmi postupnými odtlačkami"""
         dx = x1 - x0
         dy = y1 - y0
         self._maybe_start_new_pass(layer, dx, dy)
@@ -226,8 +234,8 @@ class EraserTool(BaseTool):
             yy = int(round(y0 + t * dy))
             self._erase_dot(layer, xx, yy)
 
-    #--------udalosti myši--------
     def on_mouse_press(self, img_x: int, img_y: int, buttons: Qt.MouseButtons, modifiers: Qt.KeyboardModifiers) -> None:
+        """Začne nový ťah gumy"""
         if not (buttons & Qt.LeftButton):
             return
 
@@ -261,6 +269,7 @@ class EraserTool(BaseTool):
             self._sync_mask_and_refresh(layer, bbox)
 
     def on_mouse_move(self, img_x: int, img_y: int, buttons: Qt.MouseButtons, modifiers: Qt.KeyboardModifiers) -> None:
+        """Pokračuje v gumovaní počas ťahu myšou"""
         if not self.is_erasing:
             return
 
@@ -298,6 +307,7 @@ class EraserTool(BaseTool):
         self._stroke_max_y = max(self._stroke_max_y, prev_y, img_y)
 
     def on_mouse_release(self, img_x: int, img_y: int, buttons: Qt.MouseButtons, modifiers: Qt.KeyboardModifiers) -> None:
+        """Ukončí ťah gumy a uloží undo akciu"""
         if not self.is_erasing:
             return
 
@@ -335,6 +345,10 @@ class EraserTool(BaseTool):
         before = self._before_image[y0:y1, x0:x1, :].copy()
         after = layer.image[y0:y1, x0:x1, :].copy()
 
+        if np.array_equal(before, after):
+            self._cleanup()
+            return
+
         bbox = (x0, y0, bw, bh)
 
         action = UndoAction(description="Erase stroke", layer_id = layer.meta.id, layer_role = layer.meta.role, bbox = bbox, before = before, after = after)
@@ -352,6 +366,7 @@ class EraserTool(BaseTool):
         self._cleanup()
 
     def _sync_mask_and_refresh(self, layer, bbox: tuple[int, int, int, int]) -> None:
+        """Zosynchronizuje filled masku vrstvy a prekreslí dotknutý bbox"""
         project = self.controller.project
         if project is not None:
             project.sync_layer_filled_mask_from_alpha(layer.meta.id, bbox, mode="assign")
@@ -362,6 +377,7 @@ class EraserTool(BaseTool):
             self.controller.refresh_canvas()
 
     def _clamp_bbox_to_layer(self, layer, bbox: tuple[int, int, int, int]) -> tuple[int, int, int, int] | None:
+        """Oreže bbox podľa hraníc vrstvy"""
         x, y, bw, bh = bbox
         if bw <= 0 or bh <= 0:
             return None
@@ -379,6 +395,8 @@ class EraserTool(BaseTool):
         return (x0, y0, x1 - x0, y1 - y0)
 
     def _cleanup(self) -> None:
+        """Vyčistí dočasný stav po ťahu gumy"""
+        self.is_erasing = False
         self._before_image = None
         self._stroke_committed_erase_u8 = None
         self._pass_erase_u8 = None
@@ -393,6 +411,7 @@ class EraserTool(BaseTool):
         self._stroke_max_y = None
 
     def get_cursor(self):
+        """Vráti kurzor gumy"""
         if self.controller is None:
             return Qt.ArrowCursor
 

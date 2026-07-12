@@ -4,7 +4,7 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout, QGridLayout, QColorDialog, QToolButton, QFrame, QScrollArea, QRadioButton, QButtonGroup, QGroupBox
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout, QGridLayout, QColorDialog, QToolButton, QFrame, QScrollArea
 from shiboken6 import isValid
 
 from rp_restore.core.project_model import Project
@@ -12,9 +12,7 @@ from rp_restore.core.project_model import Project
 
 class PalettePanel(QWidget):
     """
-    Panel palety farieb pod vrstvami
-    -aktuálna farba (swatch + dialog)
-    -paleta (scroll, x na odstránenie, flash/scroll pri duplikáte)
+    Panel pre aktuálnu farbu a paletu uložených farieb
     """
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -27,10 +25,7 @@ class PalettePanel(QWidget):
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(6)
 
-        # title = QLabel("Paleta")
-        # layout.addWidget(title)
-
-        #---aktuálna farba---
+        #aktuálna farba
         self.current_color: QColor = QColor(0, 0, 0, 255)
 
         swatch_row = QHBoxLayout()
@@ -45,7 +40,7 @@ class PalettePanel(QWidget):
         layout.addLayout(swatch_row)
         layout.addWidget(self.btn_add_to_palette)
 
-        #---paleta scroll---
+        #skrolovateľná paleta
         self.palette_label = QLabel("Paleta:")
         layout.addWidget(self.palette_label)
 
@@ -62,25 +57,27 @@ class PalettePanel(QWidget):
 
         layout.addWidget(self.palette_scroll)
 
-        self._palette_swatch_widgets: list[QWidget] = []
+        self._palette_swatch_widgets: list[QPushButton] = []
 
         layout.addStretch(1)
 
-        #signals
+        #signály
         self.btn_change_color.clicked.connect(self._on_change_color_clicked)
         self.btn_add_to_palette.clicked.connect(self._on_add_to_palette_clicked)
 
     def set_controller(self, controller: object) -> None:
+        """Nastaví controller panelu"""
         self._controller = controller
 
     def refresh_from_project(self, project: Project) -> None:
+        """Aktualizuje aktuálnu farbu a paletu podľa projektu"""
         self._project = project
 
-        #current color z projektu
+        #aktuálna farba z projektu
         r, g, b, a = project.get_current_color_rgba()
         self.set_current_color(QColor(r, g, b, a))
 
-        #rebuild palety
+        #znovu vytvoríme obsah palety
         while self.palette_layout.count():
             item = self.palette_layout.takeAt(0)
             w = item.widget()
@@ -126,9 +123,8 @@ class PalettePanel(QWidget):
 
             self.palette_layout.addWidget(container, row, col)
 
-    #---------UI----------
-
     def set_current_color(self, color: QColor) -> None:
+        """Nastaví aktuálnu farbu a aktualizuje jej náhľad"""
         if not color.isValid():
             return
         self.current_color = color
@@ -138,12 +134,14 @@ class PalettePanel(QWidget):
         )
 
     def _scroll_palette_to_index(self, index: int) -> None:
+        """Posunie paletu tak, aby bola viditeľná farba na danom indexe"""
         if index < 0 or index >= len(self._palette_swatch_widgets):
             return
         w = self._palette_swatch_widgets[index]
         self.palette_scroll.ensureWidgetVisible(w, xmargin=10, ymargin=10)
 
     def _flash_palette_index(self, index: int) -> None:
+        """Krátko zvýrazní farbu v palete"""
         if index < 0 or index >= len(self._palette_swatch_widgets):
             return
         w = self._palette_swatch_widgets[index]
@@ -160,6 +158,7 @@ class PalettePanel(QWidget):
         QTimer.singleShot(700, _restore)
 
     def _on_change_color_clicked(self) -> None:
+        """Otvorí dialóg na výber aktuálnej farby"""
         if self._project is None:
             return
 
@@ -167,7 +166,7 @@ class PalettePanel(QWidget):
         if initial.red() == 0 and initial.green() == 0 and initial.blue() == 0:
             initial = QColor(255, 255, 255, 255)
 
-        color = QColorDialog.getColor(initial, self, "Vyber barvu", options=QColorDialog.DontUseNativeDialog)
+        color = QColorDialog.getColor(initial, self, "Vyberte barvu", options=QColorDialog.DontUseNativeDialog)
         if not color.isValid():
             return
 
@@ -177,6 +176,7 @@ class PalettePanel(QWidget):
             self._controller.set_current_color_rgba(rgba)
 
     def _on_add_to_palette_clicked(self) -> None:
+        """Pridá aktuálnu farbu do palety alebo zvýrazní existujúcu"""
         if self._controller is None or self._project is None:
             return
 
@@ -193,12 +193,14 @@ class PalettePanel(QWidget):
             self._controller.add_color_to_palette_rgba(rgba, avoid_duplicates=True)
 
     def _on_palette_color_clicked(self, rgba: tuple[int, int, int, int]) -> None:
+        """Nastaví kliknutú farbu z palety ako aktuálnu"""
         r, g, b, a = rgba
         self.set_current_color(QColor(r, g, b, a))
         if self._controller is not None and hasattr(self._controller, "set_current_color_rgba"):
             self._controller.set_current_color_rgba(rgba)
 
     def _remove_color_from_palette(self, index: int) -> None:
+        """Požiada controller o odstránenie farby z palety"""
         if self._controller is None:
             return
         if hasattr(self._controller, "remove_color_from_palette"):

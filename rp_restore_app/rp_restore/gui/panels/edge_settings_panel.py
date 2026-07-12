@@ -8,10 +8,10 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout, QSpinBo
 
 class EdgeSettingsPanel(QWidget):
     """
-    Panel pre nastavenie hrúbky a farby EdgeToolu
-    - hrúbka (px)
+    Panel pre nastavenie farby hrán a šírky zjemnenia po odstránení hrany
+    - zjemnenie (px)
     - edge farba
-    - Použiť aktuální barvu
+    - použitie aktuálnej farby z panelu Barvy
     """
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -66,6 +66,7 @@ class EdgeSettingsPanel(QWidget):
     #prepojenie s controllerom
 
     def set_controller(self, controller: object) -> None:
+        """Nastaví controller a načíta z neho aktuálne hodnoty"""
         self._controller = controller
         self.refresh_from_controller(controller)
 
@@ -75,7 +76,7 @@ class EdgeSettingsPanel(QWidget):
         """
         self._controller = controller
 
-        if not hasattr(controller, "get_edge_brush_size") or not hasattr(controller, "get_edge_color_rgba"):
+        if not hasattr(controller, "get_edge_color_rgba"):
             return
 
         if hasattr(controller, "get_edge_blend_buffer"):
@@ -90,6 +91,7 @@ class EdgeSettingsPanel(QWidget):
 
 
     def _set_swatch_color(self, color: QColor) -> None:
+        """Aktualizuje farebný náhľad edge farby"""
         self.color_swatch.setStyleSheet(
             f"background-color: rgba({color.red()}, {color.green()}, {color.blue()}, {color.alpha()});"
             "border: 1px solid #333;"
@@ -98,6 +100,7 @@ class EdgeSettingsPanel(QWidget):
     #---reakcie na UI---
 
     def _on_change_color_clicked(self) -> None:
+        """Otvorí dialóg na výber edge farby"""
         if self._controller is None:
             return
 
@@ -108,7 +111,7 @@ class EdgeSettingsPanel(QWidget):
         r, g, b, a = [int(x) for x in arr.tolist()]
         initial = QColor(r, g, b, a)
 
-        color = QColorDialog.getColor(initial, self, "Vyber barvu hran")
+        color = QColorDialog.getColor(initial, self, "Vyberte barvu hran")
         if not color.isValid():
             return
 
@@ -121,7 +124,7 @@ class EdgeSettingsPanel(QWidget):
 
     def _on_use_current_clicked(self) -> None:
         """
-        Použije aktuálnu barvu z Barvy panelu ako edge barvu
+        Použije aktuálnu farbu z panelu Barvy ako edge farbu
         """
         if self._controller is None:
             return
@@ -138,6 +141,7 @@ class EdgeSettingsPanel(QWidget):
         self._set_swatch_color(QColor(r, g, b, a))
     
     def _on_add_edge_color_to_palette_clicked(self) -> None:
+        """Pridá aktuálnu edge farbu do palety"""
         if self._controller is None:
             return
         if not hasattr(self._controller, "get_edge_color_rgba"):
@@ -150,6 +154,7 @@ class EdgeSettingsPanel(QWidget):
             self._controller.add_color_to_palette_rgba((r, g, b, a), avoid_duplicates=True)
 
     def _on_blend_width_changed(self, value: int) -> None:
+        """Nastaví šírku pásu pre edge blend nástroj"""
         if self._controller is None:
             return
 

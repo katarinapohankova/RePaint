@@ -5,7 +5,7 @@ import cv2
 
 import numpy as np
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QImage, QPixmap, QPainter, QPen, QColor
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QMessageBox
 
 from rp_restore.core.color_correction import COLORCHECKER_SRGB_24, estimate_correction_matrix_affine, rms_rgb
@@ -14,14 +14,15 @@ from rp_restore.io.image_io import load_image
 
 @dataclass
 class ColorCheckerResult:
+    """Výsledok výpočtu farebnej korekcie z ColorChecker tabuľky"""
     matrix: np.ndarray  #(3,4)
     rms_error: float    #RMS v RGB
 
 
 class _ClickImageLabel(QLabel):
     """
-    okno pre obrázok na zakliknutie rohov colorcheckeru
-    -ukladáme body v image súradniciach
+    QLabel pre kliknutie na rohy ColorChecker tabuľky
+    body sa ukladajú v súradniciach pôvodného obrázka
     """
 
     def __init__(self, parent=None) -> None:
@@ -35,11 +36,13 @@ class _ClickImageLabel(QLabel):
         self._last_drawn_pixmap: QPixmap | None = None
 
     def set_image(self, qimage: QImage) -> None:
+        """Nastaví obrázok a vymaže predchádzajúce kliknuté body"""
         self._qimage = qimage
         self.points = []
         self._update_pixmap()
 
     def _update_pixmap(self) -> None:
+        """Preškáluje obrázok podľa veľkosti widgetu"""
         if self._qimage is None:
             self.clear()
             return
@@ -49,10 +52,12 @@ class _ClickImageLabel(QLabel):
         self._redraw_with_points()
 
     def resizeEvent(self, event) -> None:
+        """Pri zmene veľkosti widgetu prepočíta zobrazený pixmap"""
         super().resizeEvent(event)
         self._update_pixmap()
 
     def mousePressEvent(self, event) -> None:
+        """Pridá bod po kliknutí do obrázka"""
         if self._qimage is None or self._pixmap is None:
             return
         if event.button() != Qt.LeftButton:
@@ -74,27 +79,51 @@ class _ClickImageLabel(QLabel):
         if mx < 0 or my < 0 or mx >= pw or my >= ph:
             return
 
-        #scale pixmap->image
+        #prevod z pixmap súradníc do súradníc pôvodného obrázka
         iw = self._qimage.width()
         ih = self._qimage.height()
         ix = int(round(mx * (iw / pw)))
         iy = int(round(my * (ih / ph)))
+        ix = max(0, min(iw - 1, ix))
+        iy = max(0, min(ih - 1, iy))
 
         self.points.append((ix, iy))
         self._redraw_with_points()
 
     def _redraw_with_points(self) -> None:
+        """Prekreslí obrázok spolu s kliknutými bodmi"""
         if self._pixmap is None:
             return
         pix = QPixmap(self._pixmap)
+
+        if self._qimage is not None and self.points:
+            painter = QPainter(pix)
+            try:
+                pen = QPen(QColor(255, 230, 0))
+                pen.setWidth(2)
+                painter.setPen(pen)
+                painter.setBrush(QColor(255, 230, 0))
+
+                iw = self._qimage.width()
+                ih = self._qimage.height()
+                pw = self._pixmap.width()
+                ph = self._pixmap.height()
+
+                for index, (ix, iy) in enumerate(self.points, start=1):
+                    px = int(round(ix * (pw / iw)))
+                    py = int(round(iy * (ph / ih)))
+                    painter.drawEllipse(px - 4, py - 4, 8, 8)
+                    painter.drawText(px + 6, py - 6, str(index))
+            finally:
+                painter.end()
+
         self.setPixmap(pix)
 
 
 class ColorCheckerDialog(QDialog):
     """
-    Dialóg:
-      -načíta kalibračnú fotku s ColorChecker tabuľkou
-      -po kliknutí na 4 rohy (LH, PH, PD, LD) spočíta korekciu 
+    Dialóg na výpočet farebnej korekcie z fotografie ColorChecker tabuľky
+    používateľ označí 4 rohy tabuľky v poradí LH, PH, PD, LD
     """
 
     def __init__(self, parent=None) -> None:
@@ -153,14 +182,17 @@ class ColorCheckerDialog(QDialog):
         self.startTimer(200)
 
     def timerEvent(self, event) -> None:
+        """Priebežne aktualizuje počet označených bodov"""
         pts = self.viewer.points
         self.points_label.setText(f"Body ({len(pts)}/4): {pts}")
         self.btn_compute.setEnabled(self._image_rgb is not None and len(pts) >= 4)
 
     def get_result(self) -> ColorCheckerResult | None:
+        """Vráti vypočítanú korekciu alebo None"""
         return self._result
 
     def _on_load_image(self) -> None:
+        """Načíta kalibračnú fotografiu zo súboru"""
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Vyberte kalibrační fotografii",
@@ -179,7 +211,7 @@ class ColorCheckerDialog(QDialog):
                 arr = arr[..., :3]
 
             if arr.dtype != np.uint8:
-                #downcast na uint8 pre výpočet
+                #pre výpočet používame 8-bitové RGB hodnoty
                 if arr.dtype == np.uint16:
                     arr = (arr / 256).astype(np.uint8)
                 else:
@@ -200,6 +232,7 @@ class ColorCheckerDialog(QDialog):
             QMessageBox.critical(self, "Chyba", str(e))
 
     def _on_compute(self) -> None:
+        """Spočíta korekčnú maticu z označených rohov tabuľky"""
         if self._image_rgb is None:
             return
         pts = self.viewer.points
@@ -221,10 +254,10 @@ class ColorCheckerDialog(QDialog):
 
     def _measure_colorchecker_patches(self, image_rgb: np.ndarray, corners: list[tuple[int, int]]) -> np.ndarray:
         """
-        Z rohov spraví warp na normovaný grid 6x4 a zmeria 24 patchov
-        vráti measured_colors (24,3) float32 v 0..255
-        """
-        #cieľová veľkosť "narovnanej" tabuľky
+    Narovná ColorChecker tabuľku na grid 6x4 a zmeria farbu 24 políčok
+    vracia pole measured_colors tvaru (24, 3) v rozsahu 0-255
+    """
+        #cieľová veľkosť narovnanej tabuľky
         out_w = 600
         out_h = 400
 
@@ -234,7 +267,7 @@ class ColorCheckerDialog(QDialog):
         H = cv2.getPerspectiveTransform(src, dst)
         warped = cv2.warpPerspective(image_rgb, H, (out_w, out_h), flags=cv2.INTER_LINEAR)
 
-        #6x4 grid
+        #ColorChecker Classic má 6 stĺpcov a 4 riadky
         cols = 6
         rows = 4
         cell_w = out_w / cols
@@ -254,7 +287,7 @@ class ColorCheckerDialog(QDialog):
                     measured.append([0, 0, 0])
                     continue
 
-                #medián kvôli šumu
+                #medián je odolnejší voči šumu a menším odleskom
                 pix = patch.reshape(-1, 3).astype(np.float32)
                 med = np.median(pix, axis=0)
                 measured.append(med.tolist())

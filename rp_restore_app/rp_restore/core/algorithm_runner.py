@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import datetime
 from enum import Enum
 from pathlib import Path
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 import numpy as np
 
@@ -21,6 +21,9 @@ class AlgorithmType(str, Enum):
     REALISTIC = "realistic"
     TEXTURE = "texture"
 
+class RealisticFillMode(str, Enum):
+    BASIC = "basic"
+    GUIDED = "guided"
 
 @dataclass
 class AlgorithmRequest:
@@ -34,7 +37,8 @@ class AlgorithmRequest:
     mock: bool = False  #True = nepúšťaj subprocess, sprav demo výstup
     partial_noise: float = 0.7
     seed: Optional[int] = None
-    progress_callback: Optional[callable] = None
+    realistic_mode: RealisticFillMode = RealisticFillMode.BASIC
+    progress_callback: Optional[Callable[[str, Optional[int], Optional[int]], None]] = None
     texture_params: Optional[TextureAlgorithmParams] = None
 
 @dataclass
@@ -52,6 +56,13 @@ class AlgorithmResult:
     bbox: tuple[int, int, int, int]     #(x, y, w, h)
     log_messages: List[str]
 
+class RemoteRestorationAccessError(RuntimeError):
+    """
+    Chyba prístupových údajov alebo endpointu remote služby.
+
+    Používa sa na odlíšenie zle zadaného API kľúča / endpoint URL
+    od bežných chýb algoritmu.
+    """
 
 class AlgorithmRunner:
     """
@@ -316,13 +327,46 @@ class AlgorithmRunner:
                 except ValueError:
                     pass
 
+    @staticmethod
+    def _looks_like_remote_access_error(error: Exception) -> bool:
+        """
+        Rozpozná chyby, ktoré pravdepodobne znamenajú zlý API key,
+        zlý endpoint alebo problém s autorizáciou remote služby.
+        """
+        text = f"{type(error).__name__}: {error}".lower()
+
+        access_error_tokens = (
+            "401",
+            "403",
+            "unauthorized",
+            "forbidden",
+            "authentication",
+            "authorization",
+            "api key",
+            "api_key",
+            "apikey",
+            "invalid key",
+            "invalid credentials",
+            "invalid token",
+            "modal_endpoint_url",
+            "endpoint url",
+            "configuration",
+        )
+
+        return any(token in text for token in access_error_tokens)
+
     @classmethod
     def _run_remote_realistic(cls, request: AlgorithmRequest) -> AlgorithmResult:
         """
-        Spustí realistic fill cez remote klienta painting_inpaint.remote
-        V request.current_image už očakávame výsek obrazu
-        V request.selected_mask -výsek masky rovnakého rozmeru
-        (request.window_bbox sa používa iba interne, aby sme vedeli vrátiť patch na správne miesto v aplikácii)
+        Spustí realistické doplnenie cez remote klienta painting_inpaint.remote.
+
+        V request.current_image očakávame iba výsek obrazu.
+        V request.selected_mask očakávame výsek masky rovnakého rozmeru.
+        request.window_bbox sa používa iba interne, aby aplikácia vedela vrátiť patch na správne miesto.
+
+        Podporované sú dva režimy:
+        - BASIC: pôvodný rýchlejší fill model, volá restore_file()
+        - GUIDED: pomalší model vedený štruktúrou/náčrtom, volá restore_guided_file()
         """
         if request.window_bbox is None:
             raise ValueError("REALISTIC algorithm requires request.window_bbox")
@@ -393,19 +437,33 @@ class AlgorithmRunner:
             client = RestorationClient.from_env(provider="modal")
 
             try:
-                result = client.restore_file(
-                    str(input_patch_path),
-                    str(mask_patch_path),
-                    on_progress=_on_progress,
-                    prompt=cls._REMOTE_REALISTIC_PROMPT,
-                    partial_noise=partial_noise,
-                    num_inference_steps=cls._REMOTE_REALISTIC_NUM_INFERENCE_STEPS,
-                    guidance_scale=cls._REMOTE_REALISTIC_GUIDANCE_SCALE,
-                    seed=request.seed,
-                    lora_scale=cls._REMOTE_REALISTIC_LORA_SCALE,
-                    output_format="png",
-                )
+                if request.realistic_mode == RealisticFillMode.GUIDED:
+                    result = client.restore_guided_file(
+                        str(input_patch_path),
+                        str(mask_patch_path),
+                        on_progress=_on_progress,
+                        seed=request.seed,
+                    )
+                else:
+                    result = client.restore_file(
+                        str(input_patch_path),
+                        str(mask_patch_path),
+                        on_progress=_on_progress,
+                        prompt=cls._REMOTE_REALISTIC_PROMPT,
+                        partial_noise=partial_noise,
+                        num_inference_steps=cls._REMOTE_REALISTIC_NUM_INFERENCE_STEPS,
+                        guidance_scale=cls._REMOTE_REALISTIC_GUIDANCE_SCALE,
+                        seed=request.seed,
+                        lora_scale=cls._REMOTE_REALISTIC_LORA_SCALE,
+                        output_format="png",
+                    )
             except RemoteRestorationError as e:
+                if cls._looks_like_remote_access_error(e):
+                    raise RemoteRestorationAccessError(
+                        "Přihlášení k remote službě se nepodařilo. "
+                        "Zkontrolujte endpoint URL a API key."
+                    ) from e
+
                 raise RuntimeError(f"Remote realistic fill failed: {e}") from e
 
             output_img = np.array(result.image.convert("RGBA"), dtype=np.uint8)
@@ -424,7 +482,10 @@ class AlgorithmRunner:
             if job_id is not None:
                 log_msgs.append(f"Remote job id: {job_id}")
 
-            log_msgs.append(f"partial_noise: {partial_noise}")
+            log_msgs.append(f"realistic_mode: {request.realistic_mode.value}")
+
+            if request.realistic_mode == RealisticFillMode.BASIC:
+                log_msgs.append(f"partial_noise: {partial_noise}")
             if request.seed is not None:
                 log_msgs.append(f"seed: {request.seed}")
 

@@ -11,6 +11,7 @@ __pycache__/
 .venv/
 venv/
 algo_venv/
+.venv-py310-backup/
 
 .pytest_cache/
 

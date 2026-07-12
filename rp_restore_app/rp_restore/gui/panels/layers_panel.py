@@ -3,15 +3,14 @@ from __future__ import annotations
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton, QHBoxLayout, QInputDialog, QToolButton, QFrame, QSlider
 
 from rp_restore.core.project_model import Project
 
 class ClickablePreviewLabel(QLabel):
     """
-    QLabel, ktorý vyšle signál po kliknutí
-    -na malý náhľad vrstvy
+    QLabel, ktorý vyšle signál po kliknutí na malý náhľad vrstvy
     """
     clicked = Signal()
 
@@ -43,10 +42,6 @@ class LayersPanel(QWidget):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
 
-        # label = QLabel("Vrstvy")
-        # layout.addWidget(label)
-
-        #self.list_widget.setSelectionMode(QListWidget.SingleSelection)
         buttons_row = QHBoxLayout()
         self.btn_add_paint = QPushButton("Nová vrstva malby")
         self.btn_rename = QPushButton("Přejmenovat vrstvu")
@@ -61,9 +56,6 @@ class LayersPanel(QWidget):
         self.list_widget.itemSelectionChanged.connect(self._on_selection_changed)
         self.btn_add_paint.clicked.connect(self._on_add_paint_clicked)
         self.btn_rename.clicked.connect(self._on_rename_clicked)
-
-        #keď sa zmení výber, zavoláme callback
-        self.list_widget.itemSelectionChanged.connect(self._on_selection_changed)
 
         separator = QFrame()
         separator.setFrameShape(QFrame.HLine)
@@ -101,6 +93,7 @@ class LayersPanel(QWidget):
         self._controller = controller
 
     def set_preview(self, qimage) -> None:
+        """Nastaví malý náhľad aktívnej vrstvy"""
         if qimage is None:
             self.preview_image.clear()
             return
@@ -118,12 +111,19 @@ class LayersPanel(QWidget):
         self.list_widget.blockSignals(True)
         self.list_widget.clear()
 
+        role_names = {
+            "background": "původní",
+            "edge": "hrany",
+            "paint": "malba",
+        }
+
         for layer in project.layers:
             meta = layer.meta
 
-            #item len ako kontajner
+            #item slúži ako kontajner pre vlastný widget riadku
             item = QListWidgetItem()
             item.setData(Qt.UserRole, meta.id)
+            item.setData(Qt.UserRole + 1, meta.name)
             self.list_widget.addItem(item)
 
             #widget riadku
@@ -132,13 +132,11 @@ class LayersPanel(QWidget):
             row_layout.setContentsMargins(6, 2, 6, 2)
             row_layout.setSpacing(6)
 
-            #eye button
+            #tlačidlo viditeľnosti
             eye = QToolButton()
             eye.setCheckable(True)
             eye.setChecked(meta.visible)
             eye.setToolTip("Zobrazit / skrýt vrstvu")
-            eye_on = QIcon.fromTheme("view-visible")
-            eye_off = QIcon.fromTheme("view-hidden")
             eye.setText("◉" if meta.visible else "⦸")
 
             def _on_eye_toggled(checked, layer_id=meta.id, btn=eye):
@@ -148,12 +146,12 @@ class LayersPanel(QWidget):
             eye.toggled.connect(_on_eye_toggled)
             row_layout.addWidget(eye)
 
-            #name label
+            #názov vrstvy
             name_label = QLabel(meta.name)
             row_layout.addWidget(name_label, 1)
 
-            #role label 
-            role_label = QLabel(meta.role.value)
+            #typ vrstvy
+            role_label = QLabel(role_names.get(meta.role.value, meta.role.value))
             role_label.setStyleSheet("color: #aaa; font-size: 10px;")
             row_layout.addWidget(role_label)
 
@@ -196,6 +194,7 @@ class LayersPanel(QWidget):
     #----------callback pri kliknutí----------
 
     def _on_selection_changed(self) -> None:
+        """Nastaví kliknutú vrstvu ako aktívnu"""
         if self._controller is None:
             return
 
@@ -210,12 +209,14 @@ class LayersPanel(QWidget):
             self._controller.set_active_layer(layer_id)
 
     def _on_add_paint_clicked(self) -> None:
+        """Požiada controller o pridanie novej PAINT vrstvy"""
         if self._controller is None:
             return
         if hasattr(self._controller, "add_paint_layer"):
             self._controller.add_paint_layer()
 
     def _on_rename_clicked(self) -> None:
+        """Premenuje aktuálne vybranú vrstvu"""
         if self._controller is None:
             return
 
@@ -226,12 +227,8 @@ class LayersPanel(QWidget):
         item = items[0]
         layer_id = item.data(Qt.UserRole)
 
-        # starý názov – vezmeme text pred " ("
-        full_text = item.text()
-        if " (" in full_text:
-            old_name = full_text.split(" (", 1)[0]
-        else:
-            old_name = full_text
+        # old_name = item.text()
+        old_name = item.data(Qt.UserRole + 1) or ""
 
         new_name, ok = QInputDialog.getText(
             self,
@@ -246,6 +243,7 @@ class LayersPanel(QWidget):
             self._controller.rename_layer(layer_id, new_name.strip())
 
     def _on_opacity_slider_changed(self, value: int) -> None:
+        """Odošle zmenu krytia aktívnej vrstvy"""
         if self._active_layer_id_for_opacity is None:
             return
         opacity = float(value) / 100.0

@@ -1,48 +1,25 @@
 from __future__ import annotations
 
-from typing import Optional, Tuple
-
 import numpy as np
+import cv2
 
-try:
-    import cv2
-except Exception:
-    cv2 = None
 
 
 def _gaussian_blur_f32(img: np.ndarray, ksize: int, sigma: float) -> np.ndarray:
+    """Rozmaže float obraz pomocou Gaussian blur"""
     if ksize % 2 == 0:
         ksize += 1
 
-    if cv2 is not None:
-        return cv2.GaussianBlur(img, (ksize, ksize), sigmaX=sigma, sigmaY=sigma, borderType=cv2.BORDER_REPLICATE)
-
-    out = img.astype(np.float32)
-    r = max(1, ksize // 2)
-    kernel = np.ones(2 * r + 1, dtype=np.float32) / float(2 * r + 1)
-
-    for _ in range(3):
-        out = np.apply_along_axis(lambda m: np.convolve(m, kernel, mode="same"), 0, out)
-        out = np.apply_along_axis(lambda m: np.convolve(m, kernel, mode="same"), 1, out)
-
-    return out
-
+    return cv2.GaussianBlur(img, (ksize, ksize), sigmaX=sigma, sigmaY=sigma, borderType=cv2.BORDER_REPLICATE)
 
 def _distance_to_edge(edge_remove_mask: np.ndarray) -> np.ndarray:
+    """Spočíta vzdialenosť pixelov od odstraňovanej hrany"""
     inv = (~edge_remove_mask).astype(np.uint8)
 
-    if cv2 is not None:
-        return cv2.distanceTransform(inv, distanceType=cv2.DIST_L2, maskSize=3).astype(np.float32)
+    return cv2.distanceTransform(inv, distanceType=cv2.DIST_L2, maskSize=3).astype(np.float32)
 
-    dist = np.full(edge_remove_mask.shape, 1e6, dtype=np.float32)
-    dist[edge_remove_mask] = 0.0
-    return dist
-
-
-def blend_across_edge(composited_rgb: np.ndarray, damage_mask: np.ndarray, edge_remove_mask: np.ndarray, filled_mask: np.ndarray, buffer: int) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-    """
-    Vytvorí plynulý farebný prechod cez miesto, kde bola hrana
-    """
+def blend_across_edge(composited_rgb: np.ndarray, damage_mask: np.ndarray, edge_remove_mask: np.ndarray, filled_mask: np.ndarray, buffer: int) -> tuple[np.ndarray | None, np.ndarray | None]:
+    """Vytvorí plynulý farebný prechod okolo odstránenej EDGE"""
     buffer = int(max(1, buffer))
 
     if composited_rgb.ndim != 3 or composited_rgb.shape[2] < 3:
@@ -57,10 +34,12 @@ def blend_across_edge(composited_rgb: np.ndarray, damage_mask: np.ndarray, edge_
 
     dist = _distance_to_edge(edge_remove_mask)
 
+    #zjemnňujeme iba pásmo okolo odstránenej hrany v rámci damage masky
     band = (dist <= float(buffer)) & damage_mask
     if not band.any():
         return None, None
 
+    #zdrojom farby sú iba vyplnené pixely v poškodenej oblasti
     known = (filled_mask & damage_mask).astype(np.float32)
     if known.sum() <= 0:
         return None, None
@@ -75,8 +54,10 @@ def blend_across_edge(composited_rgb: np.ndarray, damage_mask: np.ndarray, edge_
     den = _gaussian_blur_f32(known, ksize, sigma)
 
     safe_den = np.maximum(den, 1e-3)
+    #rozmazané farby normalizujeme podľa množstva dostupných zdrojových pixelov
     blended = num / safe_den[..., None]
 
+    #pixely bez dostatočnej podpory z okolia radšej neupravujeme
     support_ok = den > 0.05
     band_valid = band & support_ok
 

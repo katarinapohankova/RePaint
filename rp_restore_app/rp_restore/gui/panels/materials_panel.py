@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QSize, QTimer
-from PySide6.QtGui import QColor, QPixmap, QImage, QIcon
+from PySide6.QtGui import QPixmap, QImage, QIcon
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QSlider, QGridLayout, QToolButton, QRadioButton, QButtonGroup, QGroupBox, QCheckBox
 
 from rp_restore.core.texture_brush import generate_brush_stamp
@@ -9,9 +9,7 @@ from rp_restore.core.texture_brush import generate_brush_stamp
 
 class MaterialsPanel(QWidget):
     """
-    Panel pre materiály:
-      -prepínač: Brush vs Textura
-      -textúrové nastavenia (scale/strength/rotation) + výber textúry + preview
+    Panel pre nastavenie štetca, gumy, rozmazania a textúr
     """
 
     def __init__(self, parent=None) -> None:
@@ -28,7 +26,7 @@ class MaterialsPanel(QWidget):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
 
-        #---Brush size--
+        #veľkosť štetca
         row2 = QHBoxLayout()
         row2.addWidget(QLabel("Velikost štětce:"))
 
@@ -52,7 +50,7 @@ class MaterialsPanel(QWidget):
 
         layout.addLayout(row2)
 
-        #---Brush / Eraser advanced settings
+        #nastavenia štetca, gumy a rozmazania
         brush_box = QGroupBox("Štětec / guma / rozmazání")
         brush_layout = QVBoxLayout(brush_box)
 
@@ -123,7 +121,7 @@ class MaterialsPanel(QWidget):
         self.rb_blend_active_paint.toggled.connect(self._on_blend_source_mode_changed)
         self.rb_blend_bg_and_paint.toggled.connect(self._on_blend_source_mode_changed)
 
-        #---Mode--- exkluzívne
+        #prepínač medzi štetcom a textúrou
         mode_box = QGroupBox("Režim")
         mode_layout = QHBoxLayout(mode_box)
 
@@ -143,7 +141,7 @@ class MaterialsPanel(QWidget):
         mode_layout.addWidget(self.rb_texture)
         layout.addWidget(mode_box)
 
-        #---Texture controls--- aktívne iba pri zvolenom Texture
+        #nastavenia textúry
         self.texture_controls = QWidget()
         tex_layout = QVBoxLayout(self.texture_controls)
         tex_layout.setContentsMargins(0, 0, 0, 0)
@@ -177,7 +175,7 @@ class MaterialsPanel(QWidget):
         self.tex_grid_layout.setSpacing(6)
         tex_layout.addWidget(self.tex_grid_widget)
 
-        #scale
+        #hustota textúry
         r1 = QHBoxLayout()
         r1.addWidget(QLabel("Hustota:"))
         self.scale_slider = QSlider(Qt.Horizontal)
@@ -187,7 +185,7 @@ class MaterialsPanel(QWidget):
         r1.addWidget(self.scale_slider)
         tex_layout.addLayout(r1)
 
-        #strength
+        #sila textúry
         r2 = QHBoxLayout()
         r2.addWidget(QLabel("Síla:"))
         self.strength_slider = QSlider(Qt.Horizontal)
@@ -197,7 +195,7 @@ class MaterialsPanel(QWidget):
         r2.addWidget(self.strength_slider)
         tex_layout.addLayout(r2)
 
-        #rotation
+        #rotácia textúry
         r3 = QHBoxLayout()
         r3.addWidget(QLabel("Rotace:"))
         self.rot_slider = QSlider(Qt.Horizontal)
@@ -275,9 +273,11 @@ class MaterialsPanel(QWidget):
 
     #prepojenie s controllerom
     def set_controller(self, controller) -> None:
+        """Nastaví controller panelu"""
         self._controller = controller
 
     def refresh_from_project(self, project) -> None:
+        """Aktualizuje hodnoty panelu podľa controlleru a projektu"""
         if self._controller is None or project is None:
             return
         #blend
@@ -379,9 +379,40 @@ class MaterialsPanel(QWidget):
             return
         self._controller.set_brush_flow(value / 100.0)
 
+    def _on_blend_strength_changed(self, value: int) -> None:
+        if self._controller is None:
+            return
+
+        if hasattr(self._controller, "set_blend_strength"):
+            self._controller.set_blend_strength(value / 100.0)
+
+    def set_blend_strength_value(self, value: int) -> None:
+        self.blend_strength_slider.blockSignals(True)
+        self.blend_strength_slider.setValue(int(value))
+        self.blend_strength_slider.blockSignals(False)
+
+    def _on_blend_source_mode_changed(self) -> None:
+        if self._controller is None:
+            return
+
+        mode = "background_and_active_paint" if self.rb_blend_bg_and_paint.isChecked() else "active_paint"
+
+        if hasattr(self._controller, "set_blend_source_mode"):
+            self._controller.set_blend_source_mode(mode)
+
+    def set_blend_source_mode_value(self, mode: str) -> None:
+        self.rb_blend_active_paint.blockSignals(True)
+        self.rb_blend_bg_and_paint.blockSignals(True)
+
+        self.rb_blend_active_paint.setChecked(mode == "active_paint")
+        self.rb_blend_bg_and_paint.setChecked(mode == "background_and_active_paint")
+
+        self.rb_blend_active_paint.blockSignals(False)
+        self.rb_blend_bg_and_paint.blockSignals(False)
+
     def _change_brush_size_by(self, delta: int) -> None:
         """
-        Zmena veľkosti brush tlačidlami + / - v paneli
+        Zmení veľkosť štetca tlačidlami + / - v paneli
         """
         if self._controller is None:
             return
@@ -392,15 +423,14 @@ class MaterialsPanel(QWidget):
         self.brush_slider.setValue(value)
         self._controller.set_brush_size(value)
 
-    #palette buttons
     def _clear_layout(self, grid: QGridLayout) -> None:
+        """Odstráni všetky widgety z grid layoutu"""
         while grid.count():
             item = grid.takeAt(0)
             w = item.widget()
             if w is not None:
                 w.setParent(None)
 
-    #brush/texture
     def _on_mode_changed(self) -> None:
         self._apply_mode_ui()
         if self._controller is None:
@@ -410,6 +440,7 @@ class MaterialsPanel(QWidget):
             self._controller.update_current_tool_cursor()
 
     def _apply_mode_ui(self) -> None:
+        """Zobrazí alebo skryje nastavenia textúry podľa zvoleného režimu"""
         tex_enabled = self.rb_texture.isChecked()
         self.texture_controls.setVisible(tex_enabled)
 
@@ -476,9 +507,7 @@ class MaterialsPanel(QWidget):
         self.tex_grid_layout.addWidget(add_btn, r, c)
 
     def _on_add_texture_clicked(self) -> None:
-        """
-        kliknuté na + v zozname textúr
-        """
+        """Otvorí dialóg na pridanie novej textúry"""
         if self._controller is None:
             return
 
@@ -528,6 +557,7 @@ class MaterialsPanel(QWidget):
             self._controller.update_current_tool_cursor()
     
     def _update_deformation_value_labels(self) -> None:
+        """Aktualizuje percentuálne hodnoty deformácie pri slideroch"""
         self.deform_x_value_label.setText(f"{int(self.deform_x_slider.value())} %")
         self.deform_y_value_label.setText(f"{int(self.deform_y_slider.value())} %")
         
@@ -562,6 +592,7 @@ class MaterialsPanel(QWidget):
             self._deform_status_timer.start(timeout_ms)
 
     def _clear_deformation_status(self) -> None:
+        """Vymaže stavovú správu pri deformácii textúry"""
         self.deformation_status_label.setText("")
 
         if self._controller is not None:
@@ -620,13 +651,13 @@ class MaterialsPanel(QWidget):
         self.deform_x_slider.blockSignals(True)
         self.deform_y_slider.blockSignals(True)
 
-        self._update_deformation_value_labels()
-
         self.deform_x_slider.setValue(100)
         self.deform_y_slider.setValue(100)
 
         self.deform_x_slider.blockSignals(False)
         self.deform_y_slider.blockSignals(False)
+
+        self._update_deformation_value_labels()
 
         self._update_deformation_controls_state()
         self._update_preview(self._controller.project)
@@ -656,6 +687,7 @@ class MaterialsPanel(QWidget):
         self._set_deformation_status("Deformovaná textura byla přidána mezi textury")
 
     def _update_preview(self, project) -> None:
+        """Aktualizuje náhľad aktuálnej textúry"""
         if self._controller is None:
             self.preview.clear()
             return
@@ -665,7 +697,7 @@ class MaterialsPanel(QWidget):
             self.preview.setText("Žádná textura")
             return
 
-        r, g, b , a = project.get_current_color_rgba()
+        r, g, b , _ = project.get_current_color_rgba()
         ts.color = (r, g, b)
 
         stamp = generate_brush_stamp(ts, size=96, offset_x=0, offset_y=0)
@@ -699,35 +731,3 @@ class MaterialsPanel(QWidget):
         self.brush_slider.blockSignals(True)
         self.brush_slider.setValue(int(size))
         self.brush_slider.blockSignals(False)
-
-    def _on_blend_strength_changed(self, value: int) -> None:
-        if self._controller is None:
-            return
-
-        if hasattr(self._controller, "set_blend_strength"):
-            self._controller.set_blend_strength(value / 100.0)
-
-    def set_blend_strength_value(self, value: int) -> None:
-        self.blend_strength_slider.blockSignals(True)
-        self.blend_strength_slider.setValue(int(value))
-        self.blend_strength_slider.blockSignals(False)
-
-    def _on_blend_source_mode_changed(self) -> None:
-        if self._controller is None:
-            return
-
-        mode = "background_and_active_paint" if self.rb_blend_bg_and_paint.isChecked() else "active_paint"
-
-        if hasattr(self._controller, "set_blend_source_mode"):
-            self._controller.set_blend_source_mode(mode)
-
-
-    def set_blend_source_mode_value(self, mode: str) -> None:
-        self.rb_blend_active_paint.blockSignals(True)
-        self.rb_blend_bg_and_paint.blockSignals(True)
-
-        self.rb_blend_active_paint.setChecked(mode == "active_paint")
-        self.rb_blend_bg_and_paint.setChecked(mode == "background_and_active_paint")
-
-        self.rb_blend_active_paint.blockSignals(False)
-        self.rb_blend_bg_and_paint.blockSignals(False)

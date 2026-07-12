@@ -8,14 +8,12 @@ from rp_restore.core.selection import SelectionSet
 
 class SelectionTool(BaseTool):
     """
-    Nástroj na výber jednej poškodenej oblasti
-
-    zatiaľ:
-      - len uloží Selection do controller.active_selection
-      - nevyužíva undo a nič nemení
+    Nástroj na výber poškodených oblastí kliknutím
+    pri podržaní Ctrl pridáva alebo odoberá oblasti z aktuálneho výberu
     """
 
     def on_mouse_press(self, img_x: int, img_y: int, buttons: Qt.MouseButtons, modifiers: Qt.KeyboardModifiers) -> None:
+        """Vyberie oblasť pod kurzorom alebo upraví aktuálny výber pri Ctrl kliknutí"""
         if not (buttons & Qt.LeftButton):
             return
 
@@ -27,31 +25,28 @@ class SelectionTool(BaseTool):
         selection = project.get_selection_from_click(img_x, img_y, layer_id=self.controller.active_layer_id, region_map=region_map)
         ctrl_down = bool(modifiers & Qt.ControlModifier)
 
-        #žiadna oblasť na danom mieste
+        #na kliknutom mieste nie je žiadna vyberateľná oblasť
         if selection is None:
             if not ctrl_down:
-                #bez ctrl –zrušíme výber
+                #bez Ctrl zrušíme aktuálny výber
                 self.controller.clear_selection()
             return
 
-        #validná Selection
         current_set = self.controller.active_selection
 
         if not ctrl_down or current_set is None or current_set.is_empty():
-            #bez ctrl alebo zatiaľ nič vybrané ->nový set len s týmto výberom
+            #bez Ctrl alebo bez existujúceho výberu vytvoríme nový SelectionSet
             new_set = SelectionSet(selections=[selection])
             self.controller.set_selection(new_set)
             return
 
-        #ctrl + klik + existujúci výber
+        #pri Ctrl kliknutí existujúcu oblasť odoberieme, inak pridáme novú
         if selection.region_id is not None and current_set.contains_region_id(selection.region_id):
-            #odstránime túto oblasť
             current_set.remove_by_region_id(selection.region_id)
             if current_set.is_empty():
                 self.controller.clear_selection()
             else:
                 self.controller.set_selection(current_set)
         else:
-            #pridáme novú oblasť
             current_set.add_selection(selection)
             self.controller.set_selection(current_set)

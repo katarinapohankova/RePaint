@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 
-#Referenčné sRGB hodnoty (8-bit) pre ColorChecker Classic (24 patch)
+#referenčné sRGB hodnoty pre ColorChecker Classic s 24 políčkami
 COLORCHECKER_SRGB_24 = np.array(
     [
         [115,  82,  68], [194, 150, 130], [ 98, 122, 157], [ 87, 108,  67], [133, 128, 177], [103, 189, 170],
@@ -16,12 +16,7 @@ COLORCHECKER_SRGB_24 = np.array(
 
 
 def estimate_correction_matrix_affine(measured_colors: np.ndarray, reference_colors: np.ndarray) -> np.ndarray:
-    """
-    Spočíta affine maticu 3x4: [R G B 1] -> [R' G' B']
-    -measured_colors: (N,3) float alebo uint8
-    -reference_colors: (N,3) float alebo uint8
-    vráti: matrix shape (3,4) float32
-    """
+    """Spočíta afinnú korekčnú maticu medzi zmeranými a referenčnými RGB farbami"""
     meas = np.asarray(measured_colors, dtype=np.float32)
     ref = np.asarray(reference_colors, dtype=np.float32)
 
@@ -32,23 +27,18 @@ def estimate_correction_matrix_affine(measured_colors: np.ndarray, reference_col
     if meas.shape[0] != ref.shape[0]:
         raise ValueError("measured_colors and reference_colors must have same N")
 
-    #A = [R G B 1]
+    #matica A obsahuje stĺpce [R G B 1]
     ones = np.ones((meas.shape[0], 1), dtype=np.float32)
     A = np.concatenate([meas, ones], axis=1)  
 
-    #A * X ~= ref, kde X má shape (4,3)
+    #riešime A * X ~= ref, kde X má tvar (4,3)
     X, *_ = np.linalg.lstsq(A, ref, rcond=None)
-    M = X.T  #(3,4)
+    M = X.T  #výslednú maticu ukladáme v tvare (3,4)
     return M.astype(np.float32)
 
 
 def apply_color_correction(image: np.ndarray, matrix: np.ndarray) -> np.ndarray:
-    """
-    Aplikuje farebnú korekciu na obraz
-    -image: HxWx3 uint8 
-    -matrix: 3x3 alebo 3x4 
-    vráti rovnaký dtype ako vstup
-    """
+    """Aplikuje farebnú korekciu na RGB obraz"""
     img = np.asarray(image)
     if img.ndim != 3 or img.shape[2] != 3:
         raise ValueError("apply_color_correction expects image HxWx3")
@@ -58,6 +48,7 @@ def apply_color_correction(image: np.ndarray, matrix: np.ndarray) -> np.ndarray:
         raise ValueError("matrix must be 3x3 or 3x4")
 
     dtype = img.dtype
+    #výstup orezávame podľa rozsahu pôvodného dtype
     if dtype == np.uint16:
         maxv = 65535.0
     else:
@@ -68,6 +59,7 @@ def apply_color_correction(image: np.ndarray, matrix: np.ndarray) -> np.ndarray:
     if M.shape == (3, 3):
         y = x @ M.T
     else:
+        #matica 3x4 obsahuje aj posun farieb
         y = x @ M[:, :3].T + M[:, 3]
 
     y = np.clip(y, 0.0, maxv)
@@ -75,9 +67,7 @@ def apply_color_correction(image: np.ndarray, matrix: np.ndarray) -> np.ndarray:
 
 
 def rms_rgb(measured: np.ndarray, reference: np.ndarray) -> float:
-    """
-    RMS chyba v RGB priestore (0..255)
-    """
+    """Spočíta RMS chybu medzi dvoma sadami RGB farieb"""
     meas = np.asarray(measured, dtype=np.float32)
     ref = np.asarray(reference, dtype=np.float32)
     diff = meas - ref

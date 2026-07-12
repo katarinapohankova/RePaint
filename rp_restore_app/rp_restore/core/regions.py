@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
 
+import cv2
 import numpy as np
 
 from .layers import Layer
@@ -10,22 +10,17 @@ from .layers import Layer
 
 @dataclass
 class RegionInfo:
+    """Informácie o jednej spojitej oblasti damage masky"""
     id: int
     area: int
-    bbox: Tuple[int, int, int, int]  #x, y, w, h
+    bbox: tuple[int, int, int, int]
 
-
+@dataclass
 class RegionMap:
-    """
-    Rozdelenie damage masky na oblasti
+    """Rozdelenie damage masky na očíslované spojité oblasti"""
 
-    label_image: 2D pole int32, 0 = nič, >0 = ID oblasti
-    regions: dict id -> RegionInfo
-    """
-
-    def __init__(self, label_image: np.ndarray, regions: Dict[int, RegionInfo]) -> None:
-        self.label_image = label_image
-        self.regions = regions
+    label_image: np.ndarray
+    regions: dict [int, RegionInfo]
 
     def get_region_mask(self, region_id: int) -> np.ndarray:
         """Vráti 2D bool masku pre danú oblasť"""
@@ -33,8 +28,7 @@ class RegionMap:
     
     def get_region_id_at(self, x: int, y: int) -> int:
         """
-        Vráti ID oblasti na súradniciach (x, y)
-        -ak je mimo rozsah alebo tam nie je žiadna oblasť, vráti 0
+        Vráti ID oblasti na súradniciach (x, y) alebo 0 mimo regiónov
         """
         h, w = self.label_image.shape
         if x < 0 or y < 0 or x >= w or y >= h:
@@ -43,87 +37,59 @@ class RegionMap:
 
     def has_region(self, region_id: int) -> bool:
         """
-        True, ak taká oblasť existuje v region_map
+        Vráti, či región s daným ID existuje
         """
         return region_id in self.regions
 
-    def get_region_bbox(self, region_id: int) -> Tuple[int, int, int, int] | None:
+    def get_region_bbox(self, region_id: int) -> tuple[int, int, int, int] | None:
         """
-        Vráti bbox oblasti podľa ID alebo None
+        Vráti bbox regiónu alebo None, ak región neexistuje
         """
         info = self.regions.get(region_id)
         if info is None:
             return None
         return info.bbox
 
-    def get_region_ids_smaller_than(self, threshold: int) -> List[int]:
+    def get_region_ids_smaller_than(self, threshold: int) -> list[int]:
         """
-        Vráti len ID oblastí, ktorých area < threshold
+        Vráti len ID regiónov menších ako zadaný prah
         """
         return [r.id for r in self.regions.values() if r.area < threshold]
 
 def build_region_map(damage_mask: np.ndarray, edge_layer: Layer | None = None) -> RegionMap:
-    """
-    Rozdelí damage_mask na spojité oblasti, pričom hrany (EDGE vrstvy)
-    fungujú ako bariéry
-
-    damage_mask -2D bool pole (True = poškodené miesto, ktoré chceme segmentovať)
-    edge_layers -hraničné vrstvy – pixely s alfou > 0 tvoria bariéru
-    """
+    """Rozdelí damage masku na spojité oblasti oddelené EDGE bariérami"""
     if damage_mask.ndim != 2:
         raise ValueError("damage_mask must be 2D bool array")
 
     h, w = damage_mask.shape
 
-    #bariéry z EDGE vrstiev
+    #pixely s alfou v EDGE vrstve berieme ako bariéru
     barrier = np.zeros_like(damage_mask, dtype=bool)
-    if edge_layer is not None and edge_layer.image.shape[:2] == (h, w):
+    if edge_layer is not None:
+        if edge_layer.image.shape[:2] != (h, w):
+            raise ValueError("edge_layer must have the same size as damage_mask")
+
         barrier = edge_layer.image[..., 3] > 0
 
-    #len tie pixely, ktoré sú poškodené a nie sú bariéra
+    #segmentujeme iba poškodené pixely, ktoré nie sú bariérou
     valid = damage_mask & ~barrier
 
-    label_image = np.zeros((h, w), dtype=np.int32)
-    regions: Dict[int, RegionInfo] = {}
+    #OpenCV očakáva binárny obraz typu uint8
+    valid_u8 = valid.astype(np.uint8)
 
-    current_id = 1
+    num_labels, label_image, stats, _ = cv2.connectedComponentsWithStats(valid_u8, connectivity=4)
 
-    for y in range(h):
-        for x in range(w):
-            if not valid[y, x]:
-                continue
-            if label_image[y, x] != 0:
-                continue
+    label_image = label_image.astype(np.int32, copy=False)
+    regions: dict[int, RegionInfo] = {}
 
-            #flood-fill pre novú oblasť
-            stack = [(x, y)]
-            label_image[y, x] = current_id
+    #label 0 je pozadie, reálne regióny začínajú od 1
+    for region_id in range(1, num_labels):
+        x = int(stats[region_id, cv2.CC_STAT_LEFT])
+        y = int(stats[region_id, cv2.CC_STAT_TOP])
+        width = int(stats[region_id, cv2.CC_STAT_WIDTH])
+        height = int(stats[region_id, cv2.CC_STAT_HEIGHT])
+        area = int(stats[region_id, cv2.CC_STAT_AREA])
 
-            area = 0
-            x_min = x_max = x
-            y_min = y_max = y
+        regions[region_id] = RegionInfo(id=region_id, area=area, bbox=(x, y, width, height))
 
-            while stack:
-                cx, cy = stack.pop()
-                area += 1
-
-                if cx < x_min:
-                    x_min = cx
-                if cx > x_max:
-                    x_max = cx
-                if cy < y_min:
-                    y_min = cy
-                if cy > y_max:
-                    y_max = cy
-
-                for nx, ny in ((cx - 1, cy), (cx + 1, cy), (cx, cy - 1), (cx, cy + 1)):
-                    if 0 <= nx < w and 0 <= ny < h:
-                        if valid[ny, nx] and label_image[ny, nx] == 0:
-                            label_image[ny, nx] = current_id
-                            stack.append((nx, ny))
-
-            bbox = (x_min, y_min, x_max - x_min + 1, y_max - y_min + 1)
-            regions[current_id] = RegionInfo(id=current_id, area=area, bbox=bbox)
-            current_id += 1
-
-    return RegionMap(label_image, regions)
+    return RegionMap(label_image=label_image, regions=regions)

@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from typing import Optional
-
-from PySide6.QtWidgets import QDialog, QWidget, QVBoxLayout, QLabel, QPushButton
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QDialog, QWidget, QVBoxLayout, QLabel, QPushButton
 
 from rp_restore.core.selection import SelectionSet
 from rp_restore.core.algorithm_runner import AlgorithmType, TextureAlgorithmParams
@@ -13,17 +11,17 @@ from rp_restore.gui.texture_fill_dialog import TextureFillDialog
 
 class AlgorithmPanel(QWidget):
     """
-    Panel s tlačidlami pre spustenie externých algoritmov:
-      - Realistic fill
-      - Texture fill
+    Panel s tlačidlami pre spustenie externých algoritmov
 
-    tlačidlá sú enable len vtedy, keď existuje active_selection
+    -Realistické doplnenie je dostupné aj bez aktívneho výberu, pretože používateľ môže zvoliť okno ručne
+    -Texturové doplnenie je dostupné iba vtedy, keď existuje aktívny výber
     """
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
-        self._controller: Optional[object] = None  #ProjectController
+        self._controller: object | None = None  #ProjectController
+        self._realistic_dialog: RealisticFillDialog | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
@@ -46,18 +44,19 @@ class AlgorithmPanel(QWidget):
         self.btn_texture.setEnabled(False)
 
     def set_controller(self, controller: object) -> None:
+        """Nastaví controller používaný na spúšťanie algoritmov"""
         self._controller = controller
 
     def refresh_from_selection(self, selection_set: SelectionSet | None) -> None:
         """
-        Zavolá controller, keď sa zmení active_selection
+        Aktualizuje panel podľa aktuálneho výberu
         """
-        #Realistic je vždy dostupné
+        #realistic fill je dostupný aj bez selection, pretože vie použiť ručný výber okna
         self.btn_realistic.setEnabled(True)
 
-        #Texture iba keď selection existuje
+        #texture fill potrebuje existujúci selection
         if selection_set is None or selection_set.is_empty():
-            self.info_label.setText("Není vybrána žádná oblast")
+            self.info_label.setText("Není vybrána žádná oblast.")
             self.btn_texture.setEnabled(False)
             return
 
@@ -71,11 +70,19 @@ class AlgorithmPanel(QWidget):
         self.btn_texture.setEnabled(True)
 
     def _on_realistic_clicked(self) -> None:
+        """Otvorí dialóg pre realistické doplnenie"""
         if self._controller is None:
+            return
+
+        if self._realistic_dialog is not None:
+            self._realistic_dialog.show()
+            self._realistic_dialog.raise_()
+            self._realistic_dialog.activateWindow()
             return
 
         dlg = RealisticFillDialog(controller=self._controller, parent=self) 
         dlg.setAttribute(Qt.WA_DeleteOnClose, True)
+        self._realistic_dialog = dlg
 
         def _on_accept() -> None:
             res = dlg.get_result()
@@ -83,17 +90,25 @@ class AlgorithmPanel(QWidget):
                 return
 
             if hasattr(self._controller, "run_realistic_fill_window"):
-                self._controller.run_realistic_fill_window(res.bbox, use_mock=res.use_mock, partial_noise=res.partial_noise, seed=res.seed, use_composited_input=res.use_composited_input)
+                self._controller.run_realistic_fill_window(res.bbox, use_mock=res.use_mock, partial_noise=res.partial_noise, seed=res.seed, realistic_mode=res.realistic_mode)
 
         dlg.accepted.connect(_on_accept)
+        dlg.destroyed.connect(lambda _obj=None: setattr(self, "_realistic_dialog", None))
         dlg.show()
         dlg.raise_()
         dlg.activateWindow()
 
     def _on_texture_clicked(self) -> None:
+        """Otvorí dialóg pre texturové doplnenie a spustí algoritmus nad aktívnym výberom"""
         if self._controller is None:
             return
-        
+
+        selection_set = getattr(self._controller, "active_selection", None)
+        if selection_set is None or selection_set.is_empty():
+            if hasattr(self._controller, "show_tool_message"):
+                self._controller.show_tool_message("Nejprve vyberte oblast pro texturové doplnění")
+            return
+
         dlg = TextureFillDialog(controller=self._controller, parent=self)
         if dlg.exec() != QDialog.Accepted:
             return

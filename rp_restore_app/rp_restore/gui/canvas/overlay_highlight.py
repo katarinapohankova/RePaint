@@ -6,7 +6,7 @@ import numpy as np
 
 def draw_selection_highlight(painter: QPainter, selection_mask: np.ndarray) -> None:
     """
-    Nakreslí polopriehľadný overlay podľa 2D bool selection_mask
+    Nakreslí polopriehľadné zvýraznenie podľa 2D bool selection_mask
     """
     if selection_mask is None:
         return
@@ -19,17 +19,16 @@ def draw_selection_highlight(painter: QPainter, selection_mask: np.ndarray) -> N
         return
 
     #vytvoríme ARGB QImage s tyrkysovým overlayom
-    img = QImage(w, h, QImage.Format_ARGB32_Premultiplied)
+    img = QImage(w, h, QImage.Format_ARGB32)
     img.fill(Qt.transparent)
 
     ptr = img.bits()
-    #ptr.setsize(h * w * 4)
     buf = np.frombuffer(ptr, np.uint8).reshape((h, w, 4))
 
-    #RGBA: (0, 255, 255, alpha) pre pixely v maske, inak alpha = 0
+    #v pamäti je poradie kanálov BGRA
     buf[..., 0] = 0 #B
     buf[..., 1] = 255   #G
     buf[..., 2] = 255   #R
-    buf[..., 3] = np.where(selection_mask, 80, 0).astype(np.uint8)  #A
+    buf[..., 3] = np.where(mask, 80, 0).astype(np.uint8)  #A
 
     painter.drawImage(0, 0, img)

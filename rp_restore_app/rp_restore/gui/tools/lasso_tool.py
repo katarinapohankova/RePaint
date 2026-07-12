@@ -8,9 +8,8 @@ from rp_restore.core.layers import LayerRole
 
 class LassoTool(BaseTool):
     """
-    Laso nástroj:
-    -užívateľ myšou nakreslí uzatvorenú čiaru
-    -po pustení myši sa nájdu všetky damage oblasti vo vnútri polygonu a z nich sa vytvorí SelectionSet
+    Nástroj na výber poškodených oblastí pomocou ručne nakresleného lasa
+    po pustení myši sa nájdu damage oblasti vo vnútri polygonu a vytvorí sa SelectionSet
     """
 
     def __init__(self, controller, canvas) -> None:
@@ -19,6 +18,7 @@ class LassoTool(BaseTool):
         self.points: list[tuple[int, int]] = []
 
     def on_mouse_press(self, img_x: int, img_y: int, buttons: Qt.MouseButtons, modifiers: Qt.KeyboardModifiers) -> None:
+        """Začne kreslenie lasa"""
         if not (buttons & Qt.LeftButton):
             return
         
@@ -34,8 +34,10 @@ class LassoTool(BaseTool):
             self.canvas.set_lasso_preview_points(self.points)
 
     def on_mouse_move(self, img_x: int, img_y: int, buttons: Qt.MouseButtons, modifiers: Qt.KeyboardModifiers) -> None:
+        """Pridáva body do lasa počas ťahu myšou"""
         if not self.is_drawing:
             return
+
         #pridáme bod len ak sa reálne posunul
         if not self.points or self.points[-1] != (img_x, img_y):
             self.points.append((img_x, img_y))
@@ -44,6 +46,7 @@ class LassoTool(BaseTool):
                 self.canvas.set_lasso_preview_points(self.points)
 
     def on_mouse_release(self, img_x: int, img_y: int, buttons: Qt.MouseButtons, modifiers: Qt.KeyboardModifiers) -> None:
+        """Dokončí laso a vytvorí výber oblastí vo vnútri polygonu"""
         if not self.is_drawing:
             return
 
@@ -84,7 +87,7 @@ class LassoTool(BaseTool):
             self.points = []
             return
 
-        #Ctrl (pridanie k existujúcemu výberu)
+        #pri Ctrl pridáme nové oblasti k existujúcemu výberu
         for sel in selection_set.selections:
             current_set.add_selection(sel)
 
@@ -92,6 +95,7 @@ class LassoTool(BaseTool):
         self.points = []
 
     def _get_active_paint_layer(self):
+        """Nájde aktívnu PAINT vrstvu podľa active_layer_id v controlleri"""
         project = self.controller.project
         if project is None or self.controller.active_layer_id is None:
             return None

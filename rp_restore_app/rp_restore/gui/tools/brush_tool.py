@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Optional
 
 import numpy as np
 from PySide6.QtCore import Qt
@@ -12,40 +11,39 @@ from rp_restore.gui.tools.base_tool import BaseTool
 
 class BrushTool(BaseTool):
     """
-    štetec -kreslí na aktívnu PAINT vrstvu a ukladá undo ako celú vrstvu
+    Nástroj na kreslenie štetcom alebo textúrou na aktívnu PAINT vrstvu
     """
 
     def __init__(self, controller, canvas) -> None:
         super().__init__(controller, canvas)
         self.is_drawing: bool = False
-        self._active_layer_index: Optional[int] = None
 
         #nastavenia štetca
         self.brush_size: int = self.controller.get_brush_size()
-        self.color_rgba = self.controller.get_current_color_rgba()  #np.array([255, 0, 0, 255], dtype=np.uint8)
-        self._stroke_seed: int = 0
+        self.color_rgba = self.controller.get_current_color_rgba()
 
         #undo
-        self._before_image: Optional[np.ndarray] = None
-        self._stroke_committed_alpha_u8: Optional[np.ndarray] = None
-        self._pass_alpha_u8: Optional[np.ndarray] = None
-        self._last_dir: Optional[tuple[float, float]] = None
+        self._before_image: np.ndarray | None = None
+        self._stroke_committed_alpha_u8: np.ndarray | None = None
+        self._pass_alpha_u8: np.ndarray | None = None
+        self._last_dir: tuple[float, float] | None = None
 
         #posledná pozícia
-        self._last_x: Optional[int] = None
-        self._last_y: Optional[int] = None
+        self._last_x: int | None = None
+        self._last_y: int | None = None
 
-        self._stroke_min_x: Optional[int] = None
-        self._stroke_min_y: Optional[int] = None
-        self._stroke_max_x: Optional[int] = None
-        self._stroke_max_y: Optional[int] = None
+        self._stroke_min_x: int | None = None
+        self._stroke_min_y: int | None = None
+        self._stroke_max_x: int | None = None
+        self._stroke_max_y: int | None = None
 
     def _update_from_controller(self) -> None:
+        """Načíta aktuálnu veľkosť štetca a farbu z controlleru"""
         self.brush_size = self.controller.get_brush_size()
         self.color_rgba = self.controller.get_current_color_rgba()
 
     def _get_active_paint_layer(self):
-        """nájde aktívnu PAINT vrstvu podľa active_layer_id v controlleri"""
+        """Nájde aktívnu PAINT vrstvu podľa active_layer_id v controlleri"""
         project = self.controller.project
         if project is None or self.controller.active_layer_id is None:
             return None
@@ -59,6 +57,7 @@ class BrushTool(BaseTool):
         return None
     
     def _opacity_limit_u8(self) -> int:
+        """Vráti nastavené krytie štetca ako hodnotu 0-255"""
         opacity = 1.0
         if hasattr(self.controller, "get_brush_opacity"):
             opacity = float(self.controller.get_brush_opacity())
@@ -89,8 +88,8 @@ class BrushTool(BaseTool):
 
     def _maybe_start_new_pass(self, layer, dx: int, dy: int) -> None:
         """
-        Ak sa smer ťahu výrazne otočí, začneme nový pass
-        -vrstvenie farby pri návrate späť cez už prejdenú časť (nefunguje do kruhu a podobne)
+        Ak sa smer ťahu výrazne otočí, začne nový pass
+        -umožňuje vrstvenie farby pri návrate späť cez už prejdenú časť
         """
         length = float((dx * dx + dy * dy) ** 0.5)
         if length < 1.0:
@@ -211,7 +210,7 @@ class BrushTool(BaseTool):
         ts = getattr(self.controller, "texture_settings", None)
         texture_enabled = bool(getattr(self.controller, "paint_mode", "brush") == "texture")
 
-        r_col, g_col, b_col, a_col = self.controller.project.get_current_color_rgba()
+        r_col, g_col, b_col, _ = self.controller.project.get_current_color_rgba()
         if ts is not None:
             ts.color = (int(r_col), int(g_col), int(b_col))
 
@@ -227,15 +226,15 @@ class BrushTool(BaseTool):
         self._alpha_blend_rgba(sub, src_rgb, alpha)
 
     def _draw_dot(self, layer, x: int, y: int) -> None:
-        """nakreslí plný kruh štetcom na vrstve okolo (x, y)"""
+        """Nakreslí plný kruh štetcom na pozícii (x, y)"""
         h, w, _ = layer.image.shape
         r = self.brush_size
 
-        #damage mask z projektu
+        #damage maska z projektu obmedzuje kreslenie iba na poškodené miesta
         project = self.controller.project
         damage_mask = None
         if project is not None:
-            damage_mask = project.damage_original_mask  #alebo get_damage_remaining_mask()
+            damage_mask = project.damage_original_mask
 
         y_min = max(0, y - r)
         y_max = min(h, y + r + 1)
@@ -248,12 +247,13 @@ class BrushTool(BaseTool):
         sh = y_max - y_min
         sw = x_max - x_min
 
-        #kruhová maska v tomto subregion-e
+        #stred štetca v lokálnych súradniciach výrezu
         cx = x - x_min
         cy = y - y_min
 
         brush_mask = self._make_soft_mask(sh, sw, cx, cy, r)
-        #damage mask obmedzenie
+
+        #kreslenie obmedzíme damage maskou
         if damage_mask is not None:
             dm_sub = damage_mask[y_min:y_max, x_min:x_max].astype(np.float32)
             brush_mask *= dm_sub
@@ -266,7 +266,7 @@ class BrushTool(BaseTool):
         ts = getattr(self.controller, "texture_settings", None)
         texture_enabled = bool(getattr(self.controller, "paint_mode", "brush") == "texture")
         if texture_enabled and ts is not None and ts.texture is not None:
-            #pattern je pre tento subregion ukotvený offsetom (x_min,y_min) -nadväzuje na seba
+            #pattern je pre tento výrez ukotvený offsetom, aby textúra nadväzovala
             pattern = generate_fill_pattern(ts, sw, sh, offset_x=x_min, offset_y=y_min)
             local_alpha = (pattern[..., 3].astype(np.float32) / 255.0) * brush_mask * flow
         else:
@@ -293,8 +293,7 @@ class BrushTool(BaseTool):
 
     def _draw_line(self, layer, x0: int, y0: int, x1: int, y1: int) -> None:
         """
-        jednoduché kreslenie medzi dvoma bodmi (aby ťah nebol dierkovaný)
-        prejde po úsečke medzi (x0, y0) a (x1, y1) a kreslíme draw_dot
+        Kreslí medzi dvoma bodmi tak, aby ťah nebol dierkovaný
         """
         self._maybe_start_new_pass(layer, x1 - x0, y1 - y0)
         dx = x1 - x0
@@ -308,24 +307,25 @@ class BrushTool(BaseTool):
             self._draw_dot(layer, xx, yy)
         
     def _update_color_from_controller(self) -> None:
+        """Načíta aktuálnu farbu z controlleru"""
         self.color_rgba = self.controller.get_current_color_rgba()
 
-    #--------udalosti myši--------
     def on_mouse_press(self, img_x: int, img_y: int, buttons: Qt.MouseButton, modifiers: Qt.KeyboardModifier) -> None:
+        """Začne kreslenie nového ťahu"""
         if not (buttons & Qt.LeftButton):
             return
         layer = self._get_active_paint_layer()
         self._update_from_controller()
 
         if layer is None:
-            self.controller.show_tool_message("Štětec lze použít pouze na vrstvých malby")
+            self.controller.show_tool_message("Štětec lze použít pouze na vrstvě malby")
             return
+
         #vždy pri začiatku ťahu si vezmeme aktuálnu farbu z panelu
         self._update_color_from_controller()
         self.is_drawing = True
         self._last_x = img_x
         self._last_y = img_y
-        self._stroke_seed = int(np.random.randint(0, 2**31 - 1))
 
         #pre undo si uložíme celú vrstvu
         self._before_image = layer.image.copy()
@@ -334,10 +334,11 @@ class BrushTool(BaseTool):
         self._stroke_committed_alpha_u8 = np.zeros((h, w), dtype=np.uint8)
         self._pass_alpha_u8 = np.zeros((h, w), dtype=np.uint8)
         self._last_dir = None
+
         #prvý bod
         self._draw_dot(layer, img_x, img_y)
 
-        # po prvom bode – sync filled mask pre malú oblasť
+        #po prvom bode synchronizujeme filled masku pre malú oblasť
         project = self.controller.project
         r = int(self.brush_size)
         fallback_bbox = (img_x - r, img_y - r, 2 * r + 1, 2 * r + 1)
@@ -345,7 +346,7 @@ class BrushTool(BaseTool):
         if project is not None and first_bbox is not None:
             project.sync_layer_filled_mask_from_alpha(layer.meta.id, first_bbox, mode="assign")
 
-        #a refresh
+        #prekreslíme len dotknutú oblasť
         self.controller.refresh_canvas_region(first_bbox if first_bbox is not None else fallback_bbox)
 
         self._stroke_min_x = img_x
@@ -354,6 +355,7 @@ class BrushTool(BaseTool):
         self._stroke_max_y = img_y
 
     def on_mouse_move(self, img_x: int, img_y: int, buttons: Qt.MouseButton, modifiers: Qt.KeyboardModifier) -> None:
+        """Pokračuje v kreslení počas ťahu myšou"""
         if not self.is_drawing:
             return
         layer = self._get_active_paint_layer()
@@ -387,11 +389,12 @@ class BrushTool(BaseTool):
         if project is not None:
             project.sync_layer_filled_mask_from_alpha(layer.meta.id, step_bbox)
 
-        #refresh tej oblasti
+        #prekreslíme len dotknutú oblasť
         self.controller.refresh_canvas_region(step_bbox)
 
         self._last_x = img_x
         self._last_y = img_y
+
         #bbox celého ťahu
         self._stroke_min_x = min(self._stroke_min_x, prev_x, img_x)
         self._stroke_max_x = max(self._stroke_max_x, prev_x, img_x)
@@ -399,6 +402,7 @@ class BrushTool(BaseTool):
         self._stroke_max_y = max(self._stroke_max_y, prev_y, img_y)
 
     def on_mouse_release(self, img_x: int, img_y: int, buttons: Qt.MouseButton, modifiers: Qt.KeyboardModifier) -> None:
+        """Ukončí ťah a uloží undo akciu"""
         if not self.is_drawing:
             return
         
@@ -406,10 +410,11 @@ class BrushTool(BaseTool):
 
         layer = self._get_active_paint_layer()
         if layer is None or self._before_image is None:
+            self._cleanup()
             return
         h, w, _ = layer.image.shape
 
-        #ak sa bbox nenastavil, tak celú vrstvu
+        #ak sa bbox nenastavil, vezmeme celú vrstvu
         if (
             self._stroke_min_x is None
             or self._stroke_min_y is None
@@ -433,14 +438,19 @@ class BrushTool(BaseTool):
         bw = x1 - x0
         bh = y1 - y0
 
-        #before –výrez z FULL snapshotu
+        #before je výrez z full snapshotu pred ťahom
         before = self._before_image[y0:y1, x0:x1, :].copy()
-        #after –výrez z aktuálnej vrstvy
+
+        #after je výrez z aktuálnej vrstvy po ťahu
         after = layer.image[y0:y1, x0:x1, :].copy()
+
+        if np.array_equal(before, after):
+            self._cleanup()
+            return
 
         bbox = (x0, y0, bw, bh)
 
-        action = UndoAction(description="Brush stroke", layer_id=layer.meta.id, layer_role=layer.meta.role, bbox=bbox, before=before, after=after)
+        action = UndoAction(description="Tah štětcem", layer_id=layer.meta.id, layer_role=layer.meta.role, bbox=bbox, before=before, after=after)
 
         self.controller.project.undo_manager.push_action(action)
 
@@ -449,12 +459,13 @@ class BrushTool(BaseTool):
             project.sync_layer_filled_mask_from_alpha(layer.meta.id, bbox)
         self.controller.invalidate_selection_region_map_cache()
 
-        #cleanup
         self._cleanup()
 
         self.controller.refresh_canvas_region(bbox)
 
     def _cleanup(self) -> None:
+        """Vyčistí dočasný stav po ťahu"""
+        self.is_drawing = False
         self._before_image = None
         self._stroke_committed_alpha_u8 = None
         self._pass_alpha_u8 = None
@@ -469,6 +480,7 @@ class BrushTool(BaseTool):
         self._stroke_max_y = None
 
     def _clamp_bbox_to_layer(self, layer, bbox: tuple[int, int, int, int]) -> tuple[int, int, int, int] | None:
+        """Oreže bbox podľa hraníc vrstvy"""
         x, y, w, h = bbox
         if w <= 0 or h <= 0:
             return None
@@ -486,17 +498,18 @@ class BrushTool(BaseTool):
         return (x0, y0, x1 - x0, y1 - y0)
     
     def get_cursor(self):
+        """Vráti kurzor štetca alebo textúrového štetca"""
         if self.controller is None:
             return Qt.ArrowCursor
 
-        #size -radius v image px
+        #size je radius v obrazových pixeloch
         radius = int(self.controller.get_brush_size())
 
-        #ak je texture mode, cursor = textura
+        #pri texture mode použijeme textúrový kurzor
         if getattr(self.controller, "paint_mode", "brush") == "texture":
             return self.controller._make_texture_cursor(radius)
 
-        #inak brush cursor s farbou current_color
+        #inak použijeme brush kurzor s aktuálnou farbou
         rgba = self.controller.project.get_current_color_rgba() if self.controller.project is not None else (0, 0, 0, 255)
         rgba_t = tuple(int(x) for x in rgba)
         return self.controller._make_brush_cursor(radius, rgba_t)

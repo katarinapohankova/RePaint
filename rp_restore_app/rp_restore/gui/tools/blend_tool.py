@@ -12,9 +12,8 @@ from rp_restore.gui.tools.base_tool import BaseTool
 
 class BlendTool(BaseTool):
     """
-    Blend nástroj
-    -funguje iba na aktívnej PAINT vrstve (alebo aktívnej PAINT + background vrstve) a iba v damage maske
-    -rozmazáva pixely v rámci jednej paint vrstvy
+    Nástroj na rozmazanie pixelov v rámci aktívnej PAINT vrstvy
+    funguje iba v damage maske a zdroj môže brať z aktívnej vrstvy alebo z kombinácie pozadia a aktívnej vrstvy
     """
 
     def __init__(self, controller, canvas) -> None:
@@ -34,6 +33,7 @@ class BlendTool(BaseTool):
         self._stroke_max_y: Optional[int] = None
 
     def _get_active_paint_layer(self):
+        """Vráti aktívnu PAINT vrstvu alebo None"""
         project = self.controller.project
         if project is None or self.controller.active_layer_id is None:
             return None
@@ -47,6 +47,7 @@ class BlendTool(BaseTool):
         return None
 
     def _make_soft_mask(self, sh: int, sw: int, cx: int, cy: int, radius: int) -> np.ndarray:
+        """Vytvorí kruhovú masku štetca so zohľadnením tvrdosti"""
         hardness = 1.0
         if hasattr(self.controller, "get_brush_hardness"):
             hardness = float(self.controller.get_brush_hardness())
@@ -69,9 +70,7 @@ class BlendTool(BaseTool):
 
     def _blend_dot(self, layer, src_x: int, src_y: int, dst_x: int, dst_y: int) -> None:
         """
-        - zoberie patch okolo predchádzajúcej pozície
-        - prenesie ho na aktuálnu pozíciu
-        - a zmieša ho s aktuálnymi pixelmi podľa sily blendu
+        Prenesie patch z predchádzajúcej pozície na aktuálnu pozíciu a zmieša ho s cieľovými pixelmi
         """
         h, w, _ = layer.image.shape
         r = int(self.brush_size)
@@ -166,8 +165,8 @@ class BlendTool(BaseTool):
         out = dst_patch * (1.0 - a) + src_patch * a
         layer.image[dst_y0:dst_y1, dst_x0:dst_x1, :] = np.clip(out, 0, 255).astype(np.uint8)
 
-
     def _blend_line(self, layer, x0: int, y0: int, x1: int, y1: int) -> None:
+        """Rozmaže úsek medzi dvoma bodmi postupnými odtlačkami štetca"""
         dx = x1 - x0
         dy = y1 - y0
         steps = max(abs(dx), abs(dy), 1)
@@ -186,6 +185,7 @@ class BlendTool(BaseTool):
             prev_y = yy
 
     def on_mouse_press(self, img_x: int, img_y: int, buttons: Qt.MouseButtons, modifiers: Qt.KeyboardModifiers) -> None:
+        """Začne ťah rozmazávacieho nástroja"""
         if not (buttons & Qt.LeftButton):
             return
 
@@ -208,6 +208,7 @@ class BlendTool(BaseTool):
         self._stroke_max_y = img_y
 
     def on_mouse_move(self, img_x: int, img_y: int, buttons: Qt.MouseButtons, modifiers: Qt.KeyboardModifiers) -> None:
+        """Pokračuje v rozmazávaní počas ťahu myšou"""
         if not self.is_blending:
             return
 
@@ -236,6 +237,7 @@ class BlendTool(BaseTool):
         self._refresh_segment_region(prev_x, prev_y, img_x, img_y, self.brush_size)
 
     def on_mouse_release(self, img_x: int, img_y: int, buttons: Qt.MouseButtons, modifiers: Qt.KeyboardModifiers) -> None:
+        """Ukončí ťah rozmazania a uloží undo akciu"""
         if not self.is_blending:
             return
 
@@ -273,7 +275,7 @@ class BlendTool(BaseTool):
         after = layer.image[y0:y1, x0:x1, :].copy()
 
         if not np.array_equal(before, after):
-            action = UndoAction(description="Blend stroke", layer_id=layer.meta.id, layer_role=layer.meta.role, bbox=bbox, before=before, after=after)
+            action = UndoAction(description="Rozmazání", layer_id=layer.meta.id, layer_role=layer.meta.role, bbox=bbox, before=before, after=after)
             self.controller.project.undo_manager.push_action(action)
 
             project = self.controller.project
@@ -288,6 +290,8 @@ class BlendTool(BaseTool):
         self._cleanup()
 
     def _cleanup(self) -> None:
+        """Vyčistí dočasný stav po ťahu"""
+        self.is_blending = False
         self._before_image = None
 
         self._last_x = None
@@ -299,5 +303,6 @@ class BlendTool(BaseTool):
         self._stroke_max_y = None
 
     def get_cursor(self):
+        """Vráti kurzor rozmazávacieho nástroja"""
         radius = int(self.controller.get_brush_size())
         return self.controller._make_blend_cursor(radius)

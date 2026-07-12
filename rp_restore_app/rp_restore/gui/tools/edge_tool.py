@@ -12,9 +12,8 @@ from rp_restore.gui.tools.base_tool import BaseTool
 
 class EdgeTool(BaseTool):
     """
-    Nástroj na kreslenie hrán -EDGE vrstvy
-    - kreslí čierne čiary (RGBA = 0,0,0,255) na aktívnej EDGE vrstve, vytvára UndoAction
-    - pri release zavolá project.on_edge_layer_modified(...)
+    Nástroj na kreslenie a mazanie hrán na aktívnej EDGE vrstve
+    kreslené hrany slúžia ako bariéry pri výbere a výplni poškodených oblastí
     """
 
     def __init__(self, controller, canvas) -> None:
@@ -24,7 +23,6 @@ class EdgeTool(BaseTool):
         self.is_erasing: bool = False
         self.brush_size = 1
         self.edge_color: np.ndarray = controller.get_edge_color_rgba()
-        #self._reset_stroke_state()
 
         self._before_image: Optional[np.ndarray] = None
         self._last_x: Optional[int] = None
@@ -35,6 +33,7 @@ class EdgeTool(BaseTool):
         self._stroke_max_y: Optional[int] = None
 
     def _get_active_edge_layer(self):
+        """Nájde aktívnu EDGE vrstvu podľa active_layer_id v controlleri"""
         project = self.controller.project
         if project is None or self.controller.active_layer_id is None:
             return None
@@ -48,6 +47,7 @@ class EdgeTool(BaseTool):
         return None
 
     def _draw_dot(self, layer, x: int, y: int) -> None:
+        """Nakreslí alebo vymaže jeden bod hrany"""
         h, w, _ = layer.image.shape
         r = self.brush_size
 
@@ -69,7 +69,7 @@ class EdgeTool(BaseTool):
                 if dist > r:
                     continue
 
-                #orezanie na damage masku
+                #hrany kreslíme iba v damage maske
                 if damage_mask is not None:
                     mh, mw = damage_mask.shape
                     if yy >= mh or xx >= mw:
@@ -92,7 +92,7 @@ class EdgeTool(BaseTool):
                 src = self.edge_color.astype(np.float32).copy()
                 src_alpha = int(src[3] * alpha_factor)
 
-                #ak je alpha veľmi malá, preskočíme
+                #pixely s nulovou alfou netreba zapisovať
                 if src_alpha <= 0:
                     continue
 
@@ -106,11 +106,12 @@ class EdgeTool(BaseTool):
                     layer.image[yy, xx, :] = 0
                     continue
 
-                #prekrytie farby podľa novej alpha
+                #farbu hrany berieme z aktuálneho edge nastavenia
                 layer.image[yy, xx, 0:3] = src[0:3].astype(np.uint8)
                 layer.image[yy, xx, 3] = int(out_a * 255)
 
     def _draw_line(self, layer, x0: int, y0: int, x1: int, y1: int) -> None:
+        """Kreslí medzi dvoma bodmi tak, aby ťah nebol prerušovaný"""
         dx = x1 - x0
         dy = y1 - y0
         steps = max(abs(dx), abs(dy), 1)
@@ -122,19 +123,22 @@ class EdgeTool(BaseTool):
             self._draw_dot(layer, xx, yy)
 
     def _update_settings_from_controller(self) -> None:
+        """Načíta aktuálnu edge farbu z controlleru"""
         self.edge_color = self.controller.get_edge_color_rgba()
 
     def on_mouse_press(self, img_x: int, img_y: int, buttons: Qt.MouseButtons, modifiers: Qt.KeyboardModifiers) -> None:
+        """Začne nový ťah na EDGE vrstve"""
         if not ((buttons & Qt.LeftButton) or (buttons & Qt.RightButton)):
             return
         
         self.is_erasing = bool(buttons & Qt.RightButton) or bool(modifiers & Qt.ShiftModifier)
-        #pri začiatku ťahu natiahneme aktuálnu hrúbku a farbu
+
+        #pri začiatku ťahu načítame aktuálnu farbu hrany
         self._update_settings_from_controller()
 
         layer = self._get_active_edge_layer()
         if layer is None:
-            self.controller.show_tool_message("Edge tool sa dá použiť len na EDGE vrstve")
+            self.controller.show_tool_message("Hrany lze kreslit pouze na vrstvě hran")
             return
 
         self.is_drawing = True
@@ -153,14 +157,15 @@ class EdgeTool(BaseTool):
         r = self.brush_size
         x0 = img_x - r
         y0 = img_y - r
-        w = 2 * r
-        h = 2 * r
+        w = 2 * r + 1
+        h = 2 * r + 1
         if hasattr(self.controller, "refresh_canvas_region"):
             self.controller.refresh_canvas_region((x0, y0, w, h))
         else:
             self.controller.refresh_canvas()
 
     def on_mouse_move(self, img_x: int, img_y: int, buttons: Qt.MouseButtons, modifiers: Qt.KeyboardModifiers) -> None:
+        """Pokračuje v kreslení alebo mazaní hrany počas ťahu"""
         if not self.is_drawing:
             return
 
@@ -187,6 +192,7 @@ class EdgeTool(BaseTool):
         self._refresh_segment_region(prev_x, prev_y, img_x, img_y, self.brush_size)
 
     def on_mouse_release(self, img_x: int, img_y: int, buttons: Qt.MouseButtons, modifiers: Qt.KeyboardModifiers) -> None:
+        """Ukončí ťah na EDGE vrstve a uloží undo akciu"""
         if not self.is_drawing:
             return
 
@@ -194,6 +200,7 @@ class EdgeTool(BaseTool):
 
         layer = self._get_active_edge_layer()
         if layer is None or self._before_image is None:
+            self._cleanup()
             return
 
         h, w, _ = layer.image.shape
@@ -209,16 +216,12 @@ class EdgeTool(BaseTool):
             margin = self.brush_size
             x0 = max(0, self._stroke_min_x - margin)
             y0 = max(0, self._stroke_min_y - margin)
-            x1 = min(w, self._stroke_max_x + margin)
-            y1 = min(h, self._stroke_max_y + margin)
+            x1 = min(w, self._stroke_max_x + margin + 1)
+            y1 = min(h, self._stroke_max_y + margin + 1)
 
         if x1 <= x0 or y1 <= y0:
-            #nič sa nezmenilo
-            self._before_image = None
-            self._last_x = None
-            self._last_y = None
-            self._stroke_min_x = self._stroke_min_y = None
-            self._stroke_max_x = self._stroke_max_y = None
+            #nič sa reálne nezmenilo
+            self._cleanup()
             return
 
         bw = x1 - x0
@@ -227,17 +230,32 @@ class EdgeTool(BaseTool):
         before = self._before_image[y0:y1, x0:x1, :].copy()
         after = layer.image[y0:y1, x0:x1, :].copy()
 
+        if np.array_equal(before, after):
+            self._cleanup()
+            return
+
         bbox = (x0, y0, bw, bh)
 
-        action = UndoAction(description="Edit edges", layer_id=layer.meta.id, layer_role=layer.meta.role, bbox=bbox, before=before, after=after)
+        description = "Mazání hran" if self.is_erasing else "Kreslení hran"
+        action = UndoAction(description=description, layer_id=layer.meta.id, layer_role=layer.meta.role, bbox=bbox, before=before, after=after)
 
         self.controller.project.undo_manager.push_action(action)
 
+        project = self.controller.project
+        if project is not None and hasattr(project, "mark_dirty"):
+            project.mark_dirty()
+
         self.controller.invalidate_selection_region_map_cache()
 
-        #refresh canvasu len v bboxe
+        #prekreslíme iba dotknutú oblasť canvasu
         self.controller.refresh_canvas_region(bbox)
 
+        self._cleanup()
+
+    def _cleanup(self) -> None:
+        """Vyčistí dočasný stav po ťahu"""
+        self.is_drawing = False
+        self.is_erasing = False
         self._before_image = None
         self._last_x = None
         self._last_y = None
@@ -248,6 +266,7 @@ class EdgeTool(BaseTool):
 
 
     def get_cursor(self):
+        """Vráti kurzor nástroja na kreslenie hrán"""
         if self.controller is None:
             return Qt.CrossCursor
         return self.controller._make_edge_cursor()

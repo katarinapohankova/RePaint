@@ -6,16 +6,14 @@ from PySide6.QtWidgets import QWidget, QRubberBand
 
 import numpy as np
 
-from .overlay_highlight import draw_selection_highlight #draw_region_highlights,
+from .overlay_highlight import draw_selection_highlight
 from rp_restore.core.regions import RegionMap
 
 class ImageCanvasWidget(QWidget):
     """
-    reprezentuje hlavnú kresliacu plochu
-    zatiaľ:
-      - drží aktuálny QImage
-      - vykreslí ho v paintEvent
-      - bez myšovej interakcie, zoomu a posúvania
+    Widget hlavného canvasu
+    vykresľuje aktuálny obraz so zoomom a posunom, selection overlayom,
+    náhľadom automatickej výplne, lasom a oknom pre realistické doplnenie
     """
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -23,10 +21,9 @@ class ImageCanvasWidget(QWidget):
 
         self.current_image: QImage | None = None
 
-        #zatiaľ len tak
         self.zoom_factor: float = 1.0
-        self.pan_x: int = 0
-        self.pan_y: int = 0
+        self.pan_x: float = 0.0
+        self.pan_y: float = 0.0
         self._panning: bool = False
         self._pan_button: Qt.MouseButton | None = None
         self._last_mouse_pos: QPoint | None = None
@@ -53,9 +50,9 @@ class ImageCanvasWidget(QWidget):
         self._window_pick_origin: QPoint | None = None
         self._window_rubber = QRubberBand(QRubberBand.Rectangle, self)
 
-        self._pending_window_bbox: tuple[int, int, int, int] | None = None  
+        self._pending_window_bbox: tuple[int, int, int, int] | None = None
         self._pending_window_dragging: bool = False
-        self._pending_window_drag_anchor: tuple[int, int] | None = None      
+        self._pending_window_drag_anchor: tuple[int, int] | None = None
         self._pending_window_drag_start_bbox: tuple[int, int, int, int] | None = None
 
         self.layer_preview_overlay_image: QImage | None = None
@@ -67,7 +64,7 @@ class ImageCanvasWidget(QWidget):
         self.update()
 
     def set_controller(self, controller) -> None:
-        """nastaví controller, ktorému budeme posielať udalosti myši"""
+        """Nastaví controller, ktorému canvas posiela udalosti myši"""
         self.controller = controller
 
     def set_selection_mask(self, mask: np.ndarray | None) -> None:
@@ -79,7 +76,8 @@ class ImageCanvasWidget(QWidget):
 
     def patch_region(self, patch: QImage, x: int, y: int) -> None:
         """
-        nahrá do current_image malý patch na pozíciu (x, y) v obrazových súradniciach a potom prekreslí widget (so zoom/pan)
+        Vloží malý patch do aktuálneho obrazu na pozíciu v obrazových súradniciach
+        potom prekreslí canvas so zachovaným zoomom a posunom
         """
         if self.current_image is None or self.current_image.isNull():
             return
@@ -93,10 +91,11 @@ class ImageCanvasWidget(QWidget):
             painter.end()
         self.update()
 
-    def paintEvent(self, event: QPaintEvent) -> None: 
+    def paintEvent(self, event: QPaintEvent) -> None:
+        """Vykreslí aktuálny obraz a všetky dočasné overlaye canvasu"""
         painter = QPainter(self)
 
-        #vyplníme pozadie -čiernou
+        #vyplníme pozadie čiernou farbou
         painter.fillRect(self.rect(), Qt.black)
 
         if self.is_layer_preview_overlay_active():
@@ -138,7 +137,7 @@ class ImageCanvasWidget(QWidget):
         img_w = img.width()
         img_h = img.height()
 
-        #stred
+        #obraz centrovame do widgetu a následne aplikujeme zoom a pan
         w = self.width()
         h = self.height()
         cx = w / 2
@@ -151,17 +150,17 @@ class ImageCanvasWidget(QWidget):
 
         painter.setTransform(transform)
 
-        #zatiaľ bez zoomu 
-        #nakreslíme obraz do ľavého horného rohu
+        #obraz kreslíme v image súradniciach, transform zabezpečuje zoom a posun
         painter.drawImage(0, 0, img)
 
         #auto-fill preview overlay
         if self.auto_fill_preview_region_map is not None and self.auto_fill_preview_region_ids:
             label_image = self.auto_fill_preview_region_map.label_image
             painter.setPen(Qt.NoPen)
-            #polopriehľadná tyrkysová
-            active_color = Qt.cyan
-            excluded_color = Qt.darkGray
+
+            #polopriehľadné zvýraznenie kandidátov auto-fill výplne
+            active_color = QColor(0, 255, 255, 80)
+            excluded_color = QColor(80, 80, 80, 100)
 
             h, w = label_image.shape
             for y in range(h):
@@ -192,7 +191,7 @@ class ImageCanvasWidget(QWidget):
             painter.setBrush(Qt.yellow)
             painter.drawEllipse(last_x - 2, last_y - 2, 4, 4)
 
-        #kreslenie pending okna (červený obrys)
+        #kreslenie pending okna pre realistic fill
         if self._pending_window_bbox is not None:
             x, y, w, h = self._pending_window_bbox
             if w > 0 and h > 0:
@@ -205,7 +204,7 @@ class ImageCanvasWidget(QWidget):
 
     def get_current_transform(self) -> QTransform:
         """
-        vráti transformáciu ktorou sa kreslí obraz (widget -> image)
+        Vráti transformáciu z obrazových súradníc do súradníc widgetu
         """
         if self.current_image is None:
             return QTransform()
@@ -226,8 +225,8 @@ class ImageCanvasWidget(QWidget):
 
     def widget_to_image(self, x: float, y: float) -> tuple[float, float]:
         """
-        prevedie widget súradnice (x, y) na image súradnice
-        Vráti (ix, iy) v image priestore (float)
+        Prevedie súradnice widgetu na súradnice obrazu
+        vracia dvojicu float hodnôt v image priestore
         """
         t = self.get_current_transform()
         inv, ok = t.inverted()
@@ -237,27 +236,8 @@ class ImageCanvasWidget(QWidget):
         ix, iy = inv.map(x, y)
         return ix, iy
 
-    #--------myš--------
-    def _map_widget_to_image(self, x: int, y: int) -> tuple[int, int] | None:
-        """
-        prepočet súradníc z widgetu na obrázok
-        zatiaľ:
-          - žiadny zoom
-          - obraz je v ľavom hornom rohu
-          - ak klikne mimo obrázok, vráti None
-        """
-        if self.current_image is None:
-            return None
-
-        img_w = self.current_image.width()
-        img_h = self.current_image.height()
-
-        if x < 0 or y < 0 or x >= img_w or y >= img_h:
-            return None
-
-        return int(x), int(y)
-
-    def mousePressEvent(self, event):  
+    def mousePressEvent(self, event):
+        """Spracuje stlačenie tlačidla myši na canvase"""
         if self.controller is None or self.current_image is None:
             return
         
@@ -277,15 +257,15 @@ class ImageCanvasWidget(QWidget):
             self._stop_panning()
 
         if event.button() == Qt.LeftButton and self._pending_window_bbox is not None:
-            #prepočíta klik na image coords
+            #prepočítame klik na image coords
             ix, iy = self.widget_to_image(float(event.position().x()), float(event.position().y()))
             px, py = int(ix), int(iy)
 
             x, y, w, h = self._pending_window_bbox
-            inside = (x <= px <= x + w) and (y <= py <= y + h)
+            inside = (x <= px < x + w) and (y <= py < y + h)
 
             if inside:
-                #začneme drag
+                #začneme posúvať pending okno
                 self._pending_window_dragging = True
                 self._pending_window_drag_anchor = (px, py)
                 self._pending_window_drag_start_bbox = self._pending_window_bbox
@@ -312,7 +292,8 @@ class ImageCanvasWidget(QWidget):
         self.controller.on_canvas_mouse_press(int(ix), int(iy), event.buttons(), event.modifiers())
         event.accept()
 
-    def mouseMoveEvent(self, event): 
+    def mouseMoveEvent(self, event):
+        """Spracuje pohyb myši na canvase"""
         if self.controller is None or self.current_image is None:
             return
         
@@ -330,7 +311,7 @@ class ImageCanvasWidget(QWidget):
 
             x0, y0, w0, h0 = self._pending_window_drag_start_bbox
 
-            #nový posun
+            #nová poloha pending okna
             new_x = x0 + dx
             new_y = y0 + dy
 
@@ -344,7 +325,7 @@ class ImageCanvasWidget(QWidget):
             self._pending_window_bbox = (new_x, new_y, w0, h0)
             self.update()
 
-            #informuje controller (aby sa aktualizoval dialóg)
+            #informujeme controller, aby sa aktualizoval dialóg
             if self.controller is not None and hasattr(self.controller, "on_pending_window_bbox_changed"):
                 self.controller.on_pending_window_bbox_changed(self._pending_window_bbox)
 
@@ -355,8 +336,7 @@ class ImageCanvasWidget(QWidget):
             #QRubberBand kreslí vo widget coords
             rect = QRect(self._window_pick_origin, event.pos()).normalized()
 
-            #clamp max_size v IMAGE coords (aby to zodpovedalo limitu 1024×1024)
-            #približný clamp vo widget coords podľa zoomu
+            #limit veľkosti okna je v image súradniciach, preto ho približne prepočítame podľa zoomu
             max_w_widget = int(self._window_pick_max_size * self.zoom_factor)
             max_h_widget = int(self._window_pick_max_size * self.zoom_factor)
 
@@ -372,7 +352,7 @@ class ImageCanvasWidget(QWidget):
             dx = event.position().x() - self._last_mouse_pos.x()
             dy = event.position().y() - self._last_mouse_pos.y()
 
-            #prevedieme posun z widget priestoru do image priestoru 
+            #prevedieme posun z widget priestoru do image priestoru
             if self.zoom_factor != 0:
                 self.pan_x += dx / self.zoom_factor
                 self.pan_y += dy / self.zoom_factor
@@ -387,7 +367,8 @@ class ImageCanvasWidget(QWidget):
         ix, iy = self.widget_to_image(xw, yw)
         self.controller.on_canvas_mouse_move(int(ix), int(iy), event.buttons(), event.modifiers())
 
-    def mouseReleaseEvent(self, event):  
+    def mouseReleaseEvent(self, event):
+        """Spracuje pustenie tlačidla myši na canvase"""
         if self.controller is None or self.current_image is None:
             return
         
@@ -422,6 +403,7 @@ class ImageCanvasWidget(QWidget):
         event.accept()
 
     def wheelEvent(self, event: QWheelEvent) -> None:
+        """Zoomuje obraz okolo aktuálnej pozície kurzora"""
         if self.current_image is None:
             return
         
@@ -429,17 +411,12 @@ class ImageCanvasWidget(QWidget):
             event.accept()
             return
 
-        #zoom okolo kurzoru
         angle = event.angleDelta().y()
         if angle == 0:
             return
 
-        #starý zoom
         old_zoom = self.zoom_factor
-        #krok –napr. 1.1
         factor = 1.1 if angle > 0 else 1 / 1.1
-        #limit
-        new_zoom = max(0.1, min(old_zoom * factor, 20.0))
 
         #dynamické min/max podľa veľkosti obrázka a okna
         img_w = self.current_image.width()
@@ -451,9 +428,9 @@ class ImageCanvasWidget(QWidget):
             #scale, pri ktorom sa obraz práve zmestí do okna
             fit = min(w / img_w, h / img_h)
 
-            #bude sa dať odzoomovať (4x)
+            #povolíme odzoomovanie pod fit hodnotu
             min_zoom = fit * 0.25
-            #zväčšíme možné priblíženie na 100 krát
+            #maximálne priblíženie naviažeme na fit hodnotu
             max_zoom = fit * 100.0
         else:
             min_zoom = 0.01
@@ -485,7 +462,7 @@ class ImageCanvasWidget(QWidget):
 
     def fit_to_window(self) -> None:
         """
-        nastaví zoom tak, aby sa obrázok vošiel do okna a bol vycentrovaný
+        Nastaví zoom tak, aby sa obrázok vošiel do okna a bol vycentrovaný
         """
         if self.current_image is None:
             return
@@ -505,7 +482,7 @@ class ImageCanvasWidget(QWidget):
         sy = h / img_h
         self.zoom_factor = min(sx, sy)
 
-        #pan nastavený na 0 = stred obrázku do stredu okna
+        #pan nastavený na 0 znamená centrovanie obrazu do stredu widgetu
         self.pan_x = 0.0
         self.pan_y = 0.0
 
@@ -557,6 +534,7 @@ class ImageCanvasWidget(QWidget):
         self.setCursor(Qt.CrossCursor)
 
     def cancel_window_pick(self) -> None:
+        """Zruší režim ručného výberu okna"""
         self._window_pick_active = False
         self._window_pick_origin = None
         self._window_rubber.hide()
@@ -571,11 +549,11 @@ class ImageCanvasWidget(QWidget):
             self.cancel_window_pick()
             return
 
-        #rohy vo widget coords
+        #rohy vo widget coords, pravý a dolný okraj berieme ako exkluzívny
         x0w = rect_widget.left()
         y0w = rect_widget.top()
-        x1w = rect_widget.right()
-        y1w = rect_widget.bottom()
+        x1w = rect_widget.left() + rect_widget.width()
+        y1w = rect_widget.top() + rect_widget.height()
 
         ix0, iy0 = self.widget_to_image(float(x0w), float(y0w))
         ix1, iy1 = self.widget_to_image(float(x1w), float(y1w))
@@ -606,7 +584,7 @@ class ImageCanvasWidget(QWidget):
             cb(bbox if (w > 0 and h > 0) else None)
 
     def set_pending_window_bbox(self, bbox: tuple[int, int, int, int] | None) -> None:
-        """Nastaví (alebo zruší) okno, ktoré sa kreslí a dá sa posúvať."""
+        """Nastaví alebo zruší okno, ktoré sa kreslí a dá sa posúvať"""
         self._pending_window_bbox = bbox
         self._pending_window_dragging = False
         self._pending_window_drag_anchor = None
@@ -635,13 +613,13 @@ class ImageCanvasWidget(QWidget):
 
     def is_layer_preview_overlay_active(self) -> bool:
         """
-        Vráti true, ak canvas práve zobrazuje veľký náhľad vrstvy
+        Vráti True, ak canvas práve zobrazuje veľký náhľad vrstvy
         """
         return self.layer_preview_overlay_image is not None and not self.layer_preview_overlay_image.isNull()
     
     def _stop_panning(self) -> None:
         """
-        ukončí panning obrazu
+        Ukončí posúvanie obrazu
         """
         self._panning = False
         self._pan_button = None

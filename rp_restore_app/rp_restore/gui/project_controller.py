@@ -12,12 +12,13 @@ from rp_restore.core.layers import Layer, LayerMeta, LayerRole
 from rp_restore.core.project_model import Project
 from rp_restore.config.settings import AppSettings
 from rp_restore.core.selection import SelectionSet
-from rp_restore.core.algorithm_runner import AlgorithmType, AlgorithmRequest, AlgorithmRunner, TextureAlgorithmParams
+from rp_restore.core.algorithm_runner import AlgorithmType, AlgorithmRequest, AlgorithmRunner, TextureAlgorithmParams, RealisticFillMode, RemoteRestorationAccessError
 from rp_restore.core.history import UndoAction
 from rp_restore.core.texture_brush import TextureSettings, Texture, generate_brush_stamp, clear_texture_cache, deform_texture_image
 from rp_restore.core import mask_alignment
 from rp_restore.core.auto_fill import auto_fill_regions, AutoFillRegion
 from rp_restore.core.regions import RegionMap, build_region_map
+from rp_restore.core.remote_restoration_config import RemoteRestorationConfigError, apply_remote_restoration_environment, has_remote_restoration_config
 from rp_restore.gui.canvas.image_canvas_widget import ImageCanvasWidget
 from rp_restore.gui.panels.layers_panel import LayersPanel
 from rp_restore.gui.tools.base_tool import BaseTool
@@ -37,10 +38,8 @@ from rp_restore.io.project_storage import ProjectLoader, ProjectSerializer
 
 class ProjectController:
     """
-    riadi Project a GUI (canvas, panely)
-    zatiaľ:
-      - drží aktuálny Project
-      - a vie obnoviť canvas podľa projektu
+    Prepája Project s GUI časťou aplikácie
+    spravuje aktuálny projekt, aktívnu vrstvu, nástroje, výbery, panely a spúšťanie algoritmov
     """
 
     def __init__(self, app_settings: AppSettings) -> None:
@@ -66,10 +65,9 @@ class ProjectController:
         self.palette_panel = None
         
         self.edge_settings_panel: Optional[object] = None
-        self._edge_brush_size: int = 1 #bude natvrdo nastavená na 1 bez možnosti zmeny
+        self._edge_brush_size: int = 1  #hrúbka EDGE nástroja je zatiaľ pevná
         self._edge_color_rgba: np.ndarray = np.array([0, 0, 0, 255], dtype=np.uint8)
         self._edge_blend_buffer: int = 5
-        #neskôr pribudnú ďalšie ako layers_panel, log_panel, tools_panel...
         self.active_layer_id: Optional[str] = None
         self.layers_panel: Optional[LayersPanel] = None
         self.current_tool: Optional[BaseTool] = None
@@ -84,7 +82,6 @@ class ProjectController:
         self.show_damage_overlay: bool = True
         self.damage_overlay_opacity: float = 0.35
         self.algorithm_panel = None
-        self.palette_panel = None
 
         self.current_project_path: Optional[str] = None
 
@@ -94,6 +91,7 @@ class ProjectController:
         
         self._algorithm_progress_callback = None
         self._algorithm_progress_clear_callback = None
+        self._remote_settings_request_callback: Optional[Callable[[Optional[str]], bool]] = None
 
         self._brush_size_preview_callback: Optional[Callable[[int], None]] = None
 
@@ -118,7 +116,7 @@ class ProjectController:
         self.canvas = canvas
 
     def set_project(self, project: Project) -> None:
-        """nastaví aktuálny Project a refreshne GUI"""
+        """Nastaví aktuálny projekt a obnoví súvisiace panely"""
         self.project = project
         self.project.undo_manager.on_change = self._on_undo_manager_changed
         self.invalidate_selection_region_map_cache()
@@ -131,9 +129,9 @@ class ProjectController:
         self._brush_hardness = float(getattr(project, "brush_hardness", 1.0))
         self._brush_opacity = float(getattr(project, "brush_opacity", 1.0))
         self._brush_flow = float(getattr(project, "brush_flow", 1.0))
-        self._brush_allow_ovelap = bool(getattr(project, "brush_allow_overlap", True))
+        self._brush_allow_overlap = bool(getattr(project, "brush_allow_overlap", True))
 
-        #default aktívna vrstva bude preferovaná BACKGROUND, inak prvú vrstvu v zozname
+        #default aktívna vrstva bude preferovaná BACKGROUND, inak prvá vrstva v zozname
         self.active_layer_id = None
         if self.project.layers:
             bg = self.project.get_background_layer()
@@ -153,7 +151,6 @@ class ProjectController:
             self.materials_panel.refresh_from_project(project)
         if self.edge_settings_panel is not None and hasattr(self.edge_settings_panel, "refresh_from_controller"):
             self.edge_settings_panel.refresh_from_controller(self)
-        #neskôr refreshne všetko (refresh_layers_panel(), refresh_log_panel()...)
     
     def set_texture(self, texture_name: str | None) -> None:
         if self.project is None:
@@ -415,7 +412,7 @@ class ProjectController:
 
         arr, _ = load_working_image(str(p), max_size=max_tex_size)
 
-        # normalizácia na RGBA
+        #normalizácia na RGBA
         if arr.ndim == 2:
             rgba = np.zeros((arr.shape[0], arr.shape[1], 4), dtype=np.uint8)
             rgba[..., 0] = arr
@@ -499,7 +496,7 @@ class ProjectController:
 
         if self.palette_panel is not None and hasattr(self.palette_panel, "refresh_from_project"):
             self.palette_panel.refresh_from_project(self.project)
-        #refresh panel
+        #refresh panelov pracujúcich s farbou
         if self.materials_panel is not None and hasattr(self.materials_panel, "refresh_from_project"):
             self.materials_panel.refresh_from_project(self.project)
 
@@ -517,8 +514,9 @@ class ProjectController:
                 return
 
         self.project.add_palette_color(color)
+        self.project.mark_dirty()
 
-        #refresh ColorPanel
+        #refresh palety
         if self.palette_panel is not None and hasattr(self.palette_panel, "refresh_from_project"):
             self.palette_panel.refresh_from_project(self.project)
 
@@ -538,6 +536,7 @@ class ProjectController:
 
         #priamo upravíme zoznam
         self.project.palette_colors.pop(index)
+        self.project.mark_dirty()
 
         if self.palette_panel is not None and hasattr(self.palette_panel, "refresh_from_project"):
             self.palette_panel.refresh_from_project(self.project)
@@ -545,7 +544,7 @@ class ProjectController:
         if self.materials_panel is not None and hasattr(self.materials_panel, "refresh_from_project"):
             self.materials_panel.refresh_from_project(self.project)
 
-    #-Edge -hrúbka a farba
+    #Edge farba a nastavenia
     def get_edge_color_rgba(self) -> np.ndarray:
         return self._edge_color_rgba.copy()
 
@@ -584,7 +583,7 @@ class ProjectController:
 
     def adjust_brush_size(self, delta: int) -> None:
         """
-        zväčší/zmenší brush size o delta
+        Zväčší alebo zmenší veľkosť štetca o delta
         """
         self.set_brush_size(self._brush_size + int(delta))
 
@@ -655,7 +654,7 @@ class ProjectController:
             self.materials_panel.set_blend_source_mode_value(mode)
 
     def set_layers_panel(self, panel: LayersPanel) -> None:
-        """prepojí controller s panelom vrstiev"""
+        """Prepojí controller s panelom vrstiev"""
         self.layers_panel = panel
         panel.set_controller(self)
 
@@ -675,6 +674,30 @@ class ProjectController:
     def _clear_algorithm_progress(self) -> None:
         if self._algorithm_progress_clear_callback is not None:
             self._algorithm_progress_clear_callback()
+
+    def set_remote_settings_request_callback(self, callback: Callable[[Optional[str]], bool]) -> None:
+        """
+        Nastaví callback, ktorý vie otvoriť dialóg nastavení remote služby.
+
+        Controller sám nevytvára hlavné okno dialógu, iba si cez callback vypýta,
+        aby GUI otvorilo nastavenia, keď chýbajú údaje pre realistic fill.
+        """
+        self._remote_settings_request_callback = callback
+
+    def _ensure_remote_restoration_config(self) -> bool:
+        """
+        Skontroluje, či sú dostupné údaje pre remote realistické doplnenie.
+
+        Ak chýbajú, požiada GUI o otvorenie nastavení.
+        """
+        if has_remote_restoration_config():
+            return True
+
+        if self._remote_settings_request_callback is None:
+            self.show_tool_message("Chybí nastavení remote služby pro realistické doplnění")
+            return False
+
+        return bool(self._remote_settings_request_callback("Pro použití realistického doplnění je potřeba nastavit endpoint URL a API key remote služby."))
     
     def toggle_layer_preview_overlay(self) -> None:
         """
@@ -716,7 +739,7 @@ class ProjectController:
             
     def set_current_tool(self, tool_type: str) -> None:
         """
-        nastaví aktuálny nástroj podľa typu (brush, eraser, ...)
+        Nastaví aktuálny nástroj podľa typu
         """
         if self.canvas is None:
             return
@@ -747,16 +770,15 @@ class ProjectController:
 
     def reset_tools_to_default(self) -> None:
         """
-        Reset nástrojov pri otvorení/zmene projektu:
-        - zruší selection
-        - nastaví default tool = brush
+        Reset nástrojov pri otvorení alebo zmene projektu
+        zruší selection a nastaví predvolený nástroj na brush
         """
         self.active_selection = None
         self.set_current_tool("brush")
 
     def has_active_selection(self) -> bool:
         """
-        True ak existuje neprázdny výber oblastí
+        Vráti True, ak existuje neprázdny výber oblastí
         """
         return self.active_selection is not None and not self.active_selection.is_empty()
 
@@ -768,7 +790,7 @@ class ProjectController:
 
     def set_selection(self, selection_set: SelectionSet | None) -> None:
         """
-        Nastaví aktuálny multi-selection (SelectionSet) a refreshne canvas + AlgorithmPanel
+        Nastaví aktuálny SelectionSet a obnoví canvas aj AlgorithmPanel
         """
         self.active_selection = selection_set
 
@@ -781,7 +803,7 @@ class ProjectController:
 
     def get_active_selection_bbox(self) -> tuple[int, int, int, int] | None:
         """
-        Vráti combined bbox aktuálneho selection
+        Vráti spoločný bbox aktuálneho výberu
         """
         if self.active_selection is None or self.active_selection.is_empty():
             if hasattr(self, "show_tool_message"):
@@ -805,7 +827,7 @@ class ProjectController:
 
         self.canvas.start_window_pick(on_done=_done, max_size=max_size)
 
-    def run_realistic_fill_window(self, window_bbox: tuple[int,int,int,int], use_mock: bool = False, partial_noise: float = 0.7, seed: int | None = None, use_composited_input: bool = False) -> None:
+    def run_realistic_fill_window(self, window_bbox: tuple[int,int,int,int], use_mock: bool = False, partial_noise: float = 0.7, seed: int | None = None, realistic_mode: RealisticFillMode = RealisticFillMode.BASIC) -> None:
         """
         Spustí realistic fill pre zvolené okno
         - ak je selection: aplikuje len do selection
@@ -817,6 +839,10 @@ class ProjectController:
 
         if project.damage_original_mask is None:
             self.show_tool_message("Projekt nemá masku poškození")
+            return
+
+        if not use_mock and not self._ensure_remote_restoration_config():
+            self.show_tool_message("Realistické doplnění nebylo spuštěno – chybí nastavení remote služby")
             return
 
         x, y, w, h = window_bbox
@@ -880,13 +906,14 @@ class ProjectController:
             self.show_tool_message("Ve zvoleném okně už na této vrstvě není nic k doplnění")
             return
 
-        #vstup pre algoritmus je buď výsek composited obrazu, alebo výsek pôvodného obrazu
-        if use_composited_input:
+        #Základný režim používa výsek pôvodného obrazu.
+        #Vedený režim používa aktuálny zložený obraz, aby obsahoval aj prípadný ručný náčrt.
+        if realistic_mode == RealisticFillMode.GUIDED:
             image_patch = project.composited_region((x0, y0, ww, wh))
         else:
             original = project.get_original_image()
             if original is None:
-                self.show_tool_message("Nepodařilo se načíst původní obraz")
+                self.show_tool_message("Nezdařilo se načíst původní obraz")
                 return
             image_patch = original[y0:y1, x0:x1].copy()
 
@@ -902,15 +929,37 @@ class ProjectController:
             window_bbox=(x0, y0, ww, wh),
             partial_noise=partial_noise,
             seed=seed,
+            realistic_mode=realistic_mode,
             progress_callback=self._show_algorithm_progress,
         )
 
-        self._show_algorithm_progress("Spouštím realistické doplnění...", None, None)
+        if realistic_mode == RealisticFillMode.GUIDED:
+            self._show_algorithm_progress("Spouštím vedené realistické doplnění...", None, None)
+        else:
+            self._show_algorithm_progress("Spouštím realistické doplnění...", None, None)
+
+        try:
+            if not use_mock:
+                apply_remote_restoration_environment()
+        except RemoteRestorationConfigError as e:
+            self.show_tool_message(f"Nastavení remote služby není platné: {e}")
+            return
 
         try:
             result = AlgorithmRunner.run(request)
+        except RemoteRestorationAccessError:
+            self.show_tool_message(
+                "Přihlášení k remote službě se nepodařilo. Zkontrolujte endpoint URL a API key."
+            )
+
+            if self._remote_settings_request_callback is not None:
+                self._remote_settings_request_callback(
+                    "Přihlášení k remote službě se nepodařilo. "
+                    "Zkontrolujte endpoint URL a API key a uložte nastavení znovu."
+                )
+
+            return
         except Exception as e:
-            self._clear_algorithm_progress()
             self.show_tool_message(f"Realistické doplnění selhalo: {e}")
             return
         finally:
@@ -945,26 +994,37 @@ class ProjectController:
 
         after = target_layer.clone_subregion(bx, by, bw, bh)
 
-        action = UndoAction(description="Realistické dopnění", layer_id=target_layer.meta.id, layer_role=target_layer.meta.role, bbox=(bx, by, bw, bh), before=before, after=after)
+        if np.array_equal(before, after):
+            self.show_tool_message("Realistické doplnění neprovedlo žádnou změnu")
+            return
+
+        description = "Vedené realistické doplnění" if realistic_mode == RealisticFillMode.GUIDED else "Realistické doplnění"
+        action = UndoAction(description=description, layer_id=target_layer.meta.id, layer_role=target_layer.meta.role, bbox=(bx, by, bw, bh), before=before, after=after)
         project.undo_manager.push_action(action)
 
         filled_mask = np.zeros_like(dmg, dtype=bool)
         filled_mask[by:by + bh, bx:bx + bw] = local_apply
         project.mark_region_as_filled_on_layer(target_layer.meta.id, filled_mask)
+        self.invalidate_selection_region_map_cache()
 
         project.mark_dirty()
         self.refresh_canvas()
         self.set_pending_window_bbox(None)
-        self.show_tool_message("Realistické doplnění bylo dokončeno")
+        if realistic_mode == RealisticFillMode.GUIDED:
+            self.show_tool_message("Vedené realistické doplnění bylo dokončeno")
+        else:
+            self.show_tool_message("Realistické doplnění bylo dokončeno")
 
     def set_pending_window_bbox_listener(self, cb) -> None:
         """Dialog si zaregistruje callback, aby dostával aktualizácie bboxu"""
         self._pending_window_bbox_listener = cb
 
     def clear_pending_window_bbox_listener(self) -> None:
+        """Odpojí listener pre zmeny pending okna"""
         self._pending_window_bbox_listener = None
 
     def set_pending_window_bbox(self, bbox: tuple[int,int,int,int] | None) -> None:
+        """Nastaví alebo zruší pending okno pre realistické doplnenie"""
         self._pending_window_bbox = bbox
         if self.canvas is not None:
             self.canvas.set_pending_window_bbox(bbox)
@@ -972,10 +1032,11 @@ class ProjectController:
             self._pending_window_bbox_listener(bbox)
 
     def get_pending_window_bbox(self) -> tuple[int,int,int,int] | None:
+        """Vráti aktuálne pending okno pre realistické doplnenie"""
         return self._pending_window_bbox
 
     def on_pending_window_bbox_changed(self, bbox: tuple[int,int,int,int]) -> None:
-        """Volá canvas pri drag"""
+        """Volá canvas pri posúvaní pending okna"""
         self._pending_window_bbox = bbox
 
         #update dialógu
@@ -1012,20 +1073,20 @@ class ProjectController:
 
     def set_message_callback(self, callback: Callable[[str], None]) -> None:
         """
-        nastaví callback na zobrazovanie krátkych hlášok pre užívateľa
+        Nastaví callback na zobrazovanie krátkych hlášok pre používateľa
         (tool warnings a pod.)
         """
         self._message_callback = callback
 
     def set_brush_size_preview_callback(self, callback: Callable[[int], None]) -> None:
         """
-        nastaví callback pre zobrazenie náhľadu veľkosti brush
+        Nastaví callback pre zobrazenie náhľadu veľkosti štetca
         """
         self._brush_size_preview_callback = callback
 
     def show_tool_message(self, text: str) -> None:
         """
-        zobrazí krátku hlášku o používaní nástrojov
+        Zobrazí krátku hlášku o používaní nástrojov
         """
         if self._message_callback is not None:
             self._message_callback(text)
@@ -1037,7 +1098,7 @@ class ProjectController:
     def _get_damage_overlay_mask_for_view(self) -> np.ndarray | None:
         """
         Vráti masku, ktorú chceme zobrazovať ako overlay
-        - globálne remaining
+        vracia globálnu remaining masku podľa viditeľných vrstiev
         """
         if self.project is None:
             return None
@@ -1045,9 +1106,8 @@ class ProjectController:
     
     def _auto_switch_active_layer_for_tool(self, tool_type: str) -> None:
         """
-        Automaticky prepne aktívnu vrstvu podľa nástroja 
-        - edge ->EDGE vrstva
-        - brush ->prvá PAINT vrstva
+        Automaticky prepne aktívnu vrstvu podľa zvoleného nástroja
+        edge používa EDGE vrstvu, kresliace nástroje používajú PAINT vrstvu
         """
         if self.project is None:
             return
@@ -1064,7 +1124,7 @@ class ProjectController:
             if edge_layer is not None:
                 self.set_active_layer(edge_layer.meta.id)
 
-        #brush tool -> PAINT vrstva 
+        #kresliace nástroje -> PAINT vrstva
         if tool_type in ("brush", "edge_blend", "blend"):
             if self.active_layer_id is not None:
                 active = self.get_layer_by_id(self.active_layer_id)
@@ -1092,7 +1152,7 @@ class ProjectController:
                 if h_mask == h_img and w_mask == w_img:
                     #vybielený náhľad poškodených oblastí
                     overlay_color = np.array([255, 255, 255], dtype=np.float32)
-                    alpha = self.damage_overlay_opacity  # 0 = nič, 1 = úplne biele
+                    alpha = self.damage_overlay_opacity  #0 = nič, 1 = úplne biele
 
                     region = remaining
                     orig = image_rgb[region].astype(np.float32)
@@ -1113,7 +1173,8 @@ class ProjectController:
 
     def refresh_canvas_region(self, bbox: tuple[int, int, int, int]) -> None:
         """
-        rýchla verzia refreshu -len v oblasti bbox = (x, y, w, h), a ten patchuje do existujúceho QImage v canvase
+        Rýchla verzia refreshu iba v oblasti bbox = (x, y, w, h)
+        výsledný patch vloží do existujúceho QImage v canvase
         """
         if self.project is None or self.canvas is None:
             return
@@ -1159,9 +1220,7 @@ class ProjectController:
 
     def set_active_layer(self, layer_id: str) -> None:
         """
-        nastaví aktívnu vrstvu podľa jej id
-        zatiaľ len uloží ID a refreshne LayersPanel
-        -neskôr o tom budú vedieť aj nástroje (brush, fill, ...)
+        Nastaví aktívnu vrstvu podľa jej id a obnoví súvisiace panely
         """
         if self.project is None:
             return
@@ -1178,7 +1237,6 @@ class ProjectController:
         self.clear_auto_fill_preview()
         self.update_layer_preview()
         self.invalidate_selection_region_map_cache()
-        #neskôr informujeme nástroje
 
     def add_paint_layer(self) -> None:
         """
@@ -1204,7 +1262,9 @@ class ProjectController:
         new_layer = Layer(meta, new_image)
 
         self.project.add_layer(new_layer)
+        self.project.mark_dirty()
         self.active_layer_id = layer_id
+        self.invalidate_selection_region_map_cache()
 
         self.refresh_layers_panel()
         self.refresh_canvas()
@@ -1251,7 +1311,7 @@ class ProjectController:
             self.project.remove_layer(layer_id)
             self.project.mark_dirty()
         except Exception as e:
-            self.show_tool_message(f"Vrstvu se nepodařilo smazať: {e}")
+            self.show_tool_message(f"Vrstvu se nepodařilo smazat: {e}")
             return False
 
         #ak sme zmazali aktívnu vrstvu, nastavíme inú aktívnu
@@ -1279,7 +1339,7 @@ class ProjectController:
 
     def _apply_opacity_debounced_refresh(self) -> None:
         """
-        Zavolá sa po debounce timeout
+        Zavolá sa po debounce timeoute pri zmene krytia vrstvy
         """
         self.refresh_canvas()
 
@@ -1293,6 +1353,7 @@ class ProjectController:
         for layer in self.project.layers:
             if layer.meta.id == layer_id:
                 layer.meta.name = new_name
+                self.project.mark_dirty()
                 break
 
         self.refresh_layers_panel()
@@ -1368,8 +1429,8 @@ class ProjectController:
 
     def _numpy_rgb_to_qimage(self, arr: np.ndarray) -> QImage:
         """
-        konverzia numpy RGB (H, W, 3, uint8) na QImage RGB
-        .copy(), aby QImage mal vlastnú kópiu dát 
+        Konvertuje numpy RGB obraz na QImage RGB888
+        .copy() zabezpečí, že QImage má vlastnú kópiu dát
         """
         if arr.dtype != np.uint8 or arr.ndim != 3 or arr.shape[2] != 3:
             raise ValueError("Expected RGB image of shape (H, W, 3) with dtype=uint8")
@@ -1379,7 +1440,7 @@ class ProjectController:
         qimage = QImage(arr.data, w, h, bytes_per_line, QImage.Format_RGB888)
         return qimage.copy()
     
-    #load /save projektu
+    #load/save projektu
     def create_project_from_files(self, image_path: str, mask_path: Optional[str] = None) -> Project:
         """
         Vytvorí nový Project zo zadaného obrázka (a voliteľne damage masky)
@@ -1497,9 +1558,9 @@ class ProjectController:
 
     def save_project_with_dialog_if_needed(self) -> bool:
         """
-        Ak projekt nemá path -> vyžiada Save As dialóg (cez QFileDialog)
-        -inak spraví Save
-        -vráti True ak úspech, False ak zrušené alebo chyba
+        Ak projekt nemá cestu, vyžiada Save As dialóg
+        inak spraví obyčajný Save
+        vracia True pri úspechu, False pri zrušení alebo chybe
         """
         if self.project is None:
             return False
@@ -1540,8 +1601,8 @@ class ProjectController:
         Zavrie aktuálny projekt v controlleri
 
         - zabudne referenciu na Project
-        - zruší aktívnu vrstvu, selection, nástroj
-        -vyčistí canvas (obraz)
+        - zruší aktívnu vrstvu, selection a nástroj
+        - vyčistí stav controlleru
         """
         self.project = None
         self.active_layer_id = None
@@ -1554,7 +1615,7 @@ class ProjectController:
 
     def run_auto_fill_small_regions(self, area_threshold: int = 200) -> int:
         """
-        spustí auto-fill malých oblastí na aktívnej PAINT vrstve
+        Spustí auto-fill malých oblastí na aktívnej PAINT vrstve
         (alebo na prvej paint vrstve, ak aktívna nie je paint)
 
         vráti počet vyplnených oblastí
@@ -1603,91 +1664,96 @@ class ProjectController:
     
     def run_algorithm_on_selection(self, algorithm_type: AlgorithmType, use_mock: bool = False, texture_params: TextureAlgorithmParams | None = None) -> None:
         """
-        Spustí externý algoritmus na aktuálnej selection
-        - pripraví AlgorithmRequest, zavolá AlgorithmRunner.run
-        - výsledný patch vloží do aktívnej (alebo prvej) PAINT vrstvy
-        - pridá UndoAction a označí oblasť v damage maske ako vyplnenú
+        Spustí externý algoritmus nad aktuálnym výberom
+        pripraví AlgorithmRequest, zavolá AlgorithmRunner.run a výsledný patch vloží do cieľovej PAINT vrstvy
         """
         project = self.project
-        if project is None or self.active_selection is None:
+        if project is None or self.active_selection is None or self.active_selection.is_empty():
             return
 
-        selection_set = self.active_selection
+        target_layer = self.get_active_paint_layer_for_autofill()
+        if target_layer is None:
+            self.show_tool_message("Není dostupná vrstva malby")
+            return
 
         original = project.get_original_image()
         current = project.get_current_composited_image()
-        damage_rem = project.get_damage_remaining_mask()
+        remaining_mask = project.get_layer_damage_remaining_mask(target_layer.meta.id)
 
-        if original is None or damage_rem is None:
+        if original is None or current is None or remaining_mask is None:
             return
 
-        #zabezpečíme tvar masiek
-        selected_mask = selection_set.combined_mask()
-        remaining_mask = damage_rem.astype(bool)
+        selected_mask = self.active_selection.combined_mask().astype(bool)
+        remaining_mask = remaining_mask.astype(bool)
 
-        #device – zatiaľ natvrdo cpu, neskôr z konfigurácie
-        device = "cpu"
+        if selected_mask.shape != remaining_mask.shape:
+            self.show_tool_message("Výběr a maska poškození nemají stejnou velikost")
+            return
 
-        request = AlgorithmRequest(original_image=original, current_image=current, selected_mask=selected_mask, remaining_mask=remaining_mask, algorithm_type=algorithm_type, device=device, mock=use_mock, texture_params=texture_params)
+        apply_mask = selected_mask & remaining_mask
+        if not bool(apply_mask.any()):
+            self.show_tool_message("Ve vybrané oblasti už na této vrstvě není nic k doplnění")
+            return
+
+        request = AlgorithmRequest(original_image=original, current_image=current, selected_mask=selected_mask, remaining_mask=remaining_mask, algorithm_type=algorithm_type, device="cpu", mock=use_mock, texture_params=texture_params)
 
         try:
             result = AlgorithmRunner.run(request)
         except Exception as e:
-            #zatia+ to aspoň vypíšeme do konzoly
+            #chybu vypíšeme do konzoly aj do používateľskej hlášky
             print("Algorithm error:", e)
             self.show_tool_message(f"Chyba algoritmu: {e}")
             return
 
-        #nájdeme cieľovú PAINT vrstvu
-        target_layer: Layer | None = None
-
-        if self.active_layer_id is not None:
-            for layer in project.layers:
-                if layer.meta.id == self.active_layer_id and layer.meta.role == LayerRole.PAINT:
-                    target_layer = layer
-                    break
-
-        if target_layer is None:
-            for layer in project.layers:
-                if layer.meta.role == LayerRole.PAINT:
-                    target_layer = layer
-                    break
-
-        if target_layer is None:
-            return
-
         x, y, w, h = result.bbox
-        local_sel = selected_mask[y:y+h, x:x+w]
-        patch = result.output_patch
-
-        #zarovnanie patch na RGBA
-        if patch.ndim != 3:
+        if w <= 0 or h <= 0:
+            self.show_tool_message("Algoritmus vrátil neplatný výřez")
             return
+
+        patch = result.output_patch
+        if patch.ndim != 3 or patch.shape[0] != h or patch.shape[1] != w:
+            self.show_tool_message("Algoritmus vrátil patch se špatnými rozměry")
+            return
+
         if patch.shape[2] == 3:
             patch_rgba = np.zeros((h, w, 4), dtype=np.uint8)
             patch_rgba[..., :3] = patch
             patch_rgba[..., 3] = 255
+        elif patch.shape[2] == 4:
+            patch_rgba = patch.astype(np.uint8)
         else:
-            patch_rgba = patch
+            self.show_tool_message("Algoritmus vrátil neplatný počet kanálů")
+            return
 
-        #before
+        local_apply = apply_mask[y:y + h, x:x + w]
+        if local_apply.shape != (h, w) or not bool(local_apply.any()):
+            self.show_tool_message("Algoritmus nevrátil žádné použitelné pixely pro aktuální výběr")
+            return
+
         before = target_layer.clone_subregion(x, y, w, h)
 
-        #vložíme patch do vrstvy
-        sub_img = target_layer.image[y : y + h, x : x + w, :]
-        sub_img[local_sel] = patch_rgba[local_sel]
+        sub_img = target_layer.image[y:y + h, x:x + w, :]
+        sub_img[local_apply] = patch_rgba[local_apply]
 
-        #after
         after = target_layer.clone_subregion(x, y, w, h)
 
-        action = UndoAction(description=f"Doplnění algoritmem {algorithm_type.value} fill", layer_id=target_layer.meta.id, layer_role=target_layer.meta.role, bbox=(x, y, w, h), before=before, after=after)
+        if np.array_equal(before, after):
+            self.show_tool_message("Algoritmus neprovedl žádnou změnu")
+            return
 
+        if algorithm_type == AlgorithmType.TEXTURE:
+            description = "Texturové doplnění"
+        elif algorithm_type == AlgorithmType.REALISTIC:
+            description = "Realistické doplnění"
+        else:
+            description = f"Doplnění algoritmem {algorithm_type.value}"
+
+        action = UndoAction(description=description, layer_id=target_layer.meta.id, layer_role=target_layer.meta.role, bbox=(x, y, w, h), before=before, after=after)
         project.undo_manager.push_action(action)
 
-        #označíme selection ako vyplnenú v damage maske
-        project.mark_region_as_filled_on_layer(target_layer.meta.id, selected_mask)
+        project.mark_region_as_filled_on_layer(target_layer.meta.id, apply_mask)
+        self.invalidate_selection_region_map_cache()
 
-        #pridáme info do history_for_report
         project.history_for_report.append(
             {
                 "type": "algorithm_fill",
@@ -1697,8 +1763,8 @@ class ProjectController:
             }
         )
 
+        project.mark_dirty()
         self.refresh_canvas()
-
     def can_undo(self) -> bool:
         return self.project is not None and self.project.can_undo()
 
@@ -1717,7 +1783,7 @@ class ProjectController:
         if self._undo_redo_changed_callback is not None:
             self._undo_redo_changed_callback()
 
-    #-------export--------
+    #export
     def export_image(self, path: str, resolution: str = "working") -> None:
         if self.project is None:
             return
@@ -1750,7 +1816,7 @@ class ProjectController:
     def has_color_correction(self) -> bool:
         return self.project is not None and self.project.has_color_correction()
     
-    #--autofill-------
+    #autofill
     def get_active_paint_layer_for_autofill(self) -> Layer | None:
         """
         Vráti paint vrstvu, na ktorej sa má robiť auto-fill preview/fill
@@ -1907,7 +1973,7 @@ class ProjectController:
     
     def has_auto_fill_preview_candidates(self) -> bool:
         """
-        True, ak existuje auto-fill preview a sú v ňom aspoň nejaký kandidáti
+        Vráti True, ak existuje auto-fill preview a sú v ňom nejakí kandidáti
         """
         return self.auto_fill_preview_active and self.auto_fill_region_map is not None and len(self.get_effective_auto_fill_region_ids()) > 0
     
@@ -2146,7 +2212,7 @@ class ProjectController:
         p2.setPen(pen)
         p2.setBrush(Qt.NoBrush)
 
-        # obrys po okraji pixmapy
+        #obrys po okraji pixmapy
         p2.drawEllipse(1, 1, pm.width() - 2, pm.height() - 2)
         p2.end()
 
@@ -2251,7 +2317,7 @@ class ProjectController:
     
     def _make_blend_cursor(self, radius_img_px: int) -> QCursor:
         """
-        kurzor pre Blend nástroj
+        Kurzor pre Blend nástroj
         """
         r_screen = self._brush_radius_to_screen_px(radius_img_px)
         r_screen = int(max(6, min(256, r_screen)))
@@ -2269,7 +2335,7 @@ class ProjectController:
         p = QPainter(pm)
         p.setRenderHint(QPainter.Antialiasing, True)
 
-        # polopriehľadný neutrálny kurzor
+        #polopriehľadný neutrálny kurzor
         p.setPen(Qt.NoPen)
         p.setBrush(QBrush(QColor(0, 0, 0, 45)))
         p.drawEllipse(1, 1, d - 2, d - 2)

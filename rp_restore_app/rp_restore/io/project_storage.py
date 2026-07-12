@@ -4,7 +4,6 @@ import json
 import zipfile
 from io import BytesIO
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 from PIL import Image
@@ -35,11 +34,11 @@ def _encode_png(arr: np.ndarray) -> bytes:
 
 def _decode_png_to_rgba(data: bytes) -> np.ndarray:
     """
-    Načíta PNG bytes a vráti RGBA numpy (H, W, 4, uint8)
+    Načíta PNG bytes a vráti RGBA numpy pole tvaru (H, W, 4)
     """
     with BytesIO(data) as bio:
-        img = Image.open(bio).convert("RGBA")
-        return np.array(img, dtype=np.uint8)
+        with Image.open(bio) as img:
+            return np.array(img.convert("RGBA"), dtype=np.uint8)
 
 
 def _decode_png_to_mask(data: bytes) -> np.ndarray:
@@ -47,24 +46,25 @@ def _decode_png_to_mask(data: bytes) -> np.ndarray:
     Načíta PNG bytes a vráti 2D bool masku
     """
     with BytesIO(data) as bio:
-        img = Image.open(bio).convert("L")
-        arr = np.array(img, dtype=np.uint8)
-        return arr > 0
+        with Image.open(bio) as img:
+            arr = np.array(img.convert("L"), dtype=np.uint8)
+            return arr > 0
 
 
 class ProjectSerializer:
     """
-    Ukladanie Project do .zip súboru
+    Ukladanie projektu do .zip súboru
     """
 
     @staticmethod
     def save_to_zip(project: Project, zip_path: str | Path) -> None:
+        """Uloží projekt do ZIP súboru"""
         zip_path = Path(zip_path)
         zip_path.parent.mkdir(parents=True, exist_ok=True)
 
         layers_meta: list[dict] = []
 
-        #základná veľkosť plátna (z background vrstvy, ak existuje)
+        #základná veľkosť plátna z background vrstvy, ak existuje
         canvas_width = canvas_height = None
         bg_layer = project.get_background_layer()
         if bg_layer is not None:
@@ -91,8 +91,8 @@ class ProjectSerializer:
                 )
 
             #uloženie masiek poškodenia
-            damage_original_path: Optional[str] = None
-            damage_filled_path: Optional[str] = None
+            damage_original_path: str | None = None
+            damage_filled_path: str | None = None
 
             if project.damage_original_mask is not None:
                 damage_original_path = "masks/damage_original.png"
@@ -116,12 +116,11 @@ class ProjectSerializer:
                 "damage_original_mask_path": damage_original_path,
                 "damage_filled_mask_path": damage_filled_path,
                 "history_for_report": project.history_for_report,
-
                 "palette": [
                     list(color) for color in getattr(project, "palette_colors", [])
                 ],
                 "current_color": list(getattr(project, "current_color_rgba", (0, 0, 0, 255))),
-                                "colorchecker": {
+                "colorchecker": {
                     "enabled": bool(getattr(project, "color_correction_enabled", False)),
                     "matrix": (
                         getattr(project, "color_correction_matrix", None).tolist()
@@ -134,24 +133,27 @@ class ProjectSerializer:
                     "hardness": float(getattr(project, "brush_hardness", 1.0)),
                     "opacity": float(getattr(project, "brush_opacity", 1.0)),
                     "flow": float(getattr(project, "brush_flow", 1.0)),
+                    "allow_overlap": bool(getattr(project, "brush_allow_overlap", True)),
                 },
             }
 
-            #textúry
+            #uloženie textúr
             textures_meta: list[dict] = []
             if hasattr(project, "textures") and project.textures:
                 for name, tex in project.textures.items():
                     rel = f"textures/{name}.png"
                     zf.writestr(rel, _encode_png(tex.image))
-                    textures_meta.append({
-                        "name": name,
-                        "filename": rel,
-                        "is_generated": bool(getattr(tex, "is_generated", False)),
-                        "source_texture_name": getattr(tex, "source_texture_name", None),
-                        "deformation_scale_x": float(getattr(tex, "deformation_scale_x", 1.0)),
-                        "deformation_scale_y": float(getattr(tex, "deformation_scale_y", 1.0)),
-                        "can_deform": bool(getattr(tex, "can_deform", True)),
-                    })
+                    textures_meta.append(
+                        {
+                            "name": name,
+                            "filename": rel,
+                            "is_generated": bool(getattr(tex, "is_generated", False)),
+                            "source_texture_name": getattr(tex, "source_texture_name", None),
+                            "deformation_scale_x": float(getattr(tex, "deformation_scale_x", 1.0)),
+                            "deformation_scale_y": float(getattr(tex, "deformation_scale_y", 1.0)),
+                            "can_deform": bool(getattr(tex, "can_deform", True)),
+                        }
+                    )
 
             meta["textures"] = textures_meta
 
@@ -160,11 +162,12 @@ class ProjectSerializer:
 
 class ProjectLoader:
     """
-    Načítanie Project zo .zip súboru
+    Načítanie projektu zo .zip súboru
     """
 
     @staticmethod
     def load_from_zip(zip_path: str | Path) -> Project:
+        """Načíta projekt zo ZIP súboru"""
         zip_path = Path(zip_path)
 
         with zipfile.ZipFile(zip_path, "r") as zf:
@@ -200,7 +203,6 @@ class ProjectLoader:
                     visible=layer_info.get("visible", True),
                     opacity=layer_info.get("opacity", 1.0),
                     order=layer_info.get("order", 0),
-                    path=image_path,
                 )
                 layer = Layer(layer_meta, img_rgba)
                 project.add_layer(layer)
@@ -225,6 +227,11 @@ class ProjectLoader:
                         project.damage_filled_mask = mask_filled
                 except KeyError:
                     pass
+
+            #vrstvy sa načítali skôr než damage maska, preto per-layer filled masky doplníme až teraz
+            if project.damage_original_mask is not None:
+                for layer in project.get_paint_layers():
+                    project.sync_layer_filled_mask_from_alpha(layer.meta.id, mode="assign")
 
             #história pre report
             project.history_for_report = meta.get("history_for_report", [])
@@ -253,24 +260,33 @@ class ProjectLoader:
                         project.set_color_correction_enabled(False)
                     else:
                         m = np.array(matrix, dtype=np.float32)
+                        if m.shape != (3, 4):
+                            raise ValueError("Color correction matrix must have shape (3, 4)")
+
                         project.set_color_correction_matrix(m)
                         project.set_color_correction_enabled(enabled)
                 except Exception:
-                    #ak chyba, radšej korekciu vypneme
+                    #ak nastane chyba, radšej korekciu vypneme
                     project.set_color_correction_matrix(None)
                     project.set_color_correction_enabled(False)
 
             #textúry
             project.textures = {}
             for info in meta.get("textures", []):
-                fname = info["filename"]
-                name = info["name"]
+                if not isinstance(info, dict):
+                    continue
+
+                fname = info.get("filename")
+                name = info.get("name")
+                if not fname or not name:
+                    continue
+
                 try:
                     data = zf.read(fname)
                 except KeyError:
                     continue
+
                 img_rgba = _decode_png_to_rgba(data)
-                #uložíme RGB/RGBA
                 project.textures[name] = Texture(
                     name=name,
                     image=img_rgba,
@@ -286,9 +302,10 @@ class ProjectLoader:
                 project.brush_hardness = float(brush_settings.get("hardness", 1.0))
                 project.brush_opacity = float(brush_settings.get("opacity", 1.0))
                 project.brush_flow = float(brush_settings.get("flow", 1.0))
+                project.brush_allow_overlap = bool(brush_settings.get("allow_overlap", True))
 
                 project.brush_hardness = max(0.0, min(1.0, project.brush_hardness))
                 project.brush_opacity = max(0.0, min(1.0, project.brush_opacity))
                 project.brush_flow = max(0.0, min(1.0, project.brush_flow))
-                
+
             return project

@@ -1,19 +1,22 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Optional, Callable
 
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QHBoxLayout, QLabel, QPushButton, QSpinBox, QVBoxLayout, QWidget
 
+MAX_COLORS = 3
 
 @dataclass
 class TextureFillDialogResult:
+    """Výsledok nastavení textúrového algoritmu"""
+
     texture_name: str
     colors: list[tuple[int, int, int]]
     global_scale: float
     rotation: float
-    seed: Optional[int]
+    seed: int | None
 
 
 class _TextureColorRow(QWidget):
@@ -58,16 +61,20 @@ class _TextureColorRow(QWidget):
         self._refresh_color_display()
 
     def set_index(self, index: int) -> None:
+        """Nastaví poradové číslo farby"""
         self._index = index
         self.lbl_name.setText(f"Barva {index}:")
 
     def set_remove_enabled(self, enabled: bool) -> None:
+        """Povolí alebo zakáže odstránenie farby"""
         self.btn_remove.setEnabled(enabled)
 
     def get_rgb(self) -> tuple[int, int, int]:
+        """Vráti aktuálnu farbu ako RGB trojicu"""
         return (self._color.red(), self._color.green(), self._color.blue())
 
     def _refresh_color_display(self) -> None:
+        """Aktualizuje náhľad farby a text RGB hodnôt"""
         r, g, b = self.get_rgb()
         self.swatch.setStyleSheet(
             f"background-color: rgb({r}, {g}, {b});"
@@ -76,6 +83,7 @@ class _TextureColorRow(QWidget):
         self.lbl_rgb.setText(f"({r}, {g}, {b})")
 
     def _on_change_clicked(self) -> None:
+        """Otvorí dialóg na zmenu farby"""
         color = QColorDialog.getColor(self._color, self, f"Vyberte barvu {self._index}", options=QColorDialog.DontUseNativeDialog)
         if not color.isValid():
             return
@@ -84,12 +92,14 @@ class _TextureColorRow(QWidget):
         self._refresh_color_display()
 
     def _on_remove_clicked(self) -> None:
+        """Požiada rodičovský dialóg o odstránenie tohto riadku"""
         self._remove_callback(self)
 
 
 class TextureFillDialog(QDialog):
     """
     Dialóg pre nastavenie parametrov textúrového algoritmu
+    používateľ vyberá typ textúry, jednu až tri farby, mierku, rotáciu a voliteľný seed
     """
 
     def __init__(self, controller: object, parent=None) -> None:
@@ -192,13 +202,14 @@ class TextureFillDialog(QDialog):
 
         self._update_color_rows()
 
-    def get_result(self) -> Optional[TextureFillDialogResult]:
+    def get_result(self) -> TextureFillDialogResult | None:
+        """Vráti nastavenia dialógu alebo None, ak nie je zvolená žiadna farba"""
         if not self._color_rows:
             return None
 
         colors = [row.get_rgb() for row in self._color_rows]
 
-        seed: Optional[int]
+        seed: int | None
         if self.seed_checkbox.isChecked():
             seed = int(self.seed_spin.value())
         else:
@@ -209,22 +220,27 @@ class TextureFillDialog(QDialog):
     def _get_initial_color(self) -> tuple[int, int, int]:
         """
         Skúsi použiť aktuálnu farbu z aplikácie
-        (ak nie je dostupná, použije čiernu)
+        ak nie je dostupná, použije čiernu
         """
         if hasattr(self._controller, "get_current_color_rgba"):
-            arr = self._controller.get_current_color_rgba()
-            r, g, b = [int(x) for x in arr[:3].tolist()]
+            rgba = self._controller.get_current_color_rgba()
+            r, g, b = [int(x) for x in rgba[:3]]
             return (r, g, b)
 
         return (0, 0, 0)
 
     def _add_color_row(self, color: tuple[int, int, int]) -> None:
+        """Pridá nový riadok farby, najviac však do limitu MAX_COLORS"""
+        if len(self._color_rows) >= MAX_COLORS:
+            return
+
         row = _TextureColorRow(index=len(self._color_rows) + 1, color=color, remove_callback=self._remove_color_row, parent=self.colors_container)
         self._color_rows.append(row)
         self.colors_layout.addWidget(row)
         self._update_color_rows()
 
     def _remove_color_row(self, row: _TextureColorRow) -> None:
+        """Odstráni riadok farby, ale ponechá aspoň jednu farbu"""
         if len(self._color_rows) <= 1:
             return
 
@@ -234,9 +250,13 @@ class TextureFillDialog(QDialog):
         self._update_color_rows()
 
     def _update_color_rows(self) -> None:
+        """Aktualizuje číslovanie riadkov a stav tlačidiel"""
         for i, row in enumerate(self._color_rows, start=1):
             row.set_index(i)
             row.set_remove_enabled(len(self._color_rows) > 1)
+
+        if hasattr(self, "btn_add_color"):
+            self.btn_add_color.setEnabled(len(self._color_rows) < MAX_COLORS)
 
         #pri prvom pridaní farby ešte nemusí existovať QDialogButtonBox
         if not hasattr(self, "buttons"):
@@ -247,4 +267,5 @@ class TextureFillDialog(QDialog):
             ok_btn.setEnabled(len(self._color_rows) > 0)
             
     def _on_add_color_clicked(self) -> None:
+        """Pridá ďalšiu farbu podľa aktuálnej farby v aplikácii"""
         self._add_color_row(self._get_initial_color())

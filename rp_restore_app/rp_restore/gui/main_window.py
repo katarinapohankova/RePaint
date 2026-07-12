@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Optional
 
 import numpy as np
 from pathlib import Path
@@ -9,6 +10,8 @@ from PySide6.QtWidgets import QApplication, QDialog, QHBoxLayout, QMainWindow, Q
 from rp_restore.config.settings import AppSettings
 from rp_restore.core.layers import Layer, LayerMeta, LayerRole
 from rp_restore.core.project_model import Project
+from rp_restore.core.remote_restoration_config import has_remote_restoration_config
+from rp_restore.gui.remote_restoration_settings_dialog import RemoteRestorationSettingsDialog
 from rp_restore.gui.canvas.image_canvas_widget import ImageCanvasWidget
 from rp_restore.gui.project_controller import ProjectController
 from rp_restore.gui.start_screen_widget import StartScreenWidget
@@ -140,6 +143,7 @@ class MainWindow(QMainWindow):
         
         self.controller.set_algorithm_progress_callback(self._show_algorithm_progress)
         self.controller.set_algorithm_progress_clear_callback(self._clear_algorithm_progress)
+        self.controller.set_remote_settings_request_callback(self._request_remote_restoration_settings)
 
         #overlay na krátke hlášky v strede okna
         self._toast_label = QLabel(self)
@@ -308,6 +312,13 @@ class MainWindow(QMainWindow):
 
         if hasattr(self, "edge_settings_dock"):
             _add_dock_toggle(view_menu, "Hrany", self.edge_settings_dock)
+        
+        settings_menu = menu_bar.addMenu("&Nastavení")
+
+        remote_settings_action = QAction("Remote realistické doplnění...", self)
+        remote_settings_action.triggered.connect(self.on_remote_restoration_settings)
+        settings_menu.addAction(remote_settings_action)
+        
 
     def _create_toolbars(self) -> None:
         self.tools_toolbar = QToolBar("Nástroje", self)
@@ -533,6 +544,30 @@ class MainWindow(QMainWindow):
 
         self._brush_preview_timer.stop()
         self._brush_preview_timer.start(2000)
+
+    def on_remote_restoration_settings(self) -> None:
+        """Otvorí nastavenia prístupu k remote realistickému doplneniu"""
+        dlg = RemoteRestorationSettingsDialog(parent=self, require_complete=False)
+
+        if dlg.exec() == QDialog.Accepted:
+            self.statusBar().showMessage("Nastavení remote realistického doplnění bylo uloženo", 4000)
+
+
+    def _request_remote_restoration_settings(self, message: Optional[str] = None) -> bool:
+        """
+        Vyžiada nastavenie remote služby pri prvom použití realistic fill.
+
+        Vráti True iba vtedy, keď sú po zatvorení dialógu uložené kompletné údaje.
+        """
+        dlg = RemoteRestorationSettingsDialog(
+            parent=self,
+            require_complete=True,
+            message=message,
+        )
+        if dlg.exec() != QDialog.Accepted:
+            return False
+
+        return has_remote_restoration_config()
 
     #----------prepínanie obrazoviek-----------
 
@@ -803,7 +838,7 @@ class MainWindow(QMainWindow):
 
         mask_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Vyber masku poškodenia (voliteľné)",
+            "Vyberte masku poškození (volitelné)",
             "",
             "Obrázky (*.png *.jpg *.jpeg *.tif *.tiff);;Všetky súbory (*.*)",
         )

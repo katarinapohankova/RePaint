@@ -8,17 +8,17 @@ from PySide6.QtGui import QCursor
 
 class BaseTool:
     """
-    Základná trieda pre nástroj
-    každý nástroj má prístup k ProjectControlleru a ku canvasu a reaguje na udalosti myši v obrazových súradniciach
+    Základná trieda pre nástroje pracujúce s canvasom
+    každý nástroj má prístup ku ProjectControlleru a reaguje na udalosti myši v obrazových súradniciach
     """
 
     def __init__(self, controller: "ProjectController", canvas: "ImageCanvasWidget") -> None:
         self.controller = controller
         self.canvas = canvas
 
-    def _refresh_segment_region(self, x0: int, y0: int, x1: int, y1: int, radius: int,) -> None:
+    def _refresh_segment_region(self, x0: int, y0: int, x1: int, y1: int, radius: int) -> None:
         """
-        z dvoch bodov a polomeru štetca spraví bbox a zavolá refresh_canvas_region
+        Vytvorí bbox okolo úseku ťahu a požiada controller o prekreslenie tejto oblasti
         """
         if self.controller is None:
             return
@@ -39,22 +39,24 @@ class BaseTool:
         else:
             self.controller.refresh_canvas()
 
+
     #myš v image súradniciach:
     # img_x, img_y: int
     # buttons: Qt.MouseButtons
     # modifiers: Qt.KeyboardModifiers
 
     def on_mouse_press(self, img_x: int, img_y: int, buttons: Qt.MouseButtons, modifiers: Qt.KeyboardModifiers) -> None:
-        """reakcia na stlačenie myši"""
+        """Reakcia na stlačenie myši"""
         return
 
     def on_mouse_move(self, img_x: int, img_y: int, buttons: Qt.MouseButtons, modifiers: Qt.KeyboardModifiers) -> None:
-        """reakcia na pohyb myši s tlačidlami"""
+        """Reakcia na pohyb myši s tlačidlami"""
         return
 
     def on_mouse_release(self, img_x: int, img_y: int, buttons: Qt.MouseButtons, modifiers: Qt.KeyboardModifiers) -> None:
-        """reakcia na uvoľnenie tlačidla myši"""
+        """Reakcia na uvoľnenie tlačidla myši"""
         return
     
     def get_cursor(self) -> QCursor | Qt.CursorShape | None:
+        """Vráti kurzor používaný pri aktívnom nástroji"""
         return None

@@ -1,89 +1,94 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Optional, Tuple
+from dataclasses import dataclass, field
+
+import cv2
 import numpy as np
+
+
+TextureCacheKey = tuple[int, tuple[int, ...], str, float, float, float, float]
 
 
 @dataclass
 class Texture:
+    """Jedna textúra dostupná v paneli materiálov"""
+
     name: str
-    image: np.ndarray  #RGB alebo RGBA uint8
+    image: np.ndarray  #RGB alebo RGBA obraz textúry
 
-    is_generated: bool = False  #true pri textúrach, ktoré vznikli uložením deformácie inej textúry
-    #názov pôvodnej textúry, z ktorej táto deformovaná textúra vznikla
-    source_texture_name: str | None = None
-    #deformácia, s ktorou bola táto textúra vytvorená
-    deformation_scale_x: float = 1.0
-    deformation_scale_y: float = 1.0
+    is_generated: bool = False  #True pri uložených deformovaných variantoch
+    source_texture_name: str | None = None      #názov pôvodnej textúry
+    deformation_scale_x: float = 1.0    #uložená deformácia v osi x
+    deformation_scale_y: float = 1.0    #uložená deformácia v osi y
+    can_deform: bool = True #uložené deformované varianty už ďalej nedeformujeme
 
-    #pôvodné textúry sa deformovať dajú, uložené deformované varianty už nie
-    can_deform: bool = True
+    def __post_init__(self) -> None:
+        """Skontroluje základný tvar obrázka textúry"""
+        if self.image.ndim != 3:
+            raise ValueError("Texture image must be HxWxC")
+
+        if self.image.shape[2] not in (3, 4):
+            raise ValueError("Texture image must have 3 or 4 channels")
+
+        if self.image.dtype != np.uint8:
+            raise ValueError("Texture image must have dtype uint8")
 
 
 @dataclass
 class TextureSettings:
-    texture: Optional[Texture] = None
+    """Aktuálne nastavenia používania textúry pri kreslení a výplni"""
+
+    texture: Texture | None = None
     scale: float = 1.0  #0.25 .. 4.0
-    color: Tuple[int, int, int] = (255, 255, 255)  #tint RGB
+    color: tuple[int, int, int] = (255, 255, 255)  #tint RGB
     strength: float = 1.0  #0..1
     rotation_deg: float = 0.0
     deformation_scale_x: float = 1.0
     deformation_scale_y: float = 1.0
-    # "transparent" -cez alfa ako doteraz / "color" -plná textúra s odtieňmi
-    texture_style: str = "transparent"
+    texture_style: str = "transparent"  #transparent alebo color
+
+    #cache transformovanej textúry, aby sa pri kreslení neprepočítavala stále znova
+    _cached_tex_key: TextureCacheKey | None = field(default=None, init=False, repr=False)
+    _cached_tex_rgb: np.ndarray | None = field(default=None, init=False, repr=False)
 
 
 def _to_gray01(tex_rgb: np.ndarray) -> np.ndarray:
-    return (0.299 * tex_rgb[..., 0] + 0.587 * tex_rgb[..., 1] + 0.114 * tex_rgb[..., 2])
+    """Prevedie RGB textúru v rozsahu 0-1 na jasovú zložku"""
+    return 0.299 * tex_rgb[..., 0] + 0.587 * tex_rgb[..., 1] + 0.114 * tex_rgb[..., 2]
+
 
 def clear_texture_cache(settings: TextureSettings) -> None:
-    """
-    Vymaže internú cache transformovanej textúry (po výbere inej textúry)
-    """
-    for attr in ("_cached_tex_key", "_cached_tex_rgb"):
-        if hasattr(settings, attr):
-            delattr(settings, attr)
+    """Vymaže cache transformovanej textúry"""
+    settings._cached_tex_key = None
+    settings._cached_tex_rgb = None
+
 
 def deform_texture_image(image: np.ndarray, deformation_scale_x: float, deformation_scale_y: float) -> np.ndarray:
-    """
-    Vytvorí novú textúru natiahnutím pôvodného obrázka v osi x / y
-    """
+    """Vytvorí novú textúru zmenou veľkosti v osi x a y"""
     if image.ndim != 3:
         raise ValueError("Texture must be HxWxC")
 
     if image.shape[2] not in (3, 4):
         raise ValueError("Texture must have 3 or 4 channels")
 
+    if image.dtype != np.uint8:
+        raise ValueError("Texture must have dtype uint8")
+
     h, w = image.shape[:2]
 
+    #deformáciu obmedzíme zdola, aby nevznikol nulový rozmer textúry
     sx = float(max(0.05, deformation_scale_x))
     sy = float(max(0.05, deformation_scale_y))
 
     new_w = max(1, int(round(w * sx)))
     new_h = max(1, int(round(h * sy)))
 
-    try:
-        import cv2
+    resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+    return resized.astype(np.uint8)
 
-        resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-        return resized.astype(np.uint8)
-    except Exception:
-        from PIL import Image
-
-        if image.shape[2] == 4:
-            pil = Image.fromarray(image.astype(np.uint8), mode="RGBA")
-        else:
-            pil = Image.fromarray(image.astype(np.uint8), mode="RGB")
-
-        pil = pil.resize((new_w, new_h), resample=Image.BILINEAR)
-        return np.array(pil).astype(np.uint8)
 
 def _get_transformed_texture_rgb(settings: TextureSettings) -> np.ndarray:
-    """
-    Vráti transformovanú textúru ako float32 RGB v [0..1]
-    -cachuje podľa (id(image), scale, rotation_deg).
-    """
+    """Vráti transformovanú textúru ako float32 RGB obraz v rozsahu 0-1"""
     if settings.texture is None:
         raise ValueError("TextureSettings.texture is None")
 
@@ -95,8 +100,8 @@ def _get_transformed_texture_rgb(settings: TextureSettings) -> np.ndarray:
     if source.shape[2] not in (3, 4):
         raise ValueError("Texture must have 3 or 4 channels")
 
+    #uložené deformované varianty už nepoužívajú ďalšiu deformáciu zo sliderov
     texture_can_deform = bool(getattr(settings.texture, "can_deform", True))
-
     effective_deform_x = (
         float(getattr(settings, "deformation_scale_x", 1.0))
         if texture_can_deform
@@ -108,13 +113,21 @@ def _get_transformed_texture_rgb(settings: TextureSettings) -> np.ndarray:
         else 1.0
     )
 
-    key = id(source), tuple(source.shape), str(source.dtype), float(settings.scale), float(effective_deform_x), float(effective_deform_y), float(settings.rotation_deg)
+    #cache závisí od zdrojového obrázka aj aktuálnych transformácií
+    key: TextureCacheKey = (
+        id(source),
+        tuple(source.shape),
+        str(source.dtype),
+        float(settings.scale),
+        float(effective_deform_x),
+        float(effective_deform_y),
+        float(settings.rotation_deg),
+    )
 
-    cached_key = getattr(settings, "_cached_tex_key", None)
-    cached_tex = getattr(settings, "_cached_tex_rgb", None)
-    if cached_key == key and cached_tex is not None:
-        return cached_tex
+    if settings._cached_tex_key == key and settings._cached_tex_rgb is not None:
+        return settings._cached_tex_rgb
 
+    #pri výpočte textúry používame iba RGB časť
     if source.shape[2] == 4:
         tex = source[..., :3]
     else:
@@ -123,57 +136,45 @@ def _get_transformed_texture_rgb(settings: TextureSettings) -> np.ndarray:
     tex_f = tex.astype(np.float32) / 255.0
     th, tw, _ = tex_f.shape
 
-    #scale: >1 = väčšie zrno (textúra sa "zväčší"), <1 = hustejšie
+    #scale určuje veľkosť zrna textúry
     scale = float(max(0.05, settings.scale))
 
-    deform_x = float(max(0.05, getattr(settings, "deformation_scale_x", 1.0)))
-    deform_y = float(max(0.05, getattr(settings, "deformation_scale_y", 1.0)))
+    deform_x = float(max(0.05, effective_deform_x))
+    deform_y = float(max(0.05, effective_deform_y))
 
     new_w = max(1, int(round(tw * scale * deform_x)))
     new_h = max(1, int(round(th * scale * deform_y)))
 
-    #resize
+    #textúru škálujeme a prípadne deformujeme v osiach x/y
     if new_w != tw or new_h != th:
-        try:
-            import cv2
-            tex_f = cv2.resize(tex_f, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-        except Exception:
-            from PIL import Image
-            pil = Image.fromarray((tex_f * 255).astype(np.uint8), mode="RGB")
-            pil = pil.resize((new_w, new_h))
-            tex_f = np.array(pil).astype(np.float32) / 255.0
+        tex_f = cv2.resize(tex_f, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
 
-    #rotation with wrap
     rot = float(settings.rotation_deg)
-    if abs(rot) > 0.01:
-        try:
-            import cv2
-            H, W = tex_f.shape[:2]
-            M = cv2.getRotationMatrix2D((W / 2, H / 2), rot, 1.0)
-            tex_f = cv2.warpAffine(tex_f, M, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
-            tex_f = tex_f.astype(np.float32)
-        except Exception:
-            from PIL import Image
-            pil = Image.fromarray((tex_f * 255).astype(np.uint8), mode="RGB")
-            pil = pil.rotate(rot, resample=Image.BILINEAR, expand=False)
-            tex_f = np.array(pil).astype(np.float32) / 255.0
 
-    setattr(settings, "_cached_tex_key", key)
-    setattr(settings, "_cached_tex_rgb", tex_f)
+    #rotácia používa wrap režim, aby textúra po okrajoch nadväzovala
+    if abs(rot) > 0.01:
+        h_tex, w_tex = tex_f.shape[:2]
+        matrix = cv2.getRotationMatrix2D((w_tex / 2, h_tex / 2), rot, 1.0)
+        tex_f = cv2.warpAffine(tex_f, matrix, (w_tex, h_tex), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
+        tex_f = tex_f.astype(np.float32)
+
+    settings._cached_tex_key = key
+    settings._cached_tex_rgb = tex_f
     return tex_f
 
 
 def generate_fill_pattern(settings: TextureSettings, w: int, h: int, offset_x: int = 0, offset_y: int = 0) -> np.ndarray:
-    """
-    RGBA pattern (h,w,4) uint8
-    -pattern je ukotvený v súradniciach obrazu cez (offset_x, offset_y) aby nadväzoval pri ťahu štetcom
-    """
+    """Vygeneruje RGBA textúrový pattern ukotvený v súradniciach obrazu"""
+    if w <= 0 or h <= 0:
+        raise ValueError("Pattern width and height must be positive")
+
     tex_f = _get_transformed_texture_rgb(settings)
     th, tw, _ = tex_f.shape
 
+    #offset ukotví textúru v súradniciach obrazu, aby ťahy na seba nadväzovali
     yy = (np.arange(h) + int(offset_y)) % th
     xx = (np.arange(w) + int(offset_x)) % tw
-    patch = tex_f[np.ix_(yy, xx)]  #(h,w,3)
+    patch = tex_f[np.ix_(yy, xx)]
 
     gray = _to_gray01(patch)
     gray = np.clip(gray, 0.0, 1.0)
@@ -186,8 +187,7 @@ def generate_fill_pattern(settings: TextureSettings, w: int, h: int, offset_x: i
     style = getattr(settings, "texture_style", "transparent")
 
     if style == "color":
-        #farba nie je všade rovnaká -grayscale textúry mení odtieň aktuálnej farby a alfa je skoro plná
-        # 0.0 (tmavšia) -> 0.5 (pôvodná farba) -> 1.0 (svetlejšia)
+        #v color režime jas textúry mení odtieň zvolenej farby
         variation = 0.35 * strength
         shade_factor = 1.0 + (gray - 0.5) * 2.0 * variation
         shade_factor = np.clip(shade_factor, 0.55, 1.45)
@@ -201,8 +201,8 @@ def generate_fill_pattern(settings: TextureSettings, w: int, h: int, offset_x: i
         out[..., 0:3] = np.clip(rgb * 255.0, 0, 255).astype(np.uint8)
         out[..., 3] = np.clip(alpha * 255.0, 0, 255).astype(np.uint8)
         return out
-    
-    #transparentná
+
+    #v transparentnom režime jas textúry určuje alfu ťahu
     alpha = (1.0 - gray) * float(settings.strength)
     alpha = np.clip(alpha, 0.0, 1.0)
 
@@ -212,17 +212,21 @@ def generate_fill_pattern(settings: TextureSettings, w: int, h: int, offset_x: i
 
 
 def generate_brush_stamp(settings: TextureSettings, size: int, offset_x: int = 0, offset_y: int = 0) -> np.ndarray:
-    """
-    RGBA stamp (size,size,4) uint8 – používa rovnaký pattern ako fill, len ho oreže kruhom (aby preview sedelo s brush)
-    """
-    pat = generate_fill_pattern(settings, size, size, offset_x=offset_x, offset_y=offset_y)
+    """Vygeneruje kruhový RGBA odtlačok textúrového štetca"""
+    if size <= 0:
+        raise ValueError("Brush stamp size must be positive")
+
+    pattern = generate_fill_pattern(settings, size, size, offset_x=offset_x, offset_y=offset_y)
 
     y, x = np.ogrid[:size, :size]
     cx = (size - 1) / 2
     cy = (size - 1) / 2
-    r = size / 2
-    circle = ((x - cx) ** 2 + (y - cy) ** 2) <= (r ** 2)
+    radius = size / 2
+    circle = ((x - cx) ** 2 + (y - cy) ** 2) <= radius ** 2
 
-    pat2 = pat.copy()
-    pat2[..., 3] = np.where(circle, pat2[..., 3], 0).astype(np.uint8)
-    return pat2
+    stamp = pattern.copy()
+
+    #mimo kruhu vynulujeme alfu, aby odtlačok zodpovedal tvaru štetca
+    stamp[..., 3] = np.where(circle, stamp[..., 3], 0).astype(np.uint8)
+
+    return stamp

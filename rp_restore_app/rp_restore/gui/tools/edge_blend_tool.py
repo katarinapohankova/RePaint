@@ -2,13 +2,9 @@ from __future__ import annotations
 
 from typing import Optional
 
+import cv2
 import numpy as np
 from PySide6.QtCore import Qt
-
-try:
-    import cv2
-except Exception:
-    cv2 = None
 
 from rp_restore.core.history import UndoAction
 from rp_restore.core.layers import LayerRole
@@ -39,12 +35,8 @@ class EdgeBlendTool(BaseTool):
         self._last_x: Optional[int] = None
         self._last_y: Optional[int] = None
 
-        self._bx0: Optional[int] = None
-        self._by0: Optional[int] = None
-        self._bx1: Optional[int] = None
-        self._by1: Optional[int] = None
-
     def _project(self):
+        """Vráti aktuálny projekt z controlleru"""
         return self.controller.project
     
     def _active_paint_layer(self):
@@ -71,25 +63,7 @@ class EdgeBlendTool(BaseTool):
             return
 
         r = self.stroke_radius
-
-        if cv2 is not None:
-            cv2.circle(self._stroke_mask, (int(x), int(y)), int(r), 1, thickness=-1)
-        else:
-            h, w = self._stroke_mask.shape
-            y0 = max(0, y - r)
-            y1 = min(h, y + r + 1)
-            x0 = max(0, x - r)
-            x1 = min(w, x + r + 1)
-
-            yy, xx = np.ogrid[y0:y1, x0:x1]
-            circle = (xx - x) ** 2 + (yy - y) ** 2 <= r * r
-            sub = self._stroke_mask[y0:y1, x0:x1]
-            sub[circle] = 1
-
-        self._bx0 = x - r if self._bx0 is None else min(self._bx0, x - r)
-        self._by0 = y - r if self._by0 is None else min(self._by0, y - r)
-        self._bx1 = x + r if self._bx1 is None else max(self._bx1, x + r)
-        self._by1 = y + r if self._by1 is None else max(self._by1, y + r)
+        cv2.circle(self._stroke_mask, (int(x), int(y)), int(r), 1, thickness=-1)
 
     def _stamp_line(self, x0: int, y0: int, x1: int, y1: int) -> None:
         """
@@ -106,6 +80,7 @@ class EdgeBlendTool(BaseTool):
             self._stamp(xx, yy)
 
     def on_mouse_press(self, img_x: int, img_y: int, buttons: Qt.MouseButtons, modifiers: Qt.KeyboardModifiers) -> None:
+        """Začne ťah nástroja na zjemnenie hrany"""
         if not (buttons & Qt.LeftButton):
             return
 
@@ -125,11 +100,6 @@ class EdgeBlendTool(BaseTool):
         h, w = project.damage_original_mask.shape
         self._stroke_mask = np.zeros((h, w), dtype=np.uint8)
 
-        self._bx0 = None
-        self._by0 = None
-        self._bx1 = None
-        self._by1 = None
-
         self.is_drawing = True
         self._last_x = img_x
         self._last_y = img_y
@@ -137,6 +107,7 @@ class EdgeBlendTool(BaseTool):
         self._stamp(img_x, img_y)
 
     def on_mouse_move(self, img_x: int, img_y: int, buttons: Qt.MouseButtons, modifiers: Qt.KeyboardModifiers) -> None:
+        """Pridáva do stroke masky ďalšie body počas ťahu"""
         if not self.is_drawing or self._stroke_mask is None:
             return
 
@@ -150,6 +121,7 @@ class EdgeBlendTool(BaseTool):
         self._last_y = img_y
 
     def on_mouse_release(self, img_x: int, img_y: int, buttons: Qt.MouseButtons, modifiers: Qt.KeyboardModifiers) -> None:
+        """Dokončí zjemnenie hrany a uloží spoločnú undo akciu"""
         if not self.is_drawing:
             return
 
@@ -162,7 +134,7 @@ class EdgeBlendTool(BaseTool):
 
         active = self._active_paint_layer()
         if active is None:
-            self.controller.show_tool_message("Zjemnění hrany lze použít pouze na PAINT vrstvě")
+            self.controller.show_tool_message("Zjemnění hrany lze použít pouze na vrstvě malby")
             self._reset()
             return
 
@@ -280,15 +252,14 @@ class EdgeBlendTool(BaseTool):
         self._reset()
 
     def _reset(self) -> None:
+        """Vyčistí dočasný stav nástroja"""
+        self.is_drawing = False
         self._stroke_mask = None
         self._last_x = None
         self._last_y = None
-        self._bx0 = None
-        self._by0 = None
-        self._bx1 = None
-        self._by1 = None
 
     def get_cursor(self):
+        """Vráti kurzor nástroja na zjemnenie hrany"""
         if hasattr(self.controller, "_make_edge_blend_cursor"):
             return self.controller._make_edge_blend_cursor()
         return super().get_cursor()

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable
 
 import numpy as np
 from PIL import Image as PILImage
@@ -61,7 +61,7 @@ def generate_report(project: Project, pdf_path: str | Path, metadata: ReportMeta
         leftMargin=1.6 * cm,
         topMargin=1.5 * cm,
         bottomMargin=1.5 * cm,
-        title="Report - digitalni rekonstrukce obrazu",
+        title="Report - digitální rekonstrukce obrazu",
     )
 
     story: list = []
@@ -74,9 +74,8 @@ def generate_report(project: Project, pdf_path: str | Path, metadata: ReportMeta
 
 def _register_report_fonts() -> _ReportFonts:
     """
-    font s podporou českých znakov
-    - Windows = Arial
-    - Linuxe = DejaVu/Liberation
+    Zaregistruje font s podporou českých znakov
+    Windows používa Arial alebo Segoe UI, Linux DejaVu alebo Liberation
     """
     global _FONT_CACHE
     if _FONT_CACHE is not None:
@@ -202,7 +201,7 @@ def _draw_footer(canvas, doc, fonts: _ReportFonts) -> None:
     canvas.restoreState()
 
 
-# -sekcie reportu
+#sekcie reportu
 def _add_title_page(story: list, project: Project, metadata: ReportMetadata, styles: dict[str, ParagraphStyle]) -> None:
     story.append(Paragraph("Report - digitální rekonstrukce obrazu", styles["title"]))
     story.append(Paragraph("Dokumentace aktuálního stavu projektu v okamžiku exportu.", styles["subtitle"]))
@@ -252,7 +251,7 @@ def _add_input_data_section(story: list, project: Project, styles: dict[str, Par
 
 def _add_result_section(story: list, project: Project, styles: dict[str, ParagraphStyle]) -> None:
     story.append(Paragraph("Výsledný stav", styles["h1"]))
-    story.append(Paragraph("Výsledný stav odpovídá aktuálně viditelným vrstvám v projektu", styles["body"]))
+    story.append(Paragraph("Výsledný stav odpovídá aktuálně viditelným vrstvám v projektu.", styles["body"]))
 
     composited = _safe_composited_image(project)
     remaining_visible = _remaining_damage_mask(project, visible_only=True)
@@ -268,25 +267,24 @@ def _add_result_section(story: list, project: Project, styles: dict[str, Paragra
     _add_image_grid(story, images, styles)
 
     damage = _damage_original_mask(project)
-    if damage is None:
-        return
+    if damage is not None:
+        filled_visible = _filled_mask_from_layers(project, visible_only=True)
+        if filled_visible is None:
+            filled_visible = np.zeros_like(damage, dtype=bool)
 
-    filled_visible = _filled_mask_from_layers(project, visible_only=True)
-    if filled_visible is None:
-        filled_visible = np.zeros_like(damage, dtype=bool)
+        damage_pixels = int(damage.sum())
+        filled_pixels = int((damage & filled_visible).sum())
+        remaining_pixels = max(0, damage_pixels - filled_pixels)
+        coverage = (filled_pixels / damage_pixels * 100.0) if damage_pixels > 0 else 0.0
 
-    damage_pixels = int(damage.sum())
-    filled_pixels = int((damage & filled_visible).sum())
-    remaining_pixels = max(0, damage_pixels - filled_pixels)
-    coverage = (filled_pixels / damage_pixels * 100.0) if damage_pixels > 0 else 0.0
+        rows = [
+            ("Celková plocha masky poškození", f"{damage_pixels} px"),
+            ("Vyplněná část ve viditelných vrstvách malby", f"{filled_pixels} px"),
+            ("Zbývající nevyplněná část", f"{remaining_pixels} px"),
+            ("Pokrytí masky poškození", f"{coverage:.1f} %"),
+        ]
+        story.append(_info_table(rows, styles))
 
-    rows = [
-        ("Celková plocha masky poškození", f"{damage_pixels} px"),
-        ("Vyplněná část ve viditelných vrstvách malby", f"{filled_pixels} px"),
-        ("Zbývající nevyplněná část", f"{remaining_pixels} px"),
-        ("Pokrytí masky poškození", f"{coverage:.1f} %"),
-    ]
-    story.append(_info_table(rows, styles))
     story.append(PageBreak())
 
 def _add_layers_section(story: list, project: Project, styles: dict[str, ParagraphStyle]) -> None:
@@ -300,9 +298,8 @@ def _add_layers_section(story: list, project: Project, styles: dict[str, Paragra
     for layer in layers:
         story.extend(_layer_block(layer, styles))
 
-    story.append(PageBreak())
 
-#-obrázky a masky
+#obrázky a masky
 def _project_original_rgb(project: Project) -> np.ndarray | None:
     try:
         original = project.get_original_image()
@@ -444,7 +441,7 @@ def _image_flowable(arr: np.ndarray, max_width: float, max_height: float) -> RLI
     buf.seek(0)
 
     flowable = RLImage(buf, width=iw * scale, height=ih * scale)
-    flowable._rp_restore_buffer = buf  # udrží BytesIO počas generovania PDF
+    flowable._rp_restore_buffer = buf  #udrží BytesIO počas generovania PDF
     return flowable
 
 
@@ -521,7 +518,7 @@ def _layer_block(layer: Layer, styles: dict[str, ParagraphStyle]) -> list:
     rows = [
         ("Typ", _layer_role_label(layer.meta.role)),
         ("Viditelnost", visibility),
-        ("Průhlednost", f"{float(layer.meta.opacity) * 100:.0f} %"),
+        ("Krytí", f"{float(layer.meta.opacity) * 100:.0f} %"),
     ]
 
     info = _info_table(rows, styles, col_widths=[3.8 * cm, 4.2 * cm])

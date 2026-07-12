@@ -1,18 +1,14 @@
 from __future__ import annotations
 
-from typing import List
-
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QListWidget, QListWidgetItem
 from PySide6.QtGui import QPalette
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QListWidget, QListWidgetItem
 
 
 class StartScreenWidget(QWidget):
     """
-    Úvodná obrazovka
-      - tlačítko Nový projekt
-      - tlačítko Otvoriť projekt
-      - zoznam Naposledy otvorené projekty
+    Úvodná obrazovka aplikácie
+    obsahuje tlačidlá na vytvorenie alebo otvorenie projektu a zoznam naposledy otvorených projektov
     """
 
     new_project_requested = Signal()
@@ -32,7 +28,7 @@ class StartScreenWidget(QWidget):
         palette.setColor(QPalette.WindowText, Qt.white)
         self.setPalette(palette)
 
-        #nadpis
+        #nadpis aplikácie
         title = QLabel("RePaint")
         title.setAlignment(Qt.AlignCenter)
         font = title.font()
@@ -41,7 +37,7 @@ class StartScreenWidget(QWidget):
         title.setFont(font)
         main_layout.addWidget(title)
 
-        #tlačítka Nový / Otvoriť
+        #tlačidlá pre vytvorenie alebo otvorenie projektu
         buttons_layout = QHBoxLayout()
         self.new_button = QPushButton("Nový projekt")
         self.open_button = QPushButton("Otevřít projekt")
@@ -50,7 +46,7 @@ class StartScreenWidget(QWidget):
         buttons_layout.addWidget(self.open_button)
         main_layout.addLayout(buttons_layout)
 
-        #naposledy otvorené
+        #zoznam naposledy otvorených projektov
         recent_label = QLabel("Naposledy otevřené projekty:")
         main_layout.addWidget(recent_label)
 
@@ -62,13 +58,19 @@ class StartScreenWidget(QWidget):
         self.open_button.clicked.connect(self.open_project_requested)
         self.recent_list.itemActivated.connect(self._on_recent_item_activated)
 
-    def set_recent_projects(self, paths: List[str]) -> None:
-        """nastaví zoznam naposledy otvorených projektov"""
+    def set_recent_projects(self, paths: list[str]) -> None:
+        """Nastaví zoznam naposledy otvorených projektov"""
         self.recent_list.clear()
         for path in paths:
-            item = QListWidgetItem(path)
+            display_path = path.replace("\\", "/")
+            item = QListWidgetItem(display_path)
+            item.setData(Qt.UserRole, path)
+            item.setToolTip(path)
             self.recent_list.addItem(item)
 
     def _on_recent_item_activated(self, item: QListWidgetItem) -> None:
-        path = item.text()
+        """Odošle signál na otvorenie vybraného naposledy otvoreného projektu"""
+        path = item.data(Qt.UserRole)
+        if not path:
+            path = item.text()
         self.open_recent_requested.emit(path)

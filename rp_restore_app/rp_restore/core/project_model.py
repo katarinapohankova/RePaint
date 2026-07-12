@@ -1,90 +1,86 @@
 from __future__ import annotations
 
-from typing import List, Optional
-
 from pathlib import Path
 from PIL import Image, ImageDraw
 import numpy as np
 
+from .history import GlobalUndoManager, UndoAction
 from .layers import Layer, LayerRole
-
-from .history import UndoAction, GlobalUndoManager
-
-from .selection import Selection, SelectionSet
 from .regions import RegionMap, build_region_map
-from rp_restore.io.image_io import load_image
-from rp_restore.core.texture_brush import Texture
+from .selection import Selection, SelectionSet
 from rp_restore.core.color_correction import apply_color_correction
+from rp_restore.core.texture_brush import Texture
+from rp_restore.io.image_io import load_image
 
 
 class Project:
     """
-    Reprezentuje jeden otvorený projekt
-    Zatiaľ:
-      - nemá warningy ani IO
-      - vie držať vrstvy a urobiť jednoduchú kompozíciu
+    Reprezentuje jeden otvorený projekt aplikácie
+    uchováva vrstvy, damage masky, nastavenia kreslenia, paletu, textúry a undo/redo stav
     """
 
     def __init__(self, project_name: str) -> None:
         self.project_name: str = project_name
 
-        #info o pôvodnom obraze / working image
+        #informácie o pôvodnom obraze a pracovnej kópii
         self.base_image_path: Path | None = None
         self.is_dirty: bool = False
         self.base_image_scale: float = 1.0  #working_size / original_size
-        self.base_image_working: np.ndarray | None = None  #to, čo sa reálne používa
+        self.base_image_working: np.ndarray | None = None  #obraz, s ktorým aplikácia reálne pracuje
 
         #všetky vrstvy v projekte (BACKGROUND, EDGE, PAINT)
-        self.layers: List[Layer] = []
+        self.layers: list[Layer] = []
 
-        #masky poškodenia – zatiaľ len pripravené, môžu byť None
-        self.damage_original_mask: Optional[np.ndarray] = None
-        self.damage_filled_mask: Optional[np.ndarray] = None
+        #globálna maska poškodenia a z nej odvodená maska vyplnených pixelov
+        self.damage_original_mask: np.ndarray | None = None
+        self.damage_filled_mask: np.ndarray | None = None
 
         #záznamy pre neskorší PDF report
-        self.history_for_report: List[dict] = []
+        self.history_for_report: list[dict] = []
 
-        #undo/redo manažér 
+        #undo/redo manažér
         self.undo_manager: GlobalUndoManager = GlobalUndoManager()
 
         #paleta farieb a aktuálna farba (RGBA)
         self.palette_colors: list[tuple[int, int, int, int]] = []
-        self.current_color_rgba: tuple[int, int, int, int] = (0, 0, 0, 255)  #default bude čierna
+        self.current_color_rgba: tuple[int, int, int, int] = (0, 0, 0, 255)
 
-        #nastavenia štetca 0..1
+        #nastavenia štetca v rozsahu 0..1
         self.brush_hardness: float = 1.0
         self.brush_opacity: float = 1.0
         self.brush_flow: float = 1.0
         self.brush_allow_overlap: bool = True
 
+        #textúry a režim ich aplikovania
         self.textures: dict[str, Texture] = {}
         self.texture_style: str = "transparent"
 
+        #ColorChecker korekcia náhľadu
         self.color_correction_matrix: np.ndarray | None = None
         self.color_correction_enabled: bool = False
 
     def mark_dirty(self) -> None:
+        """Označí projekt ako zmenený"""
         self.is_dirty = True
 
     def mark_saved(self) -> None:
+        """Označí projekt ako uložený"""
         self.is_dirty = False
-        
-    #---------Správa vrstiev---------
+
+    #---------správa vrstiev---------
 
     def add_layer(self, layer: Layer) -> None:
         """Pridá vrstvu do projektu"""
         self.layers.append(layer)
 
         if layer.meta.role == LayerRole.PAINT and self.damage_original_mask is not None:
-            #ak už maska existuje, necháme ju -inak ju dopočítame z alfa kanálu
+            #ak už damage maska existuje, inicializujeme per-layer filled masku z alfa kanálu
             if getattr(layer, "damage_filled_mask", None) is None:
                 alpha_filled = (layer.image[..., 3] > 0) & self.damage_original_mask
                 layer.damage_filled_mask = alpha_filled.astype(bool)
-    
+
     def remove_layer(self, layer_id: str) -> None:
-        """
-        Odstráni vrstvu (iba paint)
-        """
+        """Odstráni PAINT vrstvu z projektu"""
         layer = next((l for l in self.layers if l.meta.id == layer_id), None)
         if layer is None:
             return
@@ -98,30 +94,26 @@ class Project:
         for idx, l in enumerate(self.layers):
             l.meta.order = idx
 
-    def get_background_layer(self) -> Optional[Layer]:
-        """Vráti prvú BACKGROUND vrstvu (alebo None, ak neexistuje)"""
+    def get_background_layer(self) -> Layer | None:
+        """Vráti prvú BACKGROUND vrstvu alebo None"""
         for layer in self.layers:
             if layer.meta.role == LayerRole.BACKGROUND:
                 return layer
         return None
 
-    def get_paint_layers(self) -> List[Layer]:
+    def get_paint_layers(self) -> list[Layer]:
         """Vráti zoznam všetkých PAINT vrstiev"""
         return [l for l in self.layers if l.meta.role == LayerRole.PAINT]
 
-    def get_edge_layer(self) -> Optional[Layer]:
-        """
-        Vráti jedinú EDGE vrstvu projektu (projekt bude obsahovať iba jednu EDGE vrstvu)
-        """
+    def get_edge_layer(self) -> Layer | None:
+        """Vráti EDGE vrstvu projektu alebo None"""
         for layer in self.layers:
             if layer.meta.role == LayerRole.EDGE:
                 return layer
         return None
 
     def get_layer_damage_remaining_mask(self, layer_id: str) -> np.ndarray | None:
-        """
-        Remaining mask pre konkrétnu paint vrstvu
-        """
+        """Vráti zostávajúcu damage masku pre konkrétnu PAINT vrstvu"""
         if self.damage_original_mask is None:
             return None
 
@@ -129,16 +121,13 @@ class Project:
         if layer is None or layer.meta.role != LayerRole.PAINT:
             return None
 
-        if layer.damage_filled_mask is None:
+        if layer.damage_filled_mask is None or layer.damage_filled_mask.shape != self.damage_original_mask.shape:
             layer.damage_filled_mask = np.zeros_like(self.damage_original_mask, dtype=bool)
 
         return self.damage_original_mask & ~layer.damage_filled_mask
 
-
     def mark_region_as_filled_on_layer(self, layer_id: str, region_mask: np.ndarray) -> None:
-        """
-        Označí daný region ako vyplnený iba na konkrétnej paint vrstve
-        """
+        """Označí danú oblasť ako vyplnenú iba na konkrétnej PAINT vrstve"""
         if self.damage_original_mask is None:
             return
 
@@ -149,20 +138,17 @@ class Project:
         if region_mask.shape != self.damage_original_mask.shape:
             raise ValueError("region_mask must have same shape as damage_original_mask")
 
-        if layer.damage_filled_mask is None:
+        if layer.damage_filled_mask is None or layer.damage_filled_mask.shape != self.damage_original_mask.shape:
             layer.damage_filled_mask = np.zeros_like(self.damage_original_mask, dtype=bool)
 
-        layer.damage_filled_mask |= region_mask.astype(bool)
+        layer.damage_filled_mask |= region_mask.astype(bool) & self.damage_original_mask
 
-    #---------Kompozícia obrazu---------
+    #---------kompozícia obrazu---------
 
     def composited_image(self) -> np.ndarray:
         """
-        Zloží výsledný RGB obraz z backgroundu a všetkých PAINT vrstiev
-        Zatiaľ:
-          - ignorujeme EDGE vrstvy
-          - ignorujeme opacity v meta
-          - PAINT vrstvy skladáme jednoduchým alpha blendingom
+        Zloží výsledný RGB obraz z viditeľných vrstiev
+        BACKGROUND tvorí podklad, PAINT vrstvy a EDGE vrstva sa skladajú pomocou alfa kanálu a krytia vrstvy
         """
         bg_layer = self.get_background_layer()
         if bg_layer is None:
@@ -170,27 +156,28 @@ class Project:
 
         h, w, _ = bg_layer.image.shape
 
-        #viditeľnosť backgroundu
+        #ak je background skrytý, podklad je čierny
         if not bg_layer.meta.visible:
             base = np.zeros((h, w, 3), dtype=np.float32)
         else:
             base = bg_layer.image[..., :3].astype(np.float32)
 
-        #zoberieme všetky paint vrstvy zoradené
+        #PAINT vrstvy skladáme zospodu hore podľa order
         paint_layers = sorted(self.get_paint_layers(), key=lambda l: l.meta.order)
         for layer in paint_layers:
             if not layer.meta.visible:
                 continue
+            if layer.image.shape[0] != h or layer.image.shape[1] != w:
+                continue
+
             rgba = layer.image.astype(np.float32)
             rgb = rgba[..., :3]
-            alpha = (rgba[..., 3:4] / 255.0) * float(layer.meta.opacity)  #tvar (H, W, 1)
+            alpha = (rgba[..., 3:4] / 255.0) * float(layer.meta.opacity)
             alpha = np.clip(alpha, 0.0, 1.0)
 
-            #alpha blending: out = rgb * a + base * (1 - a)
             base = rgb * alpha + base * (1.0 - alpha)
 
         edge_layer = self.get_edge_layer()
-
         if edge_layer is not None and edge_layer.meta.visible:
             rgba = edge_layer.image.astype(np.float32)
 
@@ -200,28 +187,24 @@ class Project:
                 alpha = np.clip(alpha, 0.0, 1.0)
 
                 base = rgb * alpha + base * (1.0 - alpha)
-        
-        #výsledok pretypujeme na uint8
+
         out = np.clip(base, 0, 255).astype(np.uint8)
 
-        #aplikácia ColorChecker korekcie (len na náhľad)
+        #ColorChecker korekcia sa aplikuje iba na náhľad/export, nie na samotné vrstvy
         if self.color_correction_enabled and self.color_correction_matrix is not None:
             out = apply_color_correction(out, self.color_correction_matrix)
 
         return out
     
     def composited_region(self, bbox: tuple[int, int, int, int]) -> np.ndarray:
-        """
-        Zloží výsledný RGB obraz iba v danej oblasti bbox = (x, y, w, h)
-        -rovnaké ako composited_image(), ale len pre slice
-        """
+        """Zloží výsledný RGB obraz iba v oblasti bbox = (x, y, w, h)"""
         bg_layer = self.get_background_layer()
         if bg_layer is None:
             raise RuntimeError("Project has no BACKGROUND layer")
 
         x, y, w, h = bbox
         if w <= 0 or h <= 0:
-            #vrátime aspoň nejaké 1x1, aby to nepadlo
+            #vrátime aspoň 1x1 obraz, aby volajúci kód nespadol na prázdnom výreze
             return np.zeros((1, 1, 3), dtype=np.uint8)
 
         H, W, _ = bg_layer.image.shape
@@ -235,7 +218,7 @@ class Project:
         if x1 <= x0 or y1 <= y0:
             return np.zeros((1, 1, 3), dtype=np.uint8)
 
-        #ak je background skrytý, podklad je čierny/prázdny
+        #ak je background skrytý, podklad je čierny
         if not bg_layer.meta.visible:
             base = np.zeros((y1 - y0, x1 - x0, 3), dtype=np.float32)
         else:
@@ -243,9 +226,10 @@ class Project:
 
         #PAINT vrstvy
         paint_layers = sorted(self.get_paint_layers(), key=lambda l: l.meta.order)
-
         for layer in paint_layers:
             if not layer.meta.visible:
+                continue
+            if layer.image.shape[0] != H or layer.image.shape[1] != W:
                 continue
 
             rgba = layer.image[y0:y1, x0:x1, :].astype(np.float32)
@@ -258,7 +242,7 @@ class Project:
 
             base = rgb * alpha + base * (1.0 - alpha)
 
-        # #EDGE vrstvy
+        #EDGE vrstva
         edge_layer = self.get_edge_layer()
         if edge_layer is not None and edge_layer.meta.visible:
             rgba = edge_layer.image
@@ -280,34 +264,32 @@ class Project:
 
         return out
     
-    #---------Undo/redo rozhranie---------
+    #---------undo/redo rozhranie---------
 
-    def undo_global(self) -> Optional[UndoAction]:
-        """Vykoná globálne undo
-        Vráti UndoAction alebo None"""
+    def undo_global(self) -> UndoAction | None:
+        """Vykoná globálne undo a vráti UndoAction alebo None"""
         return self.undo_manager.undo_global(self)
 
-    def redo_global(self) -> Optional[UndoAction]:
-        """Vykoná globálne redo
-        Vráti UndoAction alebo None"""
+    def redo_global(self) -> UndoAction | None:
+        """Vykoná globálne redo a vráti UndoAction alebo None"""
         return self.undo_manager.redo_global(self)
 
-    def undo_on_layer(self, layer_id: str) -> Optional[UndoAction]:
-        """Vykoná undo na konkrétnej vrstve (zatiaľ jednoduchá verzia)"""
+    def undo_on_layer(self, layer_id: str) -> UndoAction | None:
+        """Vykoná undo na vrstve iba vtedy, ak posledná akcia patrí tejto vrstve"""
         return self.undo_manager.undo_on_layer(self, layer_id)
-    
+
     def can_undo(self) -> bool:
+        """Vráti True, ak je dostupné undo"""
         return self.undo_manager.can_undo()
 
     def can_redo(self) -> bool:
+        """Vráti True, ak je dostupné redo"""
         return self.undo_manager.can_redo()
 
     #---------damage masky--------
-    def set_damage_masks(self, original_mask: Optional[np.ndarray]) -> None:
-        """
-        Nastaví masku poškodenia
-        original_mask -2D pole (H, W), kde true je poškodené miesto
-        """
+
+    def set_damage_masks(self, original_mask: np.ndarray | None) -> None:
+        """Nastaví pôvodnú damage masku, kde True znamená poškodený pixel"""
         if original_mask is None:
             raise ValueError("Damage mask could not be loaded (None)")
         
@@ -315,49 +297,43 @@ class Project:
 
         if original_mask.ndim == 3:
             original_mask = original_mask[..., 0]
-            
+
         if original_mask.ndim != 2:
             raise ValueError("Damage mask must be 2D (H, W)")
+
+        bg_layer = self.get_background_layer()
+        if bg_layer is not None and original_mask.shape != bg_layer.image.shape[:2]:
+            raise ValueError("Damage mask must have the same size as the background layer")
 
         self.damage_original_mask = original_mask.astype(bool)
         self.damage_filled_mask = np.zeros_like(self.damage_original_mask, dtype=bool)
 
+        #ak už existujú PAINT vrstvy, doplníme ich per-layer filled masky podľa alfa kanálu
+        for layer in self.get_paint_layers():
+            self.sync_layer_filled_mask_from_alpha(layer.meta.id, mode="assign")
+
     def get_damage_remaining_mask(self) -> np.ndarray | None:
-        """
-        vráti masku zostávajúcich (nevyplnených) poškodených miest
-        """
+        """Vráti masku zostávajúcich nevyplnených poškodených pixelov"""
         if self.damage_original_mask is None:
             return None
 
-        filled = self._compute_filled_mask_from_layers(visible_only=False)
-        if filled is None:
-            #žiadne paint vrstvy –všetko pôvodné poškodenie je remaining
-            return self.damage_original_mask.copy()
-
+        filled = self.compute_filled_mask_from_layers(visible_only=False)
         remaining = self.damage_original_mask & ~filled
 
-        #synchronizácia damage_filled_mask (nech je aktuálna)
+        #globálnu filled masku držíme aktuálnu podľa všetkých PAINT vrstiev
         self.damage_filled_mask = filled.copy()
         return remaining
     
     def get_damage_remaining_mask_for_visible_layers(self) -> np.ndarray | None:
-        """
-        Vráti masku poškodenia pre overlay
-        -táto verzia berie do úvahy iba viditeľné PAINT vrstvy, aby overlay zodpovedal tomu, čo je aktuálne v composited image
-        """
+        """Vráti remaining damage masku iba podľa viditeľných PAINT vrstiev pre overlay"""
         if self.damage_original_mask is None:
             return None
 
-        filled_visible = self._compute_filled_mask_from_layers(visible_only=True)
-        if filled_visible is None:
-            return self.damage_original_mask.copy()
-
+        filled_visible = self.compute_filled_mask_from_layers(visible_only=True)
         return self.damage_original_mask & ~filled_visible
 
     def get_selection_from_click(self, x: int, y: int, layer_id: str | None = None, region_map: RegionMap | None = None) -> Selection | None:
-        """
-        ak v bode (x, y) je pixel poškodený (true), spraví flood-fill a vráti Selection (region_mask + bbox)
-        """
+        """Vráti výber poškodenej oblasti pod kliknutým bodom"""
         if self.damage_original_mask is None:
             return None
 
@@ -371,6 +347,9 @@ class Project:
                 mask = self.damage_original_mask
         else:
             mask = self.damage_original_mask
+
+        if mask is None:
+            return None
 
         h, w = mask.shape
 
@@ -401,8 +380,8 @@ class Project:
     
     def get_selections_from_polygon(self, polygon_points: list[tuple[int, int]], layer_id: str | None = None, region_map: RegionMap | None = None) -> SelectionSet | None:
         """
-        Nájde všetky selection oblasti, ktoré ležia vo vnútri polygonu (lasom ohraničené)
-        -na PAINT vrstve používa layer damage remaining mask
+        Nájde všetky damage oblasti, ktoré ležia vo vnútri polygonu lasa
+        na PAINT vrstve používa remaining masku danej vrstvy
         """
         if self.damage_original_mask is None:
             return None
@@ -426,7 +405,6 @@ class Project:
 
         h, w = mask.shape
 
-        #ak region_map náhodou nie je region map, vytvoríme ho
         if region_map is None:
             edge_layer = self.get_edge_layer()
             region_map = build_region_map(mask, edge_layer)
@@ -437,12 +415,12 @@ class Project:
         draw.polygon(polygon_points, outline=1, fill=1)
         polygon_mask = np.array(poly_img, dtype=np.uint8) > 0
 
-        #chceme len pixely, ktoré sú vo vnútri polygonu a zároveň patria do relevantnej damage masky
+        #zaujímajú nás iba pixely v polygone, ktoré zároveň patria do relevantnej damage masky
         effective_mask = polygon_mask & mask
         if not effective_mask.any():
             return None
 
-        #zistíme ktoré region_id sa nachádzajú vo vnútri
+        #zistíme, ktoré region_id sa nachádzajú vo vnútri lasa
         label_sub = region_map.label_image[effective_mask]
         region_ids = np.unique(label_sub)
         region_ids = region_ids[region_ids > 0]
@@ -460,7 +438,7 @@ class Project:
             region_mask = region_map.get_region_mask(int(region_id))
             bbox = info.bbox
 
-            #seed point = stred bboxu
+            #seed point použijeme iba ako reprezentatívny bod oblasti
             x, y, bw, bh = bbox
             seed_point = (x + bw // 2, y + bh // 2)
 
@@ -471,14 +449,10 @@ class Project:
 
         return SelectionSet(selections=selections)
 
-
-    def _compute_filled_mask_from_layers(self, visible_only: bool = False) -> np.ndarray | None:
-        """
-        Vypočíta, ktoré pixely poškodenia sú aktuálne vyplnené
-        podľa PAINT vrstiev (alfa > 0)
-        """
+    def compute_filled_mask_from_layers(self, visible_only: bool = False) -> np.ndarray:
+        """Vypočíta union vyplnených damage pixelov podľa alfa kanálu PAINT vrstiev"""
         if self.damage_original_mask is None:
-            return None
+            raise RuntimeError("Project has no damage mask")
 
         h, w = self.damage_original_mask.shape
         filled_union = np.zeros((h, w), dtype=bool)
@@ -488,19 +462,26 @@ class Project:
                 continue
             if layer.image.shape[0] != h or layer.image.shape[1] != w:
                 continue
-            #preferujeme per-layer filled masku ak existuje
+
             alpha_filled = (layer.image[..., 3] > 0) & self.damage_original_mask
             filled_union |= alpha_filled
 
-            layer.damage_filled_mask = alpha_filled.astype(bool)
+            if not visible_only:
+                layer.damage_filled_mask = alpha_filled.astype(bool)
         
         filled_union &= self.damage_original_mask
         return filled_union
     
-    def sync_layer_filled_mask_from_alpha(self, layer_id: str, bbox: tuple[int,int,int,int] | None = None, mode: str = "or") -> None:
+    def _compute_filled_mask_from_layers(self, visible_only: bool = False) -> np.ndarray | None:
+        """Spätná kompatibilita pre staršie volania, používa verejnú metódu compute_filled_mask_from_layers"""
+        if self.damage_original_mask is None:
+            return None
+        return self.compute_filled_mask_from_layers(visible_only=visible_only)
+
+    def sync_layer_filled_mask_from_alpha(self, layer_id: str, bbox: tuple[int, int, int, int] | None = None, mode: str = "or") -> None:
         """
-        Synchronizuje layer.damage_filled_mask podľa alfa kanálu vrstvy (a len v damage_original_mask)
-        -ak bbox je None, prepočíta celú masku
+        Synchronizuje layer.damage_filled_mask podľa alfa kanálu vrstvy a damage masky
+        mode="assign" prepíše hodnoty vo výreze, ostatné hodnoty mode pridávajú cez OR
         """
         if self.damage_original_mask is None:
             return
@@ -509,7 +490,7 @@ class Project:
         if layer is None or layer.meta.role != LayerRole.PAINT:
             return
 
-        if layer.damage_filled_mask is None:
+        if layer.damage_filled_mask is None or layer.damage_filled_mask.shape != self.damage_original_mask.shape:
             layer.damage_filled_mask = np.zeros_like(self.damage_original_mask, dtype=bool)
 
         h, w = self.damage_original_mask.shape
@@ -523,12 +504,14 @@ class Project:
         if bw <= 0 or bh <= 0:
             return
 
-        x0 = max(0, x); y0 = max(0, y)
-        x1 = min(w, x + bw); y1 = min(h, y + bh)
+        x0 = max(0, x)
+        y0 = max(0, y)
+        x1 = min(w, x + bw)
+        y1 = min(h, y + bh)
         if x1 <= x0 or y1 <= y0:
             return
 
-        alpha_sub = (layer.image[y0:y1, x0:x1, 3] > 0)
+        alpha_sub = layer.image[y0:y1, x0:x1, 3] > 0
         dmg_sub = self.damage_original_mask[y0:y1, x0:x1]
         filled_sub = alpha_sub & dmg_sub
 
@@ -538,12 +521,11 @@ class Project:
             layer.damage_filled_mask[y0:y1, x0:x1] |= filled_sub
 
     #---------metódy pre externé algoritmy---------
+
     def get_original_image(self) -> np.ndarray | None:
-        """
-        Vráti pôvodný obraz – zatiaľ berieme ako background vrstvu
-        """
+        """Vráti pôvodný obraz alebo pracovnú kópiu, ak pôvodný súbor nie je dostupný"""
         if self.base_image_path is not None and self.base_image_scale == 1.0:
-            #bezpečné načítanie full-res -pre report
+            #ak pracujeme v pôvodnom rozlíšení, môžeme skúsiť načítať obraz priamo zo súboru
             try:
                 arr = load_image(self.base_image_path)
                 return arr
@@ -560,54 +542,54 @@ class Project:
         return bg.image.copy()
 
     def get_current_composited_image(self) -> np.ndarray:
-        """
-        Vráti aktuálny zložený obraz (background + paint vrstvy)
-        """
+        """Vráti aktuálny zložený obraz"""
         return self.composited_image()
 
     #---------farby, paleta---------
 
     def get_current_color_rgba(self) -> tuple[int, int, int, int]:
+        """Vráti aktuálnu RGBA farbu"""
         return self.current_color_rgba
 
     def set_current_color_rgba(self, color: tuple[int, int, int, int]) -> None:
+        """Nastaví aktuálnu RGBA farbu a oreže hodnoty do rozsahu 0..255"""
         r, g, b, a = [int(max(0, min(255, c))) for c in color]
         self.current_color_rgba = (r, g, b, a)
 
     def add_palette_color(self, color: tuple[int, int, int, int]) -> None:
-        """
-        Pridá farbu do palety (ak tam ešte nie je)
-        """
+        """Pridá farbu do palety, ak tam ešte nie je"""
         r, g, b, a = [int(max(0, min(255, c))) for c in color]
         rgba = (r, g, b, a)
         if rgba not in self.palette_colors:
             self.palette_colors.append(rgba)
 
     def get_palette_colors(self) -> list[tuple[int, int, int, int]]:
+        """Vráti kópiu palety farieb"""
         return list(self.palette_colors)
 
-    #----ColorChecker korekcia---------
+    #---------ColorChecker korekcia---------
+
     def set_color_correction_matrix(self, matrix: np.ndarray | None) -> None:
-        """
-        Aktivuje/deaktivuje farebnú korekciu
-        """
+        """Nastaví maticu farebnej korekcie alebo ju zruší"""
         if matrix is None:
             self.color_correction_matrix = None
             return
+
         m = np.asarray(matrix, dtype=np.float32)
         if m.shape not in [(3, 3), (3, 4)]:
             raise ValueError("Color correction matrix must be 3x3 or 3x4")
         self.color_correction_matrix = m
 
     def set_color_correction_enabled(self, enabled: bool) -> None:
+        """Zapne alebo vypne ColorChecker korekciu náhľadu"""
         self.color_correction_enabled = bool(enabled)
 
     def has_color_correction(self) -> bool:
+        """Vráti True, ak má projekt nastavenú ColorChecker korekciu"""
         return self.color_correction_matrix is not None
 
-    #--------export--------
+    #---------export--------
+
     def get_export_image(self) -> np.ndarray:
-        """
-        vráti exportovateľný finálny náhľad (working resolution)
-        """
+        """Vráti exportovateľný finálny obraz v pracovnom rozlíšení"""
         return self.composited_image()
