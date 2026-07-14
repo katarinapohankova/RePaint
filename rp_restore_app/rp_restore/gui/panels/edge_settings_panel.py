@@ -25,7 +25,7 @@ class EdgeSettingsPanel(QWidget):
 
         #šírka zjemnenia hrany
         row_blend = QHBoxLayout()
-        lbl_blend = QLabel("Zjemnění (px):")
+        lbl_blend = QLabel("Šířka zjemnění (px):")
         self.spin_blend_width = QSpinBox()
         self.spin_blend_width.setRange(1, 100)
         self.spin_blend_width.setValue(5)

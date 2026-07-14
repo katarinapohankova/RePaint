@@ -22,6 +22,12 @@ class Texture:
     deformation_scale_y: float = 1.0    #uložená deformácia v osi y
     can_deform: bool = True #uložené deformované varianty už ďalej nedeformujeme
 
+    generated_by_algorithm: bool = False
+    color_mode: str = "tint"   #"tint" | "preserve"
+    generated_colors: list[tuple[int, int, int]] | None = None
+    generated_color_strengths: list[float] | None = None
+    algorithm_params: dict[str, object] | None = None
+
     def __post_init__(self) -> None:
         """Skontroluje základný tvar obrázka textúry"""
         if self.image.ndim != 3:
@@ -32,6 +38,9 @@ class Texture:
 
         if self.image.dtype != np.uint8:
             raise ValueError("Texture image must have dtype uint8")
+        
+        if self.color_mode not in ("tint", "preserve"):
+            self.color_mode = "tint"
 
 
 @dataclass
@@ -87,8 +96,8 @@ def deform_texture_image(image: np.ndarray, deformation_scale_x: float, deformat
     return resized.astype(np.uint8)
 
 
-def _get_transformed_texture_rgb(settings: TextureSettings) -> np.ndarray:
-    """Vráti transformovanú textúru ako float32 RGB obraz v rozsahu 0-1"""
+def _get_transformed_texture_rgba01(settings: TextureSettings) -> np.ndarray:
+    """Vráti transformovanú textúru ako float32 RGBA obraz v rozsahu 0-1"""
     if settings.texture is None:
         raise ValueError("TextureSettings.texture is None")
 
@@ -100,7 +109,6 @@ def _get_transformed_texture_rgb(settings: TextureSettings) -> np.ndarray:
     if source.shape[2] not in (3, 4):
         raise ValueError("Texture must have 3 or 4 channels")
 
-    #uložené deformované varianty už nepoužívajú ďalšiu deformáciu zo sliderov
     texture_can_deform = bool(getattr(settings.texture, "can_deform", True))
     effective_deform_x = (
         float(getattr(settings, "deformation_scale_x", 1.0))
@@ -113,7 +121,6 @@ def _get_transformed_texture_rgb(settings: TextureSettings) -> np.ndarray:
         else 1.0
     )
 
-    #cache závisí od zdrojového obrázka aj aktuálnych transformácií
     key: TextureCacheKey = (
         id(source),
         tuple(source.shape),
@@ -127,16 +134,16 @@ def _get_transformed_texture_rgb(settings: TextureSettings) -> np.ndarray:
     if settings._cached_tex_key == key and settings._cached_tex_rgb is not None:
         return settings._cached_tex_rgb
 
-    #pri výpočte textúry používame iba RGB časť
     if source.shape[2] == 4:
-        tex = source[..., :3]
+        tex_rgba = source
     else:
-        tex = source
+        tex_rgba = np.zeros((source.shape[0], source.shape[1], 4), dtype=np.uint8)
+        tex_rgba[..., :3] = source
+        tex_rgba[..., 3] = 255
 
-    tex_f = tex.astype(np.float32) / 255.0
+    tex_f = tex_rgba.astype(np.float32) / 255.0
     th, tw, _ = tex_f.shape
 
-    #scale určuje veľkosť zrna textúry
     scale = float(max(0.05, settings.scale))
 
     deform_x = float(max(0.05, effective_deform_x))
@@ -145,13 +152,11 @@ def _get_transformed_texture_rgb(settings: TextureSettings) -> np.ndarray:
     new_w = max(1, int(round(tw * scale * deform_x)))
     new_h = max(1, int(round(th * scale * deform_y)))
 
-    #textúru škálujeme a prípadne deformujeme v osiach x/y
     if new_w != tw or new_h != th:
         tex_f = cv2.resize(tex_f, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
 
     rot = float(settings.rotation_deg)
 
-    #rotácia používa wrap režim, aby textúra po okrajoch nadväzovala
     if abs(rot) > 0.01:
         h_tex, w_tex = tex_f.shape[:2]
         matrix = cv2.getRotationMatrix2D((w_tex / 2, h_tex / 2), rot, 1.0)
@@ -162,27 +167,44 @@ def _get_transformed_texture_rgb(settings: TextureSettings) -> np.ndarray:
     settings._cached_tex_rgb = tex_f
     return tex_f
 
+def _get_transformed_texture_rgb(settings: TextureSettings) -> np.ndarray:
+    """Vráti transformovanú textúru ako float32 RGB obraz v rozsahu 0-1"""
+    tex_rgba_f = _get_transformed_texture_rgba01(settings)
+    return tex_rgba_f[..., :3]
 
 def generate_fill_pattern(settings: TextureSettings, w: int, h: int, offset_x: int = 0, offset_y: int = 0) -> np.ndarray:
     """Vygeneruje RGBA textúrový pattern ukotvený v súradniciach obrazu"""
     if w <= 0 or h <= 0:
         raise ValueError("Pattern width and height must be positive")
 
-    tex_f = _get_transformed_texture_rgb(settings)
-    th, tw, _ = tex_f.shape
+    tex_rgba_f = _get_transformed_texture_rgba01(settings)
+    th, tw, _ = tex_rgba_f.shape
 
     #offset ukotví textúru v súradniciach obrazu, aby ťahy na seba nadväzovali
     yy = (np.arange(h) + int(offset_y)) % th
     xx = (np.arange(w) + int(offset_x)) % tw
-    patch = tex_f[np.ix_(yy, xx)]
+    patch_rgba = tex_rgba_f[np.ix_(yy, xx)]
 
-    gray = _to_gray01(patch)
+    patch_rgb = patch_rgba[..., :3]
+    patch_alpha = patch_rgba[..., 3]
+
+    gray = _to_gray01(patch_rgb)
     gray = np.clip(gray, 0.0, 1.0)
 
     color = np.array(settings.color, dtype=np.float32) / 255.0
     strength = float(np.clip(settings.strength, 0.0, 1.0))
 
     out = np.zeros((h, w, 4), dtype=np.uint8)
+
+    texture_color_mode = getattr(settings.texture, "color_mode", "tint")
+
+    if texture_color_mode == "preserve":
+        rgb = np.clip(patch_rgb, 0.0, 1.0)
+        alpha = np.clip(patch_alpha * strength, 0.0, 1.0)
+
+        out[..., 0:3] = np.clip(rgb * 255.0, 0, 255).astype(np.uint8)
+        out[..., 3] = np.clip(alpha * 255.0, 0, 255).astype(np.uint8)
+        return out
 
     style = getattr(settings, "texture_style", "transparent")
 

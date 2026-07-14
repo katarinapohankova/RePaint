@@ -257,6 +257,24 @@ class MaterialsPanel(QWidget):
 
         tex_layout.addWidget(deform_box)
 
+        self.generated_texture_box = QGroupBox("Barvy vygenerované textury")
+        generated_texture_layout = QVBoxLayout(self.generated_texture_box)
+
+        #kontajner pre vytvárané riadky farieb
+        self.generated_colors_widget = QWidget()
+        self.generated_colors_layout = QVBoxLayout(self.generated_colors_widget)
+        self.generated_colors_layout.setContentsMargins(0, 0, 0, 0)
+        self.generated_colors_layout.setSpacing(4)
+
+        generated_texture_layout.addWidget(self.generated_colors_widget)
+
+        self.btn_edit_generated_texture_colors = QPushButton("Upravit barvy…")
+        self.btn_edit_generated_texture_colors.clicked.connect(self._on_edit_generated_texture_colors_clicked)
+        generated_texture_layout.addWidget(self.btn_edit_generated_texture_colors)
+
+        self.generated_texture_box.setVisible(False)
+        tex_layout.addWidget(self.generated_texture_box)
+
         tex_layout.addWidget(QLabel("Náhled:"))
         self.preview = QLabel()
         self.preview.setFixedSize(180, 180)
@@ -351,6 +369,7 @@ class MaterialsPanel(QWidget):
 
             self._update_deformation_controls_state()
 
+        self._update_generated_texture_controls_state()
         self._update_preview(project)
 
     def _on_brush_size_changed(self, value: int) -> None:
@@ -528,6 +547,7 @@ class MaterialsPanel(QWidget):
 
         self._rebuild_textures_grid(self._controller.project)
         self._update_deformation_controls_state()
+        self._update_generated_texture_controls_state()
         self._update_preview(self._controller.project)
         if hasattr(self._controller, "update_current_tool_cursor"):
             self._controller.update_current_tool_cursor()
@@ -686,6 +706,95 @@ class MaterialsPanel(QWidget):
         self.refresh_from_project(self._controller.project)
         self._set_deformation_status("Deformovaná textura byla přidána mezi textury")
 
+    def _on_edit_generated_texture_colors_clicked(self) -> None:
+        if self._controller is None:
+            return
+
+        if self._selected_texture_name is None:
+            return
+
+        if hasattr(self._controller, "edit_generated_texture_colors"):
+            self._controller.edit_generated_texture_colors(self._selected_texture_name, parent=self)
+
+    def _clear_generated_color_rows(self) -> None:
+        """Odstráni aktuálne zobrazené riadky generated farieb"""
+        while self.generated_colors_layout.count():
+            item = self.generated_colors_layout.takeAt(0)
+            widget = item.widget()
+
+            if widget is not None:
+                widget.deleteLater()
+
+    def _update_generated_texture_controls_state(self) -> None:
+        """Aktualizuje ovládanie farieb generated textúry"""
+        if self._controller is None:
+            return
+
+        ts = getattr(self._controller, "texture_settings", None)
+        tex = getattr(ts, "texture", None)
+
+        is_generated_color_texture = bool(
+            tex is not None
+            and getattr(tex, "generated_by_algorithm", False)
+            and getattr(tex, "color_mode", "tint") == "preserve"
+        )
+
+        self.generated_texture_box.setVisible(is_generated_color_texture)
+
+        self.rb_texture_transparent.setEnabled(not is_generated_color_texture)
+        self.rb_texture_color.setEnabled(not is_generated_color_texture)
+
+        self.btn_edit_generated_texture_colors.setEnabled(is_generated_color_texture)
+
+        self._clear_generated_color_rows()
+
+        if not is_generated_color_texture:
+            return
+
+        colors = getattr(tex, "generated_colors", None) or []
+
+        strengths = getattr(tex, "generated_color_strengths", None) or []
+
+        if not colors:
+            unavailable_label = QLabel("Informace o původních barvách nejsou dostupné")
+            unavailable_label.setWordWrap(True)
+
+            self.generated_colors_layout.addWidget(unavailable_label)
+            return
+
+        for index, color in enumerate(colors, start=1):
+            r = int(color[0])
+            g = int(color[1])
+            b = int(color[2])
+
+            strength = (float(strengths[index - 1]) if index - 1 < len(strengths) else 1.0)
+
+            row_widget = QWidget()
+            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(8)
+
+            color_swatch = QLabel()
+            color_swatch.setFixedSize(16, 16)
+            color_swatch.setStyleSheet(
+                f"background-color: rgb({r}, {g}, {b});"
+                "border: 1px solid #888;"
+            )
+            color_swatch.setToolTip(f"RGB: ({r}, {g}, {b})")
+
+            row_layout.addWidget(color_swatch)
+
+            color_label = QLabel(
+                f"Barva {index}: "
+                f"({r}, {g}, {b}), "
+                f"síla {strength:.2f}"
+            )
+            row_layout.addWidget(color_label)
+
+            row_layout.addStretch(1)
+
+            self.generated_colors_layout.addWidget(row_widget)
+
     def _update_preview(self, project) -> None:
         """Aktualizuje náhľad aktuálnej textúry"""
         if self._controller is None:
@@ -697,8 +806,11 @@ class MaterialsPanel(QWidget):
             self.preview.setText("Žádná textura")
             return
 
-        r, g, b , _ = project.get_current_color_rgba()
-        ts.color = (r, g, b)
+        texture_color_mode = getattr(ts.texture, "color_mode", "tint")
+
+        if texture_color_mode != "preserve":
+            r, g, b, _ = project.get_current_color_rgba()
+            ts.color = (r, g, b)
 
         stamp = generate_brush_stamp(ts, size=96, offset_x=0, offset_y=0)
 

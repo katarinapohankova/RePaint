@@ -1,15 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Callable, List, Optional
 
 import numpy as np
-
-import subprocess
-import sys
 import os
 import uuid
 import shutil
@@ -43,11 +39,27 @@ class AlgorithmRequest:
 
 @dataclass
 class TextureAlgorithmParams:
-    texture_name: str = "texture_H"
+    """Parametre odovzdávané textúrovému algoritmu"""
+    texture_name: str = "texture_J"
+
     colors: list[tuple[int, int, int]] | None = None
-    global_scale: float = 1.0
+    color_strengths: list[float] | None = None
+
+    scale_x: float = 1.0
+    scale_y: float = 1.0
+    density_x: float = 0.0
+    density_y: float = 0.0
     rotation: float = 0.0
-    seed: Optional[int] = None
+    global_scale: float = 1.0
+
+    white_background: bool = True
+    background_brightness: float = 1.0
+
+    generate_square: bool = False
+    width: int = 1024
+    height: int = 1024
+
+    seed: Optional[int] = 42
 
 
 @dataclass
@@ -83,8 +95,6 @@ class AlgorithmRunner:
     #toto sa musí prispôsobiť algoritmom
     # REALISTIC_CMD = ["python", "realistic_inpaint.py"]
     # TEXTURE_CMD = ["python", "texture_inpaint.py"]
-    _REPO_ROOT = Path(__file__).resolve().parents[2]  # rp_restore/core -> rp_restore -> repo root
-    _ALGO_DIR_DEV = _REPO_ROOT / "external_algorithms"
     _REMOTE_REALISTIC_MAX_PIXELS = 2_073_600
     _REMOTE_REALISTIC_PROMPT = "DURER_RESTO"
     _REMOTE_REALISTIC_NUM_INFERENCE_STEPS = 30
@@ -104,7 +114,7 @@ class AlgorithmRunner:
         if request.algorithm_type == AlgorithmType.TEXTURE:
             return cls._run_texture_generator(request)
 
-        return cls._run_external(request)
+        raise ValueError(f"Unsupported algorithm type: " f"{request.algorithm_type}")
 
     #MOCK režim 
     @classmethod
@@ -172,23 +182,67 @@ class AlgorithmRunner:
             ],
         )
     
+    @staticmethod
+    def get_available_texture_names() -> list[str]:
+        """
+        Vráti názvy modelov, ktoré sú dostupné v nainštalovanom balíku texture-infill
+        """
+        try:
+            from importlib.resources import files
+
+            models_dir = files("texture_infill").joinpath("models")
+        except (ImportError, ModuleNotFoundError, TypeError) as e:
+            raise RuntimeError("Balík texture-infill není nainstalovaný nebo jej nelze načíst") from e
+
+        model_suffix = "_transformer_weight.pth"
+        texture_names: list[str] = []
+
+        try:
+            for item in models_dir.iterdir():
+                if item.is_file() and item.name.endswith(model_suffix):
+                    texture_name = item.name[:-len(model_suffix)]
+                    texture_names.append(texture_name)
+        except OSError as e:
+            raise RuntimeError("Nepodařilo se načíst modely texturového algoritmu") from e
+
+        return sorted(texture_names)
+
+    @classmethod
+    def generate_texture_material(cls, texture_params: TextureAlgorithmParams) -> np.ndarray:
+        """
+        Vygeneruje samostatnú textúru určenú na pridanie do panelu materiálov
+        výsledkom je RGBA obraz požadovanej šírky a výšky
+        """
+        if texture_params.width <= 0 or texture_params.height <= 0:
+            raise ValueError("Texture width and height must be positive")
+
+        arguments = cls._create_texture_arguments(texture_params, generate_square=True)
+
+        tex_image = np.zeros((1, 1, 3), dtype=np.uint8)
+        tex_mask = np.zeros((1, 1), dtype=np.uint8)
+
+        output = cls._call_texture_infill(tex_image, tex_mask, arguments)
+
+        return cls._normalize_texture_output(output, expected_height=int(texture_params.height), expected_width=int(texture_params.width))
+
     @classmethod
     def _run_texture_generator(cls, request: AlgorithmRequest) -> AlgorithmResult:
         """
-        Spustí texture algoritmus z priečinka
-        - dočasne pridáme jeho priečinky do sys.path a nastavíme pracovný priečinok na priečinok algoritmu
-        -dočasne vypneme cv2.imshow/cv2.waitKey, aby aplikácia nezamrzla
-        (potom sa to upraví aby to fungovalo keď bude algoritmus ako python package)
+        Spustí nainštalovaný balík texture-infill nad aktívnym výberom používateľa
         """
         current = cls._ensure_rgb(request.current_image)
-        h, w, _ = current.shape
+        image_height, image_width, _ = current.shape
 
         selected_mask = request.selected_mask.astype(bool)
         remaining_mask = request.remaining_mask.astype(bool)
 
-        if selected_mask.shape != (h, w) or remaining_mask.shape != (h, w):
-            raise ValueError("Texture masks must have the same shape as current_image")
+        if selected_mask.shape != (image_height, image_width):
+            raise ValueError("Texture selection mask has an invalid shape")
 
+        if remaining_mask.shape != (image_height, image_width):
+            raise ValueError("Texture remaining mask has an invalid shape")
+
+        #algoritmus sa môže aplikovať iba na pixely, ktoré sú vo výbere a zároveň ešte patria medzi nevyplnené poškodené pixely
         apply_mask = selected_mask & remaining_mask
 
         if not bool(apply_mask.any()):
@@ -204,129 +258,177 @@ class AlgorithmRunner:
 
         texture_params = request.texture_params or TextureAlgorithmParams()
 
-        colors = texture_params.colors
+        #algoritmu stačí poslať ohraničujúci výrez
+        image_crop = current[y_min:y_max, x_min:x_max, :]
+
+        mask_crop = np.where(apply_mask[y_min:y_max, x_min:x_max], 255, 0).astype(np.uint8)
+
+        #pri nepriehľadnom pozadí algoritmus vracia RGB
+        #pri priehľadnom pozadí vracia RGBA, preto aj vstup bude ako štvor-kanálový obraz
+        if texture_params.white_background:
+            algorithm_image = image_crop
+        else:
+            algorithm_image = np.zeros((image_crop.shape[0], image_crop.shape[1], 4), dtype=np.uint8)
+            algorithm_image[..., :3] = image_crop
+            algorithm_image[..., 3] = 255
+
+        arguments = cls._create_texture_arguments(texture_params, generate_square=False)
+
+        output = cls._call_texture_infill(algorithm_image, mask_crop, arguments)
+
+        patch_rgba = cls._normalize_texture_output(output, expected_height=bbox[3], expected_width=bbox[2])
+
+        return AlgorithmResult(
+            output_patch=patch_rgba,
+            bbox=bbox,
+            log_messages=[
+                f"Texture: {texture_params.texture_name}",
+                f"Colors: {arguments.colors}",
+                f"Color strengths: {arguments.color_strengths}",
+                (
+                    f"Scale: "
+                    f"({arguments.scale_x}, {arguments.scale_y})"
+                ),
+                (
+                    f"Density: "
+                    f"({arguments.density_x}, {arguments.density_y})"
+                ),
+                f"Rotation: {arguments.rotation}",
+                f"Global scale: {arguments.global_scale}",
+                (
+                    f"Opaque background: "
+                    f"{arguments.white_background}"
+                ),
+                (
+                    f"Background brightness: "
+                    f"{arguments.background_brightness}"
+                ),
+                f"Seed: {arguments.seed}",
+            ],
+        )
+
+    @staticmethod
+    def _create_texture_arguments(texture_params: TextureAlgorithmParams, generate_square: bool):
+        """
+        Prevedie parametre aplikácie na triedu Arguments z balíka texture-infill
+        """
+        try:
+            from texture_infill.arguments import Arguments
+        except ImportError as e:
+            raise RuntimeError("Balík texture-infill není nainstalovaný v aktuálním prostředí") from e
+
+        colors = texture_params.colors or []
+
         if not colors:
             raise ValueError("Texture algorithm requires at least one color")
 
         normalized_colors: list[tuple[int, int, int]] = []
         for color in colors:
-            if len(color) < 3:
+            if len(color) != 3:
                 raise ValueError("Each texture color must be an RGB triplet")
 
-            r, g, b = color[:3]
-            normalized_colors.append((int(max(0, min(255, r))), int(max(0, min(255, g))), int(max(0, min(255, b)))))
+            normalized_color = tuple(max(0, min(255, int(channel))) for channel in color)
+            normalized_colors.append(normalized_color)
 
-        texture_pipeline_dir = cls._get_algo_dir() / "texture_generation_pipeline"
+        strengths = texture_params.color_strengths
 
-        if not texture_pipeline_dir.exists():
-            raise RuntimeError(f"Texture generation pipeline was not found: {texture_pipeline_dir}")
+        if strengths is None:
+            normalized_strengths = [1.0 for _ in normalized_colors]
+        else:
+            if len(strengths) != len(normalized_colors):
+                raise ValueError("The number of color strengths must match the number of colors")
 
-        texture_pipeline_parent = texture_pipeline_dir.parent
+            normalized_strengths = [max(0.0, min(1.0, float(value))) for value in strengths]
 
-        old_cwd = Path.cwd()
-        added_paths: list[str] = []
+        return Arguments(
+            texture_name=texture_params.texture_name,
+            count=len(normalized_colors),
+            scale_x=float(texture_params.scale_x),
+            scale_y=float(texture_params.scale_y),
+            density_x=float(texture_params.density_x),
+            density_y=float(texture_params.density_y),
+            rotation=float(texture_params.rotation),
+            global_scale=float(texture_params.global_scale),
+            colors=normalized_colors,
+            color_strengths=normalized_strengths,
+            white_background=bool(texture_params.white_background),
+            background_brightness=max(
+                0.0,
+                min(1.0, float(texture_params.background_brightness)),
+            ),
+            generate_square=generate_square,
+            width=int(texture_params.width),
+            height=int(texture_params.height),
+            seed=texture_params.seed,
+        )
 
-        #musí byť na sys.path aj samotný priečinok texture_generation_pipeline
-        for path in (texture_pipeline_parent, texture_pipeline_dir):
-            path_str = str(path)
-            if path_str not in sys.path:
-                sys.path.insert(0, path_str)
-                added_paths.append(path_str)
+    @staticmethod
+    def _ensure_numba_cache_dir() -> None:
+        """
+        Nastaví vlastný zapisovateľný cache priečinok pre numba
 
-        old_imshow = None
-        old_wait_key = None
+        (Niektoré časti balíka texture-infill používajú numba cache a pri určitých inštaláciách na Windowse môže zlyhať zapisovanie do pôvodného __pycache__ priečinka balíka, preto cache presmerujeme do lokálneho priečinka aplikácie)
+        """
+        cache_dir_env = os.environ.get("NUMBA_CACHE_DIR")
+
+        if cache_dir_env:
+            cache_dir = Path(cache_dir_env)
+        else:
+            base_dir = Path(os.environ.get("LOCALAPPDATA", Path.home()))
+            cache_dir = (base_dir / "RP-Restore" / "numba_cache")
+            os.environ["NUMBA_CACHE_DIR"] = str(cache_dir)
+
+        cache_dir.mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def _call_texture_infill(image: np.ndarray, mask: np.ndarray, arguments) -> np.ndarray:
+        """
+        Zavolá verejnú funkciu generate_infill z nainštalovaného balíka
+        """
+        AlgorithmRunner._ensure_numba_cache_dir()
 
         try:
-            #počas behu ho spúšťame z jeho vlastného priečinka
-            os.chdir(texture_pipeline_dir)
+            from texture_infill.texture_infill import generate_infill
+        except ImportError as e:
+            raise RuntimeError("Balík texture-infill není nainstalovaný v aktuálním prostředí") from e
 
-            try:
-                import cv2
+        output = generate_infill(image, mask, arguments)
 
-                old_imshow = cv2.imshow
-                old_wait_key = cv2.waitKey
+        if isinstance(output, tuple):
+            output = output[0]
 
-                #v aplikácii nechceme otvárať debug openCV okná
-                cv2.imshow = lambda *args, **kwargs: None
-                cv2.waitKey = lambda *args, **kwargs: 1
-            except Exception:
-                old_imshow = None
-                old_wait_key = None
+        return np.asarray(output)
 
-            try:
-                from external_algorithms.texture_generation_pipeline.texture_generator_pipeline import (Parameters, generate_infill)
-            except ImportError as e:
-                raise RuntimeError(
-                    "Texture generation pipeline could not be imported "
-                    f"import error: {e!r}"
-                ) from e
+    @staticmethod
+    def _normalize_texture_output(output: np.ndarray, expected_height: int, expected_width: int) -> np.ndarray:
+        """
+        Skontroluje výstup algoritmu a prevedie ho na RGBA uint8
+        """
+        arr = np.asarray(output)
 
-            params = Parameters(
-                texture_name=texture_params.texture_name,
-                colors=normalized_colors,
-                count=len(normalized_colors),
-
-                #tieto parametre zatiaľ nechávame na konkrétnych hodnotách
-                scale_x=1.0,
-                scale_y=1.0,
-                density_x=0.0,
-                density_y=0.0,
-
-                rotation=float(texture_params.rotation),
-                global_scale=float(texture_params.global_scale),
-                seed=texture_params.seed,
+        if arr.ndim != 3 or arr.shape[:2] != (expected_height, expected_width):
+            raise RuntimeError(
+                "Texture algorithm returned invalid output shape: "
+                f"{arr.shape}; expected "
+                f"({expected_height}, {expected_width})"
             )
 
-            mask_for_algorithm = np.where(apply_mask, 255, 0).astype(np.uint8)
+        if arr.dtype != np.uint8:
+            arr = np.clip(arr, 0, 255).astype(np.uint8)
 
-            output_full = generate_infill(current, mask_for_algorithm, params)
+        if arr.shape[2] == 4:
+            return arr.copy()
 
-            #pre istotu ošetríme aj prípad, keby algoritmus vrátil tuple
-            if isinstance(output_full, tuple):
-                output_full = output_full[0]
+        if arr.shape[2] == 3:
+            rgba = np.zeros((expected_height, expected_width, 4), dtype=np.uint8)
 
-            if output_full.ndim != 3 or output_full.shape[:2] != (h, w):
-                raise RuntimeError(f"Texture algorithm returned invalid output shape: {output_full.shape}")
+            rgba[..., :3] = arr
+            rgba[..., 3] = 255
 
-            output_rgb = output_full[..., :3].astype(np.uint8)
+            return rgba
 
-            x, y, bw, bh = bbox
-            output_patch = output_rgb[y:y + bh, x:x + bw, :]
-
-            patch_rgba = np.zeros((bh, bw, 4), dtype=np.uint8)
-            patch_rgba[..., :3] = output_patch
-            patch_rgba[..., 3] = 255
-
-            return AlgorithmResult(
-                output_patch=patch_rgba,
-                bbox=bbox,
-                log_messages=[
-                    f"Texture: {texture_params.texture_name}",
-                    f"Colors: {normalized_colors}",
-                    f"global_scale: {texture_params.global_scale}",
-                    f"rotation: {texture_params.rotation}",
-                    f"seed: {texture_params.seed}",
-                ],
-            )
-
-        finally:
-            os.chdir(old_cwd)
-
-            if old_imshow is not None and old_wait_key is not None:
-                try:
-                    import cv2
-
-                    cv2.imshow = old_imshow
-                    cv2.waitKey = old_wait_key
-                except Exception:
-                    pass
-
-            for path_str in added_paths:
-                try:
-                    sys.path.remove(path_str)
-                except ValueError:
-                    pass
-
+        raise RuntimeError(f"Texture algorithm returned an unsupported number of channels: {arr.shape[2]}")
+    
     @staticmethod
     def _looks_like_remote_access_error(error: Exception) -> bool:
         """
@@ -493,139 +595,6 @@ class AlgorithmRunner:
 
         finally:
             shutil.rmtree(tmpdir_path, ignore_errors=True)
-
-    #spustenie externého skriptu
-    @classmethod
-    def _run_external(cls, request: AlgorithmRequest) -> AlgorithmResult:
-        current = cls._ensure_rgb(request.current_image)
-        h, w, _ = current.shape
-
-        sel = request.selected_mask
-        rem = request.remaining_mask
-
-        if sel.shape != (h, w) or rem.shape != (h, w):
-            raise ValueError("Masks must have the same shape as current_image (H, W)")
-
-        #tmp priecinok
-        base_tmp = Path(os.environ.get("LOCALAPPDATA", ".")) / "RP-Restore" / "tmp"
-        base_tmp.mkdir(parents=True, exist_ok=True)
-
-        tmpdir_path = base_tmp / f"run_{uuid.uuid4().hex}"
-        tmpdir_path.mkdir(parents=True, exist_ok=True)
-
-        log_msgs: List[str] = []
-
-        try:
-            input_image_path = tmpdir_path / "input_image.png"
-            mask_selected_path = tmpdir_path / "mask_selected.png"
-            mask_all_path = tmpdir_path / "mask_all.png"
-            output_path = tmpdir_path / "output.png"
-
-            #uložíme current_image
-            image_io.save_image(input_image_path, current)
-
-            #uložíme masky
-            image_io.save_mask(mask_selected_path, sel)
-            image_io.save_mask(mask_all_path, rem)
-
-            python_for_algo = cls._get_algorithms_python()
-            algo_dir = cls._get_algo_dir()
-
-            #výber príkazu podľa typu algoritmu
-            if request.algorithm_type == AlgorithmType.TEXTURE:
-                #TEXTURE -teraz skript vracia full image (H,W,3/4) a my vyrezeme patch podľa selection ale to sa asi zmení na iba generovanie textúry
-                ys, xs = np.where(sel)
-                if ys.size == 0:
-                    raise ValueError("Selection is empty – nothing to process")
-
-                y_min = int(ys.min())
-                y_max = int(ys.max())
-                x_min = int(xs.min())
-                x_max = int(xs.max())
-                bbox = (x_min, y_min, x_max - x_min + 1, y_max - y_min + 1)
-
-                script_path = algo_dir / "texture_inpaint.py"
-                cmd = [python_for_algo, str(script_path)]
-
-            elif request.algorithm_type == AlgorithmType.REALISTIC:
-                #REALISTIC -vyžaduje window_bbox a vracia patch okna (w,h)
-                if request.window_bbox is None:
-                    raise ValueError("REALISTIC algorithm requires request.window_bbox")
-
-                wx, wy, ww, wh = request.window_bbox
-                if ww <= 0 or wh <= 0:
-                    raise ValueError("window_bbox is invalid (w/h <= 0)")
-                if ww > 1024 or wh > 1024:
-                    raise ValueError("window_bbox exceeds max size 1024x1024")
-
-                #okno musí byť v hraniciach obrazu
-                if wx < 0 or wy < 0 or wx + ww > w or wy + wh > h:
-                    raise ValueError("window_bbox is out of image bounds")
-
-                bbox = (wx, wy, ww, wh)
-
-                script_path = algo_dir / "realistic_inpaint.py"
-                cmd = [python_for_algo, str(script_path)]
-
-                #pridáme parametre okna
-                cmd += ["--window_x", str(wx), "--window_y", str(wy), "--window_w", str(ww), "--window_h", str(wh)]
-
-            else:
-                raise RuntimeError(f"Unsupported algorithm type: {request.algorithm_type}")
-
-            #spoločné CLI argumenty
-            cmd += [
-                "--input_image",
-                str(input_image_path),
-                "--mask_selected",
-                str(mask_selected_path),
-                "--mask_all",
-                str(mask_all_path),
-                "--output",
-                str(output_path),
-                "--device",
-                request.device,
-            ]
-
-            if request.mock:
-                cmd.append("--mock")
-
-            _debug_log("RUN CMD: " + " ".join(cmd))
-
-            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-
-            if proc.stdout:
-                log_msgs.extend(proc.stdout.strip().splitlines())
-            if proc.stderr:
-                log_msgs.append("stderr")
-                log_msgs.extend(proc.stderr.strip().splitlines())
-
-            if proc.returncode != 0:
-                raise RuntimeError(
-                    f"Algorithm process failed with code {proc.returncode}\n"
-                    + "\n".join(log_msgs)
-                )
-
-            #načítame výstupný obrázok
-            output_img = image_io.load_image(output_path)  #RGBA (H, W, 4)
-
-            if request.algorithm_type == AlgorithmType.TEXTURE:
-                #očakávame full image -> vyrežeme podľa bbox selection
-                x0, y0, bw, bh = bbox
-                output_patch = output_img[y0:y0+bh, x0:x0+bw, :]
-                return AlgorithmResult(output_patch=output_patch, bbox=bbox, log_messages=log_msgs)
-
-            else:
-                #REALISTIC -očakávame patch presne veľkosti okna (wh, ww)
-                wx, wy, ww, wh = bbox
-                if output_img.shape[0] != wh or output_img.shape[1] != ww:
-                    #ak by náhodou vrátili full image
-                    raise RuntimeError(f"Realistic output has wrong size. Expected ({wh},{ww}), got {output_img.shape[:2]}")
-                return AlgorithmResult(output_patch=output_img, bbox=bbox, log_messages=log_msgs)
-
-        finally:
-            shutil.rmtree(tmpdir_path, ignore_errors=True)
-            
     @staticmethod
     def _ensure_rgb(image: np.ndarray) -> np.ndarray:
         """
@@ -642,29 +611,3 @@ class AlgorithmRunner:
             arr = arr.astype(np.uint8)
 
         return arr
-    @classmethod
-    def _get_algorithms_python(cls) -> str:
-        if cls._is_frozen():
-            exe_dir = Path(sys.executable).resolve().parent
-            py = exe_dir / "_internal" / "algo_venv" / "Scripts" / "python.exe"
-            return str(py)
-        return sys.executable
-    
-    @staticmethod
-    def _is_frozen() -> bool:
-        return bool(getattr(sys, "frozen", False))
-
-    @classmethod
-    def _get_algo_dir(cls) -> Path:
-        if cls._is_frozen():
-            exe_dir = Path(sys.executable).resolve().parent
-            return exe_dir / "_internal" / "external_algorithms"
-        return cls._ALGO_DIR_DEV
-
-def _debug_log(msg: str) -> None:
-    log_dir = Path(os.environ.get("LOCALAPPDATA", ".")) / "RP-Restore"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / "debug_algo.log"
-    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open(log_path, "a", encoding="utf-8") as f:
-        f.write(f"[{ts}] {msg}\n")

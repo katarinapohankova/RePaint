@@ -143,6 +143,14 @@ class ProjectSerializer:
                 for name, tex in project.textures.items():
                     rel = f"textures/{name}.png"
                     zf.writestr(rel, _encode_png(tex.image))
+                    generated_colors = getattr(tex, "generated_colors", None)
+                    if generated_colors is not None:
+                        generated_colors = [[int(c[0]), int(c[1]), int(c[2])] for c in generated_colors]
+
+                    generated_color_strengths = getattr(tex, "generated_color_strengths", None)
+                    if generated_color_strengths is not None:
+                        generated_color_strengths = [float(value) for value in generated_color_strengths]
+
                     textures_meta.append(
                         {
                             "name": name,
@@ -152,6 +160,11 @@ class ProjectSerializer:
                             "deformation_scale_x": float(getattr(tex, "deformation_scale_x", 1.0)),
                             "deformation_scale_y": float(getattr(tex, "deformation_scale_y", 1.0)),
                             "can_deform": bool(getattr(tex, "can_deform", True)),
+                            "generated_by_algorithm": bool(getattr(tex, "generated_by_algorithm", False)),
+                            "color_mode": getattr(tex, "color_mode", "tint"),
+                            "generated_colors": generated_colors,
+                            "generated_color_strengths": generated_color_strengths,
+                            "algorithm_params": getattr(tex, "algorithm_params", None),
                         }
                     )
 
@@ -286,6 +299,25 @@ class ProjectLoader:
                 except KeyError:
                     continue
 
+                generated_colors_raw = info.get("generated_colors")
+                generated_colors: list[tuple[int, int, int]] | None = None
+
+                if isinstance(generated_colors_raw, list):
+                    generated_colors = []
+                    for item in generated_colors_raw:
+                        if isinstance(item, (list, tuple)) and len(item) >= 3:
+                            generated_colors.append((int(item[0]), int(item[1]), int(item[2])))
+
+                generated_strengths_raw = info.get("generated_color_strengths")
+                generated_strengths: list[float] | None = None
+
+                if isinstance(generated_strengths_raw, list):
+                    generated_strengths = [float(value) for value in generated_strengths_raw]
+
+                algorithm_params = info.get("algorithm_params")
+                if not isinstance(algorithm_params, dict):
+                    algorithm_params = None
+
                 img_rgba = _decode_png_to_rgba(data)
                 project.textures[name] = Texture(
                     name=name,
@@ -295,6 +327,11 @@ class ProjectLoader:
                     deformation_scale_x=float(info.get("deformation_scale_x", 1.0)),
                     deformation_scale_y=float(info.get("deformation_scale_y", 1.0)),
                     can_deform=bool(info.get("can_deform", True)),
+                    generated_by_algorithm=bool(info.get("generated_by_algorithm", False)),
+                    color_mode=str(info.get("color_mode", "tint")),
+                    generated_colors=generated_colors,
+                    generated_color_strengths=generated_strengths,
+                    algorithm_params=algorithm_params,
                 )
 
             brush_settings = meta.get("brush_settings", {})

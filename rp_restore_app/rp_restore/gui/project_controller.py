@@ -299,7 +299,20 @@ class ProjectController:
 
         new_name = self._make_deformed_texture_name(source_tex.name, sx, sy)
 
-        new_tex = Texture(name=new_name, image=new_image, is_generated=True, source_texture_name=source_tex.name, deformation_scale_x=sx, deformation_scale_y=sy, can_deform=False)
+        new_tex = Texture(
+            name=new_name,
+            image=new_image,
+            is_generated=True,
+            source_texture_name=source_tex.name,
+            deformation_scale_x=sx,
+            deformation_scale_y=sy,
+            can_deform=False,
+            generated_by_algorithm=bool(getattr(source_tex, "generated_by_algorithm", False)),
+            color_mode=str(getattr(source_tex, "color_mode", "tint")),
+            generated_colors=getattr(source_tex, "generated_colors", None),
+            generated_color_strengths=getattr(source_tex, "generated_color_strengths", None),
+            algorithm_params=getattr(source_tex, "algorithm_params", None),
+        )
 
         self._insert_texture_after(source_tex.name, new_tex)
 
@@ -438,6 +451,159 @@ class ProjectController:
         self.project.mark_dirty()
         self.set_texture(name)
 
+    def generate_texture_and_add_to_project(self, texture_params: TextureAlgorithmParams, replace_texture_name: str | None = None) -> str | None:
+        """
+        Vygeneruje samostatnú textúru pomocou externého algoritmu a pridá ju medzi materiály aktuálneho projektu
+
+        vráti názov pridanej textúry alebo None pri chybe
+        """
+        project = self.project
+
+        if project is None:
+            self.show_tool_message("Nejprve otevřete nebo vytvořte projekt")
+            return None
+
+        texture_params.generate_square = True
+
+        self._show_algorithm_progress("Generuji samostatnou texturu...", None, None)
+
+        QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
+        QApplication.processEvents()
+
+        try:
+            texture_image = (AlgorithmRunner.generate_texture_material(texture_params))
+        except Exception as error:
+            print("Texture generation error:", error)
+            self.show_tool_message(f"Texturu se nepodařilo vygenerovat: {error}")
+            return None
+        finally:
+            QApplication.restoreOverrideCursor()
+            self._clear_algorithm_progress()
+
+        texture_array = np.asarray(texture_image)
+
+        if texture_array.ndim != 3 or texture_array.shape[2] not in (3, 4):
+            self.show_tool_message("Algoritmus vrátil neplatný formát textury")
+            return None
+
+        expected_size = (int(texture_params.height),int(texture_params.width))
+
+        if texture_array.shape[:2] != expected_size:
+            self.show_tool_message("Algoritmus vrátil texturu s nesprávnými rozměry")
+            return None
+
+        if texture_array.dtype != np.uint8:
+            texture_array = np.clip(texture_array, 0, 255).astype(np.uint8)
+
+        if texture_array.shape[2] == 3:
+            rgba = np.zeros((texture_array.shape[0], texture_array.shape[1], 4), dtype=np.uint8)
+            rgba[..., :3] = texture_array
+            rgba[..., 3] = 255
+            texture_array = rgba
+        else:
+            texture_array = texture_array.copy()
+
+        seed_suffix = ""
+
+        if texture_params.seed is not None:
+            seed_suffix = f"_seed{texture_params.seed}"
+
+        if replace_texture_name is None:
+            base_name = (
+                f"generated_{texture_params.texture_name}_"
+                f"{texture_params.width}x{texture_params.height}"
+                f"{seed_suffix}"
+            )
+            texture_name = self._make_unique_texture_name(base_name)
+        else:
+            texture_name = replace_texture_name
+
+        generated_colors = texture_params.colors or []
+        generated_strengths = texture_params.color_strengths or []
+
+        texture = Texture(
+            name=texture_name,
+            image=texture_array,
+            generated_by_algorithm=True,
+            color_mode="preserve",
+            generated_colors=[(int(color[0]), int(color[1]), int(color[2])) for color in generated_colors],
+            generated_color_strengths=[float(value) for value in generated_strengths],
+            algorithm_params=self._texture_params_to_metadata_dict(texture_params),
+        )
+
+        project.textures[texture_name] = texture
+        project.mark_dirty()
+
+        #textúra sa po pridaní alebo nahradení automaticky označí ako aktuálne vybraný materiál
+        self.set_texture(texture_name)
+
+        if replace_texture_name is None:
+            self.show_tool_message(f"Textura „{texture_name}“ byla přidána do materiálů")
+        else:
+            self.show_tool_message(f'Barvy textury „{texture_name}“ byly aktualizovány')
+
+        return texture_name
+    
+    @staticmethod
+    def _texture_params_to_metadata_dict(texture_params: TextureAlgorithmParams) -> dict[str, object]:
+        colors = texture_params.colors or []
+        color_strengths = texture_params.color_strengths or []
+
+        return {
+            "texture_name": str(texture_params.texture_name),
+            "colors": [[int(c[0]), int(c[1]), int(c[2])] for c in colors],
+            "color_strengths": [float(value) for value in color_strengths],
+            "scale_x": float(texture_params.scale_x),
+            "scale_y": float(texture_params.scale_y),
+            "density_x": float(texture_params.density_x),
+            "density_y": float(texture_params.density_y),
+            "rotation": float(texture_params.rotation),
+            "global_scale": float(texture_params.global_scale),
+            "white_background": bool(texture_params.white_background),
+            "background_brightness": float(texture_params.background_brightness),
+            "generate_square": bool(texture_params.generate_square),
+            "width": int(texture_params.width),
+            "height": int(texture_params.height),
+            "seed": None if texture_params.seed is None else int(texture_params.seed),
+        }
+
+    @staticmethod
+    def _texture_params_from_metadata_dict(data: dict[str, object]) -> TextureAlgorithmParams | None:
+        try:
+            colors_raw = data.get("colors", [])
+            colors: list[tuple[int, int, int]] = []
+
+            if isinstance(colors_raw, list):
+                for item in colors_raw:
+                    if isinstance(item, (list, tuple)) and len(item) >= 3:
+                        colors.append((int(item[0]), int(item[1]), int(item[2])))
+
+            strengths_raw = data.get("color_strengths", [])
+            color_strengths: list[float] = []
+
+            if isinstance(strengths_raw, list):
+                color_strengths = [float(value) for value in strengths_raw]
+
+            return TextureAlgorithmParams(
+                texture_name=str(data.get("texture_name", "texture_J")),
+                colors=colors,
+                color_strengths=color_strengths,
+                scale_x=float(data.get("scale_x", 1.0)),
+                scale_y=float(data.get("scale_y", 1.0)),
+                density_x=float(data.get("density_x", 0.0)),
+                density_y=float(data.get("density_y", 0.0)),
+                rotation=float(data.get("rotation", 0.0)),
+                global_scale=float(data.get("global_scale", 1.0)),
+                white_background=bool(data.get("white_background", True)),
+                background_brightness=float(data.get("background_brightness", 1.0)),
+                generate_square=bool(data.get("generate_square", True)),
+                width=int(data.get("width", 1024)),
+                height=int(data.get("height", 1024)),
+                seed=None if data.get("seed") is None else int(data.get("seed")),
+            )
+        except Exception:
+            return None
+        
     def _make_unique_texture_name(self, base_name: str) -> str:
         """
         Vytvorí jedinečný názov textúry v aktuálnom projekte
@@ -459,6 +625,63 @@ class ProjectController:
             i += 1
         return f"{safe}_{i}"
     
+    def edit_generated_texture_colors(self, texture_name: str, parent=None) -> None:
+        """
+        Otvorí dialóg s pôvodnými parametrami generated textúry a po potvrdení ju pregeneruje s novými farbami
+        """
+        if self.project is None:
+            return
+
+        texture = self.project.textures.get(texture_name)
+        if texture is None:
+            return
+
+        if not bool(getattr(texture, "generated_by_algorithm", False)):
+            self.show_tool_message("Barvy lze upravovat pouze u textur vygenerovaných algoritmem")
+            return
+
+        metadata = getattr(texture, "algorithm_params", None)
+        if not isinstance(metadata, dict):
+            self.show_tool_message("U této textury nejsou uložené parametry pro opětovné vygenerování")
+            return
+
+        initial_params = self._texture_params_from_metadata_dict(metadata)
+        if initial_params is None:
+            self.show_tool_message("Nepodařilo se načíst původní parametry textury")
+            return
+
+        from rp_restore.gui.texture_fill_dialog import TextureFillDialog
+
+        dialog = TextureFillDialog(controller=self, parent=parent, initial_params=initial_params, force_generate_texture_mode=True, color_edit_only=True)
+
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        result = dialog.get_result()
+        if result is None:
+            self.show_tool_message("Parametry textury nejsou platné")
+            return
+
+        new_params = TextureAlgorithmParams(
+            texture_name=result.texture_name,
+            colors=result.colors,
+            color_strengths=result.color_strengths,
+            scale_x=result.scale_x,
+            scale_y=result.scale_y,
+            density_x=result.density_x,
+            density_y=result.density_y,
+            rotation=result.rotation,
+            global_scale=result.global_scale,
+            white_background=result.white_background,
+            background_brightness=result.background_brightness,
+            generate_square=True,
+            width=result.width,
+            height=result.height,
+            seed=result.seed,
+        )
+
+        self.generate_texture_and_add_to_project(new_params, replace_texture_name=texture_name)
+
     def set_materials_panel(self, panel: object) -> None:
         self.materials_panel = panel
         if hasattr(panel, "set_controller"):
@@ -1697,13 +1920,25 @@ class ProjectController:
 
         request = AlgorithmRequest(original_image=original, current_image=current, selected_mask=selected_mask, remaining_mask=remaining_mask, algorithm_type=algorithm_type, device="cpu", mock=use_mock, texture_params=texture_params)
 
+        if algorithm_type == AlgorithmType.TEXTURE:
+            progress_message = ("Spouštím texturové doplnění...")
+        else:
+            progress_message = ("Spouštím externí algoritmus...")
+
+        self._show_algorithm_progress(progress_message, None, None)
+
+        QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
+        QApplication.processEvents()
+
         try:
             result = AlgorithmRunner.run(request)
-        except Exception as e:
-            #chybu vypíšeme do konzoly aj do používateľskej hlášky
-            print("Algorithm error:", e)
-            self.show_tool_message(f"Chyba algoritmu: {e}")
+        except Exception as error:
+            print("Algorithm error:", error)
+            self.show_tool_message(f"Chyba algoritmu: {error}")
             return
+        finally:
+            QApplication.restoreOverrideCursor()
+            self._clear_algorithm_progress()
 
         x, y, w, h = result.bbox
         if w <= 0 or h <= 0:
@@ -1730,6 +1965,13 @@ class ProjectController:
             self.show_tool_message("Algoritmus nevrátil žádné použitelné pixely pro aktuální výběr")
             return
 
+        visible_output = patch_rgba[..., 3] > 0
+        local_apply = local_apply & visible_output
+
+        if not bool(local_apply.any()):
+            self.show_tool_message("Výstup algoritmu neobsahuje žádné viditelné pixely")
+            return
+
         before = target_layer.clone_subregion(x, y, w, h)
 
         sub_img = target_layer.image[y:y + h, x:x + w, :]
@@ -1751,7 +1993,9 @@ class ProjectController:
         action = UndoAction(description=description, layer_id=target_layer.meta.id, layer_role=target_layer.meta.role, bbox=(x, y, w, h), before=before, after=after)
         project.undo_manager.push_action(action)
 
-        project.mark_region_as_filled_on_layer(target_layer.meta.id, apply_mask)
+        filled_mask = np.zeros_like(apply_mask, dtype=bool)
+        filled_mask[y:y + h, x:x + w] = local_apply
+        project.mark_region_as_filled_on_layer(target_layer.meta.id, filled_mask)
         self.invalidate_selection_region_map_cache()
 
         project.history_for_report.append(
@@ -1765,6 +2009,9 @@ class ProjectController:
 
         project.mark_dirty()
         self.refresh_canvas()
+        if algorithm_type == AlgorithmType.TEXTURE:
+            self.show_tool_message("Texturové doplnění bylo dokončeno")
+        
     def can_undo(self) -> bool:
         return self.project is not None and self.project.can_undo()
 

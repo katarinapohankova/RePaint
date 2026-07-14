@@ -41,7 +41,7 @@ class AlgorithmPanel(QWidget):
         self.btn_texture.clicked.connect(self._on_texture_clicked)
 
         self.btn_realistic.setEnabled(True)
-        self.btn_texture.setEnabled(False)
+        self.btn_texture.setEnabled(True)
 
     def set_controller(self, controller: object) -> None:
         """Nastaví controller používaný na spúšťanie algoritmov"""
@@ -51,23 +51,24 @@ class AlgorithmPanel(QWidget):
         """
         Aktualizuje panel podľa aktuálneho výberu
         """
-        #realistic fill je dostupný aj bez selection, pretože vie použiť ručný výber okna
         self.btn_realistic.setEnabled(True)
+        self.btn_texture.setEnabled(True)
 
-        #texture fill potrebuje existujúci selection
         if selection_set is None or selection_set.is_empty():
             self.info_label.setText("Není vybrána žádná oblast.")
-            self.btn_texture.setEnabled(False)
             return
 
-        x, y, w, h = selection_set.combined_bbox()
+        _x, _y, width, height = selection_set.combined_bbox()
         num_regions = len(selection_set.selections)
 
         if num_regions == 1:
-            self.info_label.setText(f"Vybrána oblast: {w}×{h}")
+            self.info_label.setText(f"Vybrána oblast: {width}×{height}")
         else:
-            self.info_label.setText(f"Vybráno {num_regions} oblastí, společný ohraničující obdélník: {w}×{h}")
-        self.btn_texture.setEnabled(True)
+            self.info_label.setText(
+                f"Vybráno {num_regions} oblastí, "
+                "společný ohraničující obdélník: "
+                f"{width}×{height}"
+            )
 
     def _on_realistic_clicked(self) -> None:
         """Otvorí dialóg pre realistické doplnenie"""
@@ -103,27 +104,49 @@ class AlgorithmPanel(QWidget):
         if self._controller is None:
             return
 
+        dialog = TextureFillDialog(controller=self._controller, parent=self)
+
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        result = dialog.get_result()
+
+        if result is None:
+            if hasattr(self._controller, "show_tool_message"):
+                self._controller.show_tool_message("Parametry texturového algoritmu nejsou platné")
+            return
+
+        texture_params = TextureAlgorithmParams(
+            texture_name=result.texture_name,
+            colors=result.colors,
+            color_strengths=result.color_strengths,
+            scale_x=result.scale_x,
+            scale_y=result.scale_y,
+            density_x=result.density_x,
+            density_y=result.density_y,
+            rotation=result.rotation,
+            global_scale=result.global_scale,
+            white_background=result.white_background,
+            background_brightness=(result.background_brightness),
+            generate_square=result.generate_square,
+            width=result.width,
+            height=result.height,
+            seed=result.seed,
+        )
+
+        if result.generate_square:
+            if hasattr(self._controller, "generate_texture_and_add_to_project"):
+                self._controller.generate_texture_and_add_to_project(texture_params)
+            else:
+                self._controller.show_tool_message("Generování samostatné textury zatím není dostupné")
+
+            return
+
         selection_set = getattr(self._controller, "active_selection", None)
         if selection_set is None or selection_set.is_empty():
             if hasattr(self._controller, "show_tool_message"):
                 self._controller.show_tool_message("Nejprve vyberte oblast pro texturové doplnění")
             return
 
-        dlg = TextureFillDialog(controller=self._controller, parent=self)
-        if dlg.exec() != QDialog.Accepted:
-            return
-
-        res = dlg.get_result()
-        if res is None:
-            return
-
-        params = TextureAlgorithmParams(
-            texture_name=res.texture_name,
-            colors=res.colors,
-            global_scale=res.global_scale,
-            rotation=res.rotation,
-            seed=res.seed,
-        )
-
         if hasattr(self._controller, "run_algorithm_on_selection"):
-            self._controller.run_algorithm_on_selection(AlgorithmType.TEXTURE, use_mock=False, texture_params=params)
+            self._controller.run_algorithm_on_selection(AlgorithmType.TEXTURE, use_mock=False, texture_params=texture_params)
