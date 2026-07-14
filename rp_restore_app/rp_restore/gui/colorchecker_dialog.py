@@ -5,7 +5,7 @@ import cv2
 
 import numpy as np
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QImage, QPixmap, QPainter, QPen, QColor
+from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QMessageBox
 
 from rp_restore.core.color_correction import COLORCHECKER_SRGB_24, estimate_correction_matrix_affine, rms_rgb
@@ -32,7 +32,7 @@ class _ClickImageLabel(QLabel):
         self._qimage: QImage | None = None
         self._pixmap: QPixmap | None = None
 
-        self.points: list[tuple[int, int]] = []  #image coords
+        self.points: list[tuple[int, int]] = []  #súradnice v obraze
         self._last_drawn_pixmap: QPixmap | None = None
 
     def set_image(self, qimage: QImage) -> None:
@@ -63,7 +63,7 @@ class _ClickImageLabel(QLabel):
         if event.button() != Qt.LeftButton:
             return
 
-        #map widget click -> pixmap coords -> image coords
+        #prevod kliknutia z widgetu do súradníc obrázka
         w = self.width()
         h = self.height()
         pw = self._pixmap.width()
@@ -254,9 +254,9 @@ class ColorCheckerDialog(QDialog):
 
     def _measure_colorchecker_patches(self, image_rgb: np.ndarray, corners: list[tuple[int, int]]) -> np.ndarray:
         """
-    Narovná ColorChecker tabuľku na grid 6x4 a zmeria farbu 24 políčok
-    vracia pole measured_colors tvaru (24, 3) v rozsahu 0-255
-    """
+        Narovná ColorChecker tabuľku na grid 6x4 a zmeria farbu 24 políčok
+        vracia pole measured_colors tvaru (24, 3) v rozsahu 0-255
+        """
         #cieľová veľkosť narovnanej tabuľky
         out_w = 600
         out_h = 400

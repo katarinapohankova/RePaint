@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
-
 import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
@@ -23,24 +21,24 @@ class EraserTool(BaseTool):
         self.is_erasing: bool = False
         self.brush_size: int = self.controller.get_brush_size()
 
-        self._before_image: Optional[np.ndarray] = None
-        self._stroke_committed_erase_u8: Optional[np.ndarray] = None
-        self._pass_erase_u8: Optional[np.ndarray] = None
-        self._last_dir: Optional[tuple[float, float]] = None
-        self._last_x: Optional[int] = None
-        self._last_y: Optional[int] = None
+        self._before_image: np.ndarray | None = None
+        self._stroke_committed_erase_u8: np.ndarray | None = None
+        self._pass_erase_u8: np.ndarray | None = None
+        self._last_dir: tuple[float, float] | None = None
+        self._last_x: int | None = None
+        self._last_y: int | None = None
 
-        self._stroke_min_x: Optional[int] = None
-        self._stroke_min_y: Optional[int] = None
-        self._stroke_max_x: Optional[int] = None
-        self._stroke_max_y: Optional[int] = None
+        self._stroke_min_x: int | None = None
+        self._stroke_min_y: int | None = None
+        self._stroke_max_x: int | None = None
+        self._stroke_max_y: int | None = None
 
     def _update_from_controller(self) -> None:
         """Načíta aktuálnu veľkosť gumy z controlleru"""
         self.brush_size = self.controller.get_brush_size()
 
     def _get_active_paint_layer(self):
-        """Načíta aktuálnu veľkosť gumy z controlleru"""
+        """Nájde aktívnu PAINT vrstvu podľa active_layer_id v controlleri"""
         project = self.controller.project
         if project is None or self.controller.active_layer_id is None:
             return None
@@ -242,7 +240,7 @@ class EraserTool(BaseTool):
         layer = self._get_active_paint_layer()
         self._update_from_controller()
         if layer is None:
-            self.controller.show_tool_message("Gumu lze použít pouze na vrstvách malby")
+            self.controller.show_tool_message("Gumu lze použít pouze na vrstvě malby")
             return
 
         self.is_erasing = True
@@ -351,7 +349,7 @@ class EraserTool(BaseTool):
 
         bbox = (x0, y0, bw, bh)
 
-        action = UndoAction(description="Erase stroke", layer_id = layer.meta.id, layer_role = layer.meta.role, bbox = bbox, before = before, after = after)
+        action = UndoAction(description="Mazání gumou", layer_id=layer.meta.id, layer_role=layer.meta.role, bbox=bbox, before=before, after=after)
         self.controller.project.undo_manager.push_action(action)
 
         project = self.controller.project
@@ -417,7 +415,7 @@ class EraserTool(BaseTool):
 
         radius = int(self.controller.get_brush_size())
 
-        #eraser vždy brush mode
+        #guma vždy používa brush kurzor
         rgba_t = (240, 240, 240, 255)
         outline = QColor(255, 80, 80, 230)
         return self.controller._make_brush_cursor(radius, rgba_t, outline)

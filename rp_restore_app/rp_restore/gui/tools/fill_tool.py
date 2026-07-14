@@ -73,7 +73,7 @@ class FillTool(BaseTool):
 
         layer = self._get_active_paint_layer()
         if layer is None:
-            self.controller.show_tool_message("Výplň lze použít pouze na vrstvách malby")
+            self.controller.show_tool_message("Výplň lze použít pouze na vrstvě malby")
             return
 
         #ak existuje aktívny výber, vyplníme celý výber, inak oblasť pod kliknutím
@@ -83,11 +83,12 @@ class FillTool(BaseTool):
             region_mask = selection_set.combined_mask()
             x, y, w, h = selection_set.combined_bbox()
         else:
-            selection = project.get_selection_from_click(img_x, img_y)
+            region_map = self.controller.get_selection_region_map_for_active_layer()
+            selection = project.get_selection_from_click(img_x, img_y, layer_id=self.controller.active_layer_id, region_map=region_map)
             if selection is None:
                 return
             region_mask = selection.region_mask
-            x, y, w, h = selection.bbox 
+            x, y, w, h = selection.bbox
 
         #remaining maska je samostatná pre každú PAINT vrstvu
         remaining = project.get_layer_damage_remaining_mask(layer.meta.id)

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
-
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QHBoxLayout, QGridLayout, QColorDialog, QToolButton, QFrame, QScrollArea
@@ -18,8 +16,8 @@ class PalettePanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
-        self._controller: Optional[object] = None
-        self._project: Optional[Project] = None
+        self._controller: object | None = None
+        self._project: Project | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -151,7 +149,7 @@ class PalettePanel(QWidget):
         old_style = w.styleSheet()
         w.setStyleSheet(old_style + "border: 2px solid red;")
 
-        def _restore():
+        def _restore() -> None:
             if isValid(w):
                 w.setStyleSheet(old_style)
 

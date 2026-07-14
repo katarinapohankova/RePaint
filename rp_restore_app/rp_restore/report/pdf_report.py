@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
-from typing import Iterable
+from collections.abc import Iterable
 
 import numpy as np
 from PIL import Image as PILImage
@@ -70,7 +70,12 @@ def generate_report(project: Project, pdf_path: str | Path, metadata: ReportMeta
     _add_result_section(story, project, styles)
     _add_layers_section(story, project, styles)
 
-    doc.build(story, onFirstPage=lambda c, d: _draw_footer(c, d, fonts), onLaterPages=lambda c, d: _draw_footer(c, d, fonts))
+    doc.build(
+        story,
+        onFirstPage=lambda c, d: _draw_footer(c, d, fonts),
+        onLaterPages=lambda c, d: _draw_footer(c, d, fonts),
+    )
+
 
 def _register_report_fonts() -> _ReportFonts:
     """

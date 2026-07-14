@@ -48,7 +48,6 @@ class GlobalUndoManager:
 
         action = self.stack.pop()
         self._apply_before(project, action)
-        action.is_undone = True
         self.redo_stack.append(action)
 
         if self.on_change is not None:
@@ -62,7 +61,6 @@ class GlobalUndoManager:
 
         action = self.redo_stack.pop()
         self._apply_after(project, action)
-        action.is_undone = False
         self.stack.append(action)
         if self.on_change is not None:
             self.on_change()
@@ -80,8 +78,10 @@ class GlobalUndoManager:
 
         action = self.stack.pop()
         self._apply_before(project, action)
-        action.is_undone = True
         self.redo_stack.append(action)
+
+        if self.on_change is not None:
+            self.on_change()
         return action
     
     def can_undo(self) -> bool:

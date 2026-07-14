@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
-
 import numpy as np
 from PySide6.QtCore import Qt
 
@@ -22,15 +20,15 @@ class BlendTool(BaseTool):
         self.is_blending: bool = False
         self.brush_size: int = self.controller.get_brush_size()
 
-        self._before_image: Optional[np.ndarray] = None
+        self._before_image: np.ndarray | None = None
 
-        self._last_x: Optional[int] = None
-        self._last_y: Optional[int] = None
+        self._last_x: int | None = None
+        self._last_y: int | None = None
 
-        self._stroke_min_x: Optional[int] = None
-        self._stroke_min_y: Optional[int] = None
-        self._stroke_max_x: Optional[int] = None
-        self._stroke_max_y: Optional[int] = None
+        self._stroke_min_x: int | None = None
+        self._stroke_min_y: int | None = None
+        self._stroke_max_x: int | None = None
+        self._stroke_max_y: int | None = None
 
     def _get_active_paint_layer(self):
         """Vráti aktívnu PAINT vrstvu alebo None"""

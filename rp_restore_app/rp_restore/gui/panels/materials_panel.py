@@ -12,7 +12,7 @@ class MaterialsPanel(QWidget):
     Panel pre nastavenie štetca, gumy, rozmazania a textúr
     """
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._controller = None
         self._selected_texture_name: str | None = None
@@ -286,10 +286,9 @@ class MaterialsPanel(QWidget):
 
         layout.addStretch(1)
 
-        #default = brush mode
+        #default je brush mode
         self._apply_mode_ui()
 
-    #prepojenie s controllerom
     def set_controller(self, controller) -> None:
         """Nastaví controller panelu"""
         self._controller = controller
@@ -306,7 +305,7 @@ class MaterialsPanel(QWidget):
 
         if hasattr(self._controller, "get_blend_source_mode"):
             self.set_blend_source_mode_value(self._controller.get_blend_source_mode())
-            
+
         #brush size
         if hasattr(self._controller, "get_brush_size"):
             self.brush_slider.blockSignals(True)
@@ -392,7 +391,7 @@ class MaterialsPanel(QWidget):
             return
         if hasattr(self._controller, "set_brush_allow_overlap"):
             self._controller.set_brush_allow_overlap(bool(checked))
-            
+
     def _on_flow_changed(self, value: int) -> None:
         if self._controller is None:
             return
@@ -463,7 +462,6 @@ class MaterialsPanel(QWidget):
         tex_enabled = self.rb_texture.isChecked()
         self.texture_controls.setVisible(tex_enabled)
 
-    #texture
     def _rebuild_textures_grid(self, project) -> None:
         self._clear_layout(self.tex_grid_layout)
 
@@ -717,7 +715,7 @@ class MaterialsPanel(QWidget):
             self._controller.edit_generated_texture_colors(self._selected_texture_name, parent=self)
 
     def _clear_generated_color_rows(self) -> None:
-        """Odstráni aktuálne zobrazené riadky generated farieb"""
+        """Odstráni aktuálne zobrazené riadky farieb vygenerovanej textúry"""
         while self.generated_colors_layout.count():
             item = self.generated_colors_layout.takeAt(0)
             widget = item.widget()
@@ -726,7 +724,7 @@ class MaterialsPanel(QWidget):
                 widget.deleteLater()
 
     def _update_generated_texture_controls_state(self) -> None:
-        """Aktualizuje ovládanie farieb generated textúry"""
+        """Aktualizuje ovládanie farieb vygenerovanej textúry"""
         if self._controller is None:
             return
 

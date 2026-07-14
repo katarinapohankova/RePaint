@@ -26,6 +26,8 @@ def estimate_correction_matrix_affine(measured_colors: np.ndarray, reference_col
         raise ValueError("reference_colors must be shape (N,3)")
     if meas.shape[0] != ref.shape[0]:
         raise ValueError("measured_colors and reference_colors must have same N")
+    if meas.shape[0] < 4:
+        raise ValueError("At least 4 color samples are required")
 
     #matica A obsahuje stĺpce [R G B 1]
     ones = np.ones((meas.shape[0], 1), dtype=np.float32)
@@ -70,5 +72,8 @@ def rms_rgb(measured: np.ndarray, reference: np.ndarray) -> float:
     """Spočíta RMS chybu medzi dvoma sadami RGB farieb"""
     meas = np.asarray(measured, dtype=np.float32)
     ref = np.asarray(reference, dtype=np.float32)
+    if meas.shape != ref.shape:
+        raise ValueError("measured and reference must have the same shape")
+
     diff = meas - ref
     return float(np.sqrt(np.mean(diff * diff)))

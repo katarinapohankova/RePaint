@@ -19,7 +19,7 @@ def _distance_to_edge(edge_remove_mask: np.ndarray) -> np.ndarray:
     return cv2.distanceTransform(inv, distanceType=cv2.DIST_L2, maskSize=3).astype(np.float32)
 
 def blend_across_edge(composited_rgb: np.ndarray, damage_mask: np.ndarray, edge_remove_mask: np.ndarray, filled_mask: np.ndarray, buffer: int) -> tuple[np.ndarray | None, np.ndarray | None]:
-    """Vytvorí plynulý farebný prechod okolo odstránenej EDGE"""
+    """Vytvorí plynulý farebný prechod okolo odstránenej EDGE hrany"""
     buffer = int(max(1, buffer))
 
     if composited_rgb.ndim != 3 or composited_rgb.shape[2] < 3:
@@ -34,7 +34,7 @@ def blend_across_edge(composited_rgb: np.ndarray, damage_mask: np.ndarray, edge_
 
     dist = _distance_to_edge(edge_remove_mask)
 
-    #zjemnňujeme iba pásmo okolo odstránenej hrany v rámci damage masky
+    #zjemňujeme iba pásmo okolo odstránenej hrany v rámci damage masky
     band = (dist <= float(buffer)) & damage_mask
     if not band.any():
         return None, None

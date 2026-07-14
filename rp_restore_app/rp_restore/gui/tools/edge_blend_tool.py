@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
-
 import cv2
 import numpy as np
 from PySide6.QtCore import Qt
@@ -29,11 +27,11 @@ class EdgeBlendTool(BaseTool):
         self.is_drawing: bool = False
         self.stroke_radius = 2
 
-        #2D maska, kade užívateľ prešiel
-        self._stroke_mask: Optional[np.ndarray] = None
+        #2D maska, kade používateľ prešiel
+        self._stroke_mask: np.ndarray | None = None
 
-        self._last_x: Optional[int] = None
-        self._last_y: Optional[int] = None
+        self._last_x: int | None = None
+        self._last_y: int | None = None
 
     def _project(self):
         """Vráti aktuálny projekt z controlleru"""
@@ -172,7 +170,7 @@ class EdgeBlendTool(BaseTool):
             self._reset()
             return
 
-        filled = project._compute_filled_mask_from_layers()
+        filled = project.compute_filled_mask_from_layers()
         if filled is None:
             self.controller.show_tool_message("Chybí maska vyplněných oblastí")
             self._reset()

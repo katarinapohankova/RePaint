@@ -82,6 +82,7 @@ class Layer:
 
         if data.dtype != self.image.dtype:
             raise ValueError("Subregion data must have same dtype as layer image.")
+
         h, w, _ = data.shape
 
         x0 = max(0, x)

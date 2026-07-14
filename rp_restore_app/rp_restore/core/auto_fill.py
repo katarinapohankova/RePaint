@@ -27,12 +27,16 @@ def auto_fill_regions(project: Project, target_layer: Layer, region_map: RegionM
         return 0
 
     composited_before = project.composited_image()
+    damage_remaining_before = project.get_layer_damage_remaining_mask(target_layer.meta.id)
+    if damage_remaining_before is None:
+        return 0
+
     #pre auto-fill použijeme jeden spoločný undo krok
     before_all = target_layer.image.copy()
     filled_count = 0
 
     for region in regions_to_fill:
-        ok = _fill_single_region(project=project, target_layer=target_layer, region_map=region_map, region_id=region.region_id, bbox=region.bbox, composited_rgb=composited_before)
+        ok = _fill_single_region(project=project, target_layer=target_layer, region_map=region_map, region_id=region.region_id, bbox=region.bbox, composited_rgb=composited_before, damage_remaining_before=damage_remaining_before)
         if ok:
             filled_count += 1
 
@@ -43,19 +47,17 @@ def auto_fill_regions(project: Project, target_layer: Layer, region_map: RegionM
     after_all = target_layer.image.copy()
     layer_h, layer_w, _ = target_layer.image.shape
     bbox_all = (0, 0, layer_w, layer_h)
-    action = UndoAction(description=f"Auto-fill {filled_count} regions", layer_id=target_layer.meta.id, layer_role=target_layer.meta.role, bbox=bbox_all, before=before_all, after=after_all)
+    action = UndoAction(description=f"Automatická výplň {filled_count} oblastí", layer_id=target_layer.meta.id, layer_role=target_layer.meta.role, bbox=bbox_all, before=before_all, after=after_all)
     project.undo_manager.push_action(action)
 
     return filled_count
 
-def _fill_single_region(project: Project, target_layer: Layer, region_map: RegionMap, region_id: int, bbox: tuple[int, int, int, int], composited_rgb: np.ndarray) -> bool:
+def _fill_single_region(project: Project, target_layer: Layer, region_map: RegionMap, region_id: int, bbox: tuple[int, int, int, int], composited_rgb: np.ndarray, damage_remaining_before: np.ndarray) -> bool:
     """Vyplní jeden región priemernou farbou z jeho okolia"""
     if project is None or target_layer.meta.role != LayerRole.PAINT:
         return False
 
-    damage_rem = project.get_layer_damage_remaining_mask(target_layer.meta.id)
-    if damage_rem is None:
-        return False
+    damage_rem = damage_remaining_before
 
     x, y, w, h = bbox
     if w <= 0 or h <= 0:
@@ -80,7 +82,7 @@ def _fill_single_region(project: Project, target_layer: Layer, region_map: Regio
     sub_target[local_mask, 0:3] = mean_color
     sub_target[local_mask, 3] = 255
 
-    project.sync_layer_filled_mask_from_alpha(target_layer.meta.id, bbox=bbox,mode="assign")
+    project.sync_layer_filled_mask_from_alpha(target_layer.meta.id, bbox=bbox, mode="assign")
 
     return True
 

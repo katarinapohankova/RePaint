@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
-
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton, QHBoxLayout, QInputDialog, QToolButton, QFrame, QSlider
@@ -36,7 +34,7 @@ class LayersPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
-        self._controller: Optional[object] = None  #ProjectController
+        self._controller: object | None = None  #ProjectController
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
@@ -73,13 +71,13 @@ class LayersPanel(QWidget):
         self.preview_image.setStyleSheet("border: 1px solid #555; background: #222;")
         layout.addWidget(self.preview_image)
 
-        self.opacity_label = QLabel("Průhlednost vrstvy:")
+        self.opacity_label = QLabel("Krytí vrstvy:")
         layout.addWidget(self.opacity_label)
 
         self.opacity_slider = QSlider(Qt.Horizontal)
         self.opacity_slider.setRange(0, 100)
         self.opacity_slider.setValue(100)
-        self.opacity_slider.setToolTip("Průhlednost aktivní vrstvy (0–100 %)")
+        self.opacity_slider.setToolTip("Krytí aktivní vrstvy (0–100 %)")
         layout.addWidget(self.opacity_slider)
 
         self.opacity_slider.valueChanged.connect(self._on_opacity_slider_changed)
@@ -101,9 +99,7 @@ class LayersPanel(QWidget):
         pix = pix.scaled(self.preview_image.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self.preview_image.setPixmap(pix)
 
-    #----------aktualizácia podľa projectu----------
-
-    def refresh_from_project(self, project: Project, active_layer_id: Optional[str]) -> None:
+    def refresh_from_project(self, project: Project, active_layer_id: str | None) -> None:
         """
         naplní zoznam podľa vrstiev v projekte
         active_layer_id: id vrstvy, ktorá má byť označená ako aktívna
@@ -191,8 +187,6 @@ class LayersPanel(QWidget):
             self.opacity_slider.setValue(val)
             self.opacity_slider.blockSignals(False)
 
-    #----------callback pri kliknutí----------
-
     def _on_selection_changed(self) -> None:
         """Nastaví kliknutú vrstvu ako aktívnu"""
         if self._controller is None:
@@ -227,7 +221,6 @@ class LayersPanel(QWidget):
         item = items[0]
         layer_id = item.data(Qt.UserRole)
 
-        # old_name = item.text()
         old_name = item.data(Qt.UserRole + 1) or ""
 
         new_name, ok = QInputDialog.getText(

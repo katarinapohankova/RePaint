@@ -7,10 +7,12 @@ from pathlib import Path
 import numpy as np
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QPixmap, QCursor, QImage
-from PySide6.QtWidgets import QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QPushButton, QRadioButton, QSpinBox, QVBoxLayout, QWidget, QScrollArea, QApplication
+from PySide6.QtGui import QColor, QCursor, QImage, QPixmap
+from PySide6.QtWidgets import QApplication, QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QPushButton, QRadioButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget
 
 from rp_restore.core.algorithm_runner import AlgorithmRunner, TextureAlgorithmParams
+
+
 MAX_COLORS = 3
 
 TEXTURE_PREVIEW_MAX_SIZE = 256
@@ -94,8 +96,6 @@ class _TextureColorRow(QWidget):
 
         self.btn_remove = QPushButton("Odstranit")
         layout.addWidget(self.btn_remove)
-        layout.addStretch(1)
-
         layout.addStretch(1)
 
         self.btn_change.clicked.connect(self._on_change_clicked)
@@ -325,7 +325,7 @@ class TextureFillDialog(QDialog):
 
         background_form.addRow(self.white_background_checkbox)
 
-        self.background_brightness_spin = (self._make_double_spin(minimum=0.0, maximum=1.0, value=1.0, step=0.05))
+        self.background_brightness_spin = self._make_double_spin(minimum=0.0, maximum=1.0, value=1.0, step=0.05)
         self.background_brightness_spin.setToolTip(
             "0 znamená černé pozadí "
             "1 znamená bílé pozadí"
@@ -584,7 +584,7 @@ class TextureFillDialog(QDialog):
         self._update_ok_button()
 
     def _connect_texture_preview_signals(self) -> None:
-        """Prepojí zmeny parametrov so stavom náhľadu."""
+        """Prepojí zmeny parametrov so stavom náhľadu"""
         self.texture_combo.currentIndexChanged.connect(self._mark_texture_preview_outdated)
 
         self.scale_x_spin.valueChanged.connect(self._mark_texture_preview_outdated)
@@ -666,7 +666,7 @@ class TextureFillDialog(QDialog):
         if preview_params is None:
             self.preview_status_label.setText(
                 "Náhled nelze vytvořit. "
-                "Zkontrolujte model a zvolené barvy"
+                "Zkontrolujte model a zvolené barvy."
             )
             return
 
@@ -687,8 +687,6 @@ class TextureFillDialog(QDialog):
                 f"{preview_params.height} px)."
             )
         except Exception as error:
-            print("Texture preview generation error:", error)
-
             self._preview_is_current = False
             self.result_preview_label.setPixmap(QPixmap())
             self.result_preview_label.setText("Náhled se nepodařilo vygenerovat")
@@ -701,7 +699,7 @@ class TextureFillDialog(QDialog):
         """Zobrazí RGB alebo RGBA výsledok v preview prvku"""
         array = np.asarray(image)
 
-        if (array.ndim != 3 or array.shape[2] not in (3, 4)):
+        if array.ndim != 3 or array.shape[2] not in (3, 4):
             raise ValueError("Náhled textury má neplatný formát")
 
         if array.dtype != np.uint8:

@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+import os
+import shutil
+import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Callable, List, Optional
 
 import numpy as np
-import os
-import uuid
-import shutil
 
 from rp_restore.io import image_io
 
@@ -21,25 +21,11 @@ class RealisticFillMode(str, Enum):
     BASIC = "basic"
     GUIDED = "guided"
 
-@dataclass
-class AlgorithmRequest:
-    original_image: np.ndarray  #(H, W, 3) alebo (H, W, 4)
-    current_image: np.ndarray   #(H, W, 3) alebo (H, W, 4)
-    selected_mask: np.ndarray   #2Dbool, rovnaký tvar ako obraz
-    remaining_mask: np.ndarray  #2D bool
-    algorithm_type: AlgorithmType
-    window_bbox: tuple[int,int,int,int] | None = None #(x,y,w,h) pre realistic
-    device: str = "cpu" # "cpu" | "cuda"
-    mock: bool = False  #True = nepúšťaj subprocess, sprav demo výstup
-    partial_noise: float = 0.7
-    seed: Optional[int] = None
-    realistic_mode: RealisticFillMode = RealisticFillMode.BASIC
-    progress_callback: Optional[Callable[[str, Optional[int], Optional[int]], None]] = None
-    texture_params: Optional[TextureAlgorithmParams] = None
 
 @dataclass
 class TextureAlgorithmParams:
     """Parametre odovzdávané textúrovému algoritmu"""
+
     texture_name: str = "texture_J"
 
     colors: list[tuple[int, int, int]] | None = None
@@ -59,53 +45,60 @@ class TextureAlgorithmParams:
     width: int = 1024
     height: int = 1024
 
-    seed: Optional[int] = 42
+    seed: int | None = 42
+
+
+@dataclass
+class AlgorithmRequest:
+    """Vstupné dáta a nastavenia pre spustenie algoritmu"""
+
+    original_image: np.ndarray  #(H, W, 3) alebo (H, W, 4)
+    current_image: np.ndarray  #(H, W, 3) alebo (H, W, 4)
+    selected_mask: np.ndarray  #2D bool, rovnaký tvar ako obraz alebo výrez
+    remaining_mask: np.ndarray  #2D bool
+    algorithm_type: AlgorithmType
+    window_bbox: tuple[int, int, int, int] | None = None  #(x, y, w, h) pre realistic fill
+    device: str = "cpu"  #"cpu" alebo "cuda"
+    mock: bool = False
+    partial_noise: float = 0.7
+    seed: int | None = None
+    realistic_mode: RealisticFillMode = RealisticFillMode.BASIC
+    progress_callback: Callable[[str, int | None, int | None], None] | None = None
+    texture_params: TextureAlgorithmParams | None = None
 
 
 @dataclass
 class AlgorithmResult:
-    output_patch: np.ndarray    #(h, w, 4) RGBA
-    bbox: tuple[int, int, int, int]     #(x, y, w, h)
-    log_messages: List[str]
+    """Výsledný patch algoritmu a sprievodné log správy"""
+
+    output_patch: np.ndarray  #(h, w, 4) RGBA
+    bbox: tuple[int, int, int, int]  #(x, y, w, h)
+    log_messages: list[str]
 
 class RemoteRestorationAccessError(RuntimeError):
     """
-    Chyba prístupových údajov alebo endpointu remote služby.
-
-    Používa sa na odlíšenie zle zadaného API kľúča / endpoint URL
-    od bežných chýb algoritmu.
+    Chyba prístupových údajov alebo endpointu remote služby
+    používa sa na odlíšenie zlého API kľúča alebo endpoint URL od bežných chýb algoritmu
     """
 
 class AlgorithmRunner:
     """
-    Spúšťa externé algoritmy
+    Spúšťa externé algoritmy používané aplikáciou
 
-    CLI argumenty:
-      --input_image <path>   #current_image
-      --mask_selected   <path>   #binárna maska vybratej oblasti
-      --mask_all    <path>   #binárna maska všetkých zostávajúcich poškodených miest
-      --output  <path>   #výstupný obrázok (celý obraz alebo len patch)
-      --device  cpu|cuda
-      --mock    (voliteľný prepínač)
-
-    predpokladáme, že výstup je obrázok rovnakého rozmeru ako input_image
-    z neho vyrežeme patch podľa bbox vypočítaného zo selected_mask
+    Realistické doplnenie sa spúšťa cez remote klienta painting_inpaint.remote
+    Texturové doplnenie sa spúšťa cez lokálne nainštalovaný balík texture_infill
+    Mock režim vytvára jednoduchý farebný výstup bez volania externého algoritmu
     """
 
-    #toto sa musí prispôsobiť algoritmom
-    # REALISTIC_CMD = ["python", "realistic_inpaint.py"]
-    # TEXTURE_CMD = ["python", "texture_inpaint.py"]
     _REMOTE_REALISTIC_MAX_PIXELS = 2_073_600
     _REMOTE_REALISTIC_PROMPT = "DURER_RESTO"
     _REMOTE_REALISTIC_NUM_INFERENCE_STEPS = 30
     _REMOTE_REALISTIC_GUIDANCE_SCALE = 30.0
     _REMOTE_REALISTIC_LORA_SCALE = 1.0
 
-    # REALISTIC_CMD = [sys.executable, str(_ALGO_DIR / "realistic_inpaint.py")]  # zatiaľ placeholder
-    # TEXTURE_CMD = [sys.executable, str(_ALGO_DIR / "texture_inpaint.py")]
-
     @classmethod
     def run(cls, request: AlgorithmRequest) -> AlgorithmResult:
+        """Spustí algoritmus podľa typu requestu"""
         if request.mock:
             return cls._run_mock(request)
 
@@ -114,30 +107,26 @@ class AlgorithmRunner:
         if request.algorithm_type == AlgorithmType.TEXTURE:
             return cls._run_texture_generator(request)
 
-        raise ValueError(f"Unsupported algorithm type: " f"{request.algorithm_type}")
+        raise ValueError(f"Unsupported algorithm type: {request.algorithm_type}")
 
-    #MOCK režim 
     @classmethod
     def _run_mock(cls, request: AlgorithmRequest) -> AlgorithmResult:
         """
-        nevolá externý skript, ale
-          - vezme current_image
-          - podľa typu algoritmu vyberie farbu na zafarbenie (realistic -hnedá, texture -zelená)
-          - a vyplní vybranú oblasť tou farbou
+        Vytvorí jednoduchý demo výstup bez volania externého algoritmu
+        realistic fill použije hnedú farbu, texture fill použije zelenú farbu
         """
         current = cls._ensure_rgb(request.current_image)
         h, w, _ = current.shape
 
         sel = request.selected_mask
 
-        #mock pre REALISTIC (s window_bbox)
+        #mock pre REALISTIC s ručne zvoleným oknom
         if request.algorithm_type == AlgorithmType.REALISTIC and request.window_bbox is not None:
             x, y, ww, wh = request.window_bbox
             if ww <= 0 or wh <= 0:
                 empty = np.zeros((1, 1, 4), dtype=np.uint8)
                 return AlgorithmResult(output_patch=empty, bbox=(0, 0, 1, 1), log_messages=["MOCK invalid window_bbox"])
 
-            #hnedá farba 
             rgb_color = np.array([150, 100, 60], dtype=np.uint8)
 
             patch_rgba = np.zeros((wh, ww, 4), dtype=np.uint8)
@@ -158,12 +147,9 @@ class AlgorithmRunner:
         x_max = int(xs.max())
         bbox = (x_min, y_min, x_max - x_min + 1, y_max - y_min + 1)
 
-        #farby podľa typu algoritmu
         if request.algorithm_type == AlgorithmType.REALISTIC:
-            #hnedá
             rgb_color = np.array([150, 100, 60], dtype=np.uint8)
         else:
-            #zelená 
             rgb_color = np.array([60, 150, 90], dtype=np.uint8)
 
         patch_h = bbox[3]
@@ -185,7 +171,7 @@ class AlgorithmRunner:
     @staticmethod
     def get_available_texture_names() -> list[str]:
         """
-        Vráti názvy modelov, ktoré sú dostupné v nainštalovanom balíku texture-infill
+        Vráti názvy modelov dostupných v nainštalovanom balíku texture_infill
         """
         try:
             from importlib.resources import files
@@ -285,24 +271,12 @@ class AlgorithmRunner:
                 f"Texture: {texture_params.texture_name}",
                 f"Colors: {arguments.colors}",
                 f"Color strengths: {arguments.color_strengths}",
-                (
-                    f"Scale: "
-                    f"({arguments.scale_x}, {arguments.scale_y})"
-                ),
-                (
-                    f"Density: "
-                    f"({arguments.density_x}, {arguments.density_y})"
-                ),
+                f"Scale: ({arguments.scale_x}, {arguments.scale_y})",
+                f"Density: ({arguments.density_x}, {arguments.density_y})",
                 f"Rotation: {arguments.rotation}",
                 f"Global scale: {arguments.global_scale}",
-                (
-                    f"Opaque background: "
-                    f"{arguments.white_background}"
-                ),
-                (
-                    f"Background brightness: "
-                    f"{arguments.background_brightness}"
-                ),
+                f"Opaque background: {arguments.white_background}",
+                f"Background brightness: {arguments.background_brightness}",
                 f"Seed: {arguments.seed}",
             ],
         )
@@ -352,10 +326,7 @@ class AlgorithmRunner:
             colors=normalized_colors,
             color_strengths=normalized_strengths,
             white_background=bool(texture_params.white_background),
-            background_brightness=max(
-                0.0,
-                min(1.0, float(texture_params.background_brightness)),
-            ),
+            background_brightness=max(0.0, min(1.0, float(texture_params.background_brightness))),
             generate_square=generate_square,
             width=int(texture_params.width),
             height=int(texture_params.height),
@@ -375,7 +346,7 @@ class AlgorithmRunner:
             cache_dir = Path(cache_dir_env)
         else:
             base_dir = Path(os.environ.get("LOCALAPPDATA", Path.home()))
-            cache_dir = (base_dir / "RP-Restore" / "numba_cache")
+            cache_dir = base_dir / "RP-Restore" / "numba_cache"
             os.environ["NUMBA_CACHE_DIR"] = str(cache_dir)
 
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -383,7 +354,7 @@ class AlgorithmRunner:
     @staticmethod
     def _call_texture_infill(image: np.ndarray, mask: np.ndarray, arguments) -> np.ndarray:
         """
-        Zavolá verejnú funkciu generate_infill z nainštalovaného balíka
+        Zavolá verejnú funkciu generate_infill z nainštalovaného balíka texture_infill
         """
         AlgorithmRunner._ensure_numba_cache_dir()
 
@@ -402,15 +373,14 @@ class AlgorithmRunner:
     @staticmethod
     def _normalize_texture_output(output: np.ndarray, expected_height: int, expected_width: int) -> np.ndarray:
         """
-        Skontroluje výstup algoritmu a prevedie ho na RGBA uint8
+        Skontroluje výstup textúrového algoritmu a prevedie ho na RGBA uint8
         """
         arr = np.asarray(output)
 
         if arr.ndim != 3 or arr.shape[:2] != (expected_height, expected_width):
             raise RuntimeError(
                 "Texture algorithm returned invalid output shape: "
-                f"{arr.shape}; expected "
-                f"({expected_height}, {expected_width})"
+                f"{arr.shape}; expected ({expected_height}, {expected_width})"
             )
 
         if arr.dtype != np.uint8:
@@ -421,10 +391,8 @@ class AlgorithmRunner:
 
         if arr.shape[2] == 3:
             rgba = np.zeros((expected_height, expected_width, 4), dtype=np.uint8)
-
             rgba[..., :3] = arr
             rgba[..., 3] = 255
-
             return rgba
 
         raise RuntimeError(f"Texture algorithm returned an unsupported number of channels: {arr.shape[2]}")
@@ -432,8 +400,7 @@ class AlgorithmRunner:
     @staticmethod
     def _looks_like_remote_access_error(error: Exception) -> bool:
         """
-        Rozpozná chyby, ktoré pravdepodobne znamenajú zlý API key,
-        zlý endpoint alebo problém s autorizáciou remote služby.
+        Rozpozná chyby, ktoré pravdepodobne znamenajú zlý API key, zlý endpoint alebo problém s autorizáciou remote služby
         """
         text = f"{type(error).__name__}: {error}".lower()
 
@@ -460,15 +427,15 @@ class AlgorithmRunner:
     @classmethod
     def _run_remote_realistic(cls, request: AlgorithmRequest) -> AlgorithmResult:
         """
-        Spustí realistické doplnenie cez remote klienta painting_inpaint.remote.
+        Spustí realistické doplnenie cez remote klienta painting_inpaint.remote
 
-        V request.current_image očakávame iba výsek obrazu.
-        V request.selected_mask očakávame výsek masky rovnakého rozmeru.
-        request.window_bbox sa používa iba interne, aby aplikácia vedela vrátiť patch na správne miesto.
+        V request.current_image sa očakáva iba výrez obrazu.
+        V request.selected_mask sa očakáva výrez masky rovnakého rozmeru.
+        request.window_bbox sa používa na vloženie výsledného patchu späť do obrazu.
 
-        Podporované sú dva režimy:
-        - BASIC: pôvodný rýchlejší fill model, volá restore_file()
-        - GUIDED: pomalší model vedený štruktúrou/náčrtom, volá restore_guided_file()
+        Podporované režimy:
+        - BASIC: rýchlejší fill model, volá restore_file()
+        - GUIDED: pomalší model vedený štruktúrou alebo náčrtom, volá restore_guided_file()
         """
         if request.window_bbox is None:
             raise ValueError("REALISTIC algorithm requires request.window_bbox")
@@ -495,11 +462,9 @@ class AlgorithmRunner:
         partial_noise = max(0.0, min(1.0, float(request.partial_noise)))
 
         try:
-            from painting_inpaint.remote import RestorationClient, RemoteRestorationError
+            from painting_inpaint.remote import RemoteRestorationError, RestorationClient
         except ImportError as e:
-            raise RuntimeError(
-                "Balík painting-inpaint-remote není nainstalovaný "
-            ) from e
+            raise RuntimeError("Balík painting-inpaint-remote není nainstalovaný") from e
 
         base_tmp = Path(os.environ.get("LOCALAPPDATA", ".")) / "RP-Restore" / "tmp"
         base_tmp.mkdir(parents=True, exist_ok=True)
@@ -507,7 +472,7 @@ class AlgorithmRunner:
         tmpdir_path = base_tmp / f"remote_realistic_{uuid.uuid4().hex}"
         tmpdir_path.mkdir(parents=True, exist_ok=True)
 
-        log_msgs: List[str] = []
+        log_msgs: list[str] = []
 
         try:
             input_patch_path = tmpdir_path / "input_patch.png"
@@ -518,8 +483,7 @@ class AlgorithmRunner:
 
             def _on_progress(event) -> None:
                 """
-                Callback pre priebežné hlášky z algoritmu
-                Zatiaľ ich len ukladáme do logu výsledku
+                Uloží priebežnú hlášku z remote algoritmu a pošle ju späť controlleru
                 """
                 message = getattr(event, "message", None)
                 current_step = getattr(event, "current", None)
@@ -572,7 +536,7 @@ class AlgorithmRunner:
 
             if output_img.shape[0] != ph or output_img.shape[1] != pw:
                 raise RuntimeError(
-                    f"Remote realistic output has wrong size "
+                    "Remote realistic output has wrong size. "
                     f"Expected ({ph}, {pw}), got {output_img.shape[:2]}"
                 )
 
@@ -595,10 +559,11 @@ class AlgorithmRunner:
 
         finally:
             shutil.rmtree(tmpdir_path, ignore_errors=True)
+
     @staticmethod
     def _ensure_rgb(image: np.ndarray) -> np.ndarray:
         """
-        zabezpečí, že obraz je (H, W, 3) RGB, uint8
+        Zabezpečí, že obraz je RGB uint8 pole tvaru (H, W, 3)
         """
         arr = image
         if arr.ndim != 3:
@@ -606,8 +571,10 @@ class AlgorithmRunner:
 
         if arr.shape[2] == 4:
             arr = arr[..., :3]
+        elif arr.shape[2] != 3:
+            raise ValueError("Expected RGB or RGBA image array")
 
         if arr.dtype != np.uint8:
-            arr = arr.astype(np.uint8)
+            arr = np.clip(arr, 0, 255).astype(np.uint8)
 
         return arr

@@ -26,8 +26,8 @@ class BaseTool:
         margin = max(1, int(radius))
         x_min = min(x0, x1) - margin
         y_min = min(y0, y1) - margin
-        x_max = max(x0, x1) + margin
-        y_max = max(y0, y1) + margin
+        x_max = max(x0, x1) + margin + 1
+        y_max = max(y0, y1) + margin + 1
 
         w = x_max - x_min
         h = y_max - y_min

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
-import json
+from typing import ClassVar
+
 
 @dataclass
 class AppSettings:
@@ -11,8 +13,8 @@ class AppSettings:
     """
 
     #súbor s nastaveniami je uložený v domovskom priečinku používateľa
-    SETTINGS_DIR: Path = Path.home() / ".rp_restore"
-    SETTINGS_FILE: Path = SETTINGS_DIR / "settings.json"
+    SETTINGS_DIR: ClassVar[Path] = Path.home() / ".rp_restore"
+    SETTINGS_FILE: ClassVar[Path] = SETTINGS_DIR / "settings.json"
 
     recent_projects: list[str] = field(default_factory=list)
 
@@ -44,11 +46,11 @@ class AppSettings:
                 encoding="utf-8",
             )
         except Exception:
-            #pri problémoch ignorujeme
+            #chyba uloženia nesmie zhodiť celú aplikáciu
             pass
 
     def add_recent_project(self, path: str) -> None:
-        """Pridá projekt na začiatok zoznamu naposledy otvrených projektov"""
+        """Pridá projekt na začiatok zoznamu naposledy otvorených projektov"""
         if path in self.recent_projects:
             self.recent_projects.remove(path)
         self.recent_projects.insert(0, path)
@@ -58,6 +60,6 @@ class AppSettings:
         self.save()
 
     def get_recent_projects(self) -> list[str]:
-        """vráti kópiu zoznamu naposledy otvorených projektov"""
+        """Vráti kópiu zoznamu naposledy otvorených projektov"""
         return list(self.recent_projects)
     

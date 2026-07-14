@@ -127,7 +127,7 @@ class AlgorithmPanel(QWidget):
             rotation=result.rotation,
             global_scale=result.global_scale,
             white_background=result.white_background,
-            background_brightness=(result.background_brightness),
+            background_brightness=result.background_brightness,
             generate_square=result.generate_square,
             width=result.width,
             height=result.height,

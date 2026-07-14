@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Sequence, Tuple
+from collections.abc import Sequence
 
 import cv2
 import numpy as np
@@ -28,23 +28,27 @@ def compute_homography(src_points: Sequence[Point], dst_points: Sequence[Point])
     return H
 
 
-def warp_mask_to_image(mask_rgb: np.ndarray, H: np.ndarray, target_size: Tuple[int, int]) -> np.ndarray:
+def warp_mask_to_image(mask_rgb: np.ndarray, H: np.ndarray, target_size: tuple[int, int]) -> np.ndarray:
     """
     Aplikuje homografiu H na masku a vracia ju v rozlíšení cieľového obrazu
     """
-    #mask_rgb -np.ndarray (H, W, 3) alebo (H, W, 4)
-    if mask_rgb.ndim != 3:
+    if mask_rgb.ndim != 3 or mask_rgb.shape[2] not in (3, 4):
         raise ValueError("mask_rgb must be an RGB/RGBA image (H, W, C)")
 
-    #target_size je vo formáte (width, height)
-    h = target_size[1]
-    w = target_size[0]
+    H = np.asarray(H, dtype=np.float64)
+    if H.shape != (3, 3):
+        raise ValueError("H must be a 3x3 homography matrix")
+
+    #target_size je vo formáte (width, height), rovnako ako očakáva OpenCV
+    w, h = target_size
+    if w <= 0 or h <= 0:
+        raise ValueError("target_size must contain positive width and height")
 
     #ak je RGBA, odstránime alfu
     if mask_rgb.shape[2] == 4:
         mask_rgb = mask_rgb[..., :3]
 
-    warped = cv2.warpPerspective(mask_rgb, H, (w, h), flags=cv2.INTER_LINEAR)
+    warped = cv2.warpPerspective(mask_rgb, H, (int(w), int(h)), flags=cv2.INTER_LINEAR)
     warped = np.clip(warped, 0, 255).astype(np.uint8)
     return warped
 

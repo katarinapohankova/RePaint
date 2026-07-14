@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 
-from rp_restore.gui.tools.base_tool import BaseTool
 from rp_restore.core.layers import LayerRole
+from rp_restore.gui.tools.base_tool import BaseTool
 
 
 class LassoTool(BaseTool):

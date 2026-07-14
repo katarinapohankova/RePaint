@@ -80,7 +80,7 @@ def save_remote_restoration_config(endpoint_url: str, api_key: str) -> None:
         raise RemoteRestorationConfigError("Endpoint URL nesmí být prázdná")
 
     if not api_key:
-        raise RemoteRestorationConfigError("API key nesmí být prázdný")
+        raise RemoteRestorationConfigError("API klíč nesmí být prázdný")
 
     keyring = _get_keyring()
 

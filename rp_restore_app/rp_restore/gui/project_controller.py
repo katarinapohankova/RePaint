@@ -473,7 +473,6 @@ class ProjectController:
         try:
             texture_image = (AlgorithmRunner.generate_texture_material(texture_params))
         except Exception as error:
-            print("Texture generation error:", error)
             self.show_tool_message(f"Texturu se nepodařilo vygenerovat: {error}")
             return None
         finally:
@@ -1705,7 +1704,7 @@ class ProjectController:
             result = dlg.exec()
 
             if result != QDialog.Accepted:
-                raise RuntimeError("Mask alignment was cancelled by the user")
+                raise RuntimeError("Zarovnání masky bylo zrušeno uživatelem")
             
             image_points, mask_points = dlg.get_points()
             H = mask_alignment.compute_homography(src_points=mask_points, dst_points=image_points)
@@ -1933,7 +1932,6 @@ class ProjectController:
         try:
             result = AlgorithmRunner.run(request)
         except Exception as error:
-            print("Algorithm error:", error)
             self.show_tool_message(f"Chyba algoritmu: {error}")
             return
         finally:
@@ -2371,7 +2369,7 @@ class ProjectController:
         project = getattr(self, "project", None)
         if ts is None or getattr(ts, "texture", None) is None or project is None:
             #fallback na normálny brush kurzor
-            rgba = tuple(int(x) for x in self.get_current_color_rgba().tolist())
+            rgba = tuple(int(x) for x in self.get_current_color_rgba()[:4])
             return self._make_brush_cursor(radius_img_px, rgba)
 
         r_img = int(radius_img_px)
@@ -2394,7 +2392,7 @@ class ProjectController:
         vis = max(0.02, vis)  #minimum
 
         cur_color = self.get_current_color_rgba()
-        r, g, b, a = [int(x) for x in cur_color.tolist()]
+        r, g, b, a = [int(x) for x in cur_color[:4]]
         key = (
             "texture_cursor",
             size_img,
@@ -2477,7 +2475,7 @@ class ProjectController:
         d = 2 * r_screen + 1
 
         col_arr = self.get_edge_color_rgba()
-        r, g, b, a = [int(x) for x in col_arr.tolist()]
+        r, g, b, a = [int(x) for x in col_arr[:4]]
         key = ("edge", d, r, g, b, a)
         if key in self._cursor_cache:
             return self._cursor_cache[key]

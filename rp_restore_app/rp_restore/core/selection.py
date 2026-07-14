@@ -57,7 +57,7 @@ class SelectionSet:
 
     def combined_bbox(self) -> tuple[int, int, int, int]:
         """
-        vráti najmenší bbox, ktorý pokrýva všetky vybrané oblasti
+        Vráti najmenší bbox, ktorý pokrýva všetky vybrané oblasti
         """
         if self.is_empty():
             return 0, 0, 0, 0
@@ -91,5 +91,5 @@ class SelectionSet:
         self.selections.append(sel)
 
     def remove_by_region_id(self, region_id: int) -> None:
-        """Odstráni z výberu oblast so zadaným region_id"""
+        """Odstráni z výberu oblasť so zadaným region_id"""
         self.selections = [sel for sel in self.selections if sel.region_id != region_id]

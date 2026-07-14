@@ -9,6 +9,7 @@ import numpy as np
 from .overlay_highlight import draw_selection_highlight
 from rp_restore.core.regions import RegionMap
 
+
 class ImageCanvasWidget(QWidget):
     """
     Widget hlavného canvasu

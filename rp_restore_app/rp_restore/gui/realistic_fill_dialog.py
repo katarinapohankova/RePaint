@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
-
-from PySide6.QtWidgets import QDialog, QRadioButton, QVBoxLayout, QLabel, QHBoxLayout, QDialogButtonBox, QDoubleSpinBox, QSpinBox, QCheckBox, QButtonGroup
+from PySide6.QtWidgets import QButtonGroup, QCheckBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QHBoxLayout, QLabel, QRadioButton, QSpinBox, QVBoxLayout
 
 from rp_restore.core.algorithm_runner import RealisticFillMode
 
@@ -16,7 +14,7 @@ class RealisticFillDialogResult:
     bbox: tuple[int, int, int, int]  #(x, y, w, h)
     use_mock: bool
     partial_noise: float
-    seed: Optional[int]
+    seed: int | None
     realistic_mode: RealisticFillMode
 
 
@@ -32,8 +30,8 @@ class RealisticFillDialog(QDialog):
         self.setWindowTitle("Realistické doplnění – nastavení okna")
 
         self._controller = controller
-        self._bbox: Optional[tuple[int, int, int, int]] = None
-        self._use_mock: bool = False 
+        self._bbox: tuple[int, int, int, int] | None = None
+        self._use_mock: bool = False
 
         layout = QVBoxLayout(self)
 
@@ -142,6 +140,8 @@ class RealisticFillDialog(QDialog):
         self.seed_checkbox.toggled.connect(self.seed_spin.setEnabled)
 
         self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.buttons.button(QDialogButtonBox.Ok).setText("Spustit")
+        self.buttons.button(QDialogButtonBox.Cancel).setText("Zrušit")
         layout.addWidget(self.buttons)
 
         self.buttons.accepted.connect(self.accept)
@@ -153,12 +153,12 @@ class RealisticFillDialog(QDialog):
 
         self._update_ok_enabled()
 
-    def get_result(self) -> Optional[RealisticFillDialogResult]:
+    def get_result(self) -> RealisticFillDialogResult | None:
         """Vráti nastavenia dialógu alebo None, ak nie je zvolené okno"""
         if self._bbox is None:
             return None
         
-        seed: Optional[int]
+        seed: int | None
         if self.seed_checkbox.isChecked():
             seed = int(self.seed_spin.value())
         else:
@@ -166,7 +166,13 @@ class RealisticFillDialog(QDialog):
 
         realistic_mode = RealisticFillMode.GUIDED if self.guided_mode_radio.isChecked() else RealisticFillMode.BASIC
 
-        return RealisticFillDialogResult(bbox=self._bbox, use_mock=self._use_mock, partial_noise=float(self.partial_noise_spin.value()), seed=seed, realistic_mode=realistic_mode)
+        return RealisticFillDialogResult(
+            bbox=self._bbox,
+            use_mock=self._use_mock,
+            partial_noise=float(self.partial_noise_spin.value()),
+            seed=seed,
+            realistic_mode=realistic_mode,
+        )
 
     def _update_ok_enabled(self) -> None:
         """Povolí OK až po zvolení okna"""

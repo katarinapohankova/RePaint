@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from typing import Optional
-
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout, QSpinBox, QPushButton, QColorDialog 
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout, QSpinBox, QPushButton, QColorDialog
 
 class EdgeSettingsPanel(QWidget):
     """
@@ -17,7 +15,7 @@ class EdgeSettingsPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
 
-        self._controller: Optional[object] = None
+        self._controller: object | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
@@ -63,8 +61,6 @@ class EdgeSettingsPanel(QWidget):
         self.spin_blend_width.valueChanged.connect(self._on_blend_width_changed)
         self.spin_blend_width.editingFinished.connect(self._on_blend_width_editing_finished)
 
-    #prepojenie s controllerom
-
     def set_controller(self, controller: object) -> None:
         """Nastaví controller a načíta z neho aktuálne hodnoty"""
         self._controller = controller
@@ -86,7 +82,7 @@ class EdgeSettingsPanel(QWidget):
             self.spin_blend_width.blockSignals(False)
 
         color_arr = controller.get_edge_color_rgba()
-        r, g, b, a = [int(x) for x in color_arr.tolist()]
+        r, g, b, a = [int(x) for x in color_arr[:4]]
         self._set_swatch_color(QColor(r, g, b, a))
 
 
@@ -97,8 +93,6 @@ class EdgeSettingsPanel(QWidget):
             "border: 1px solid #333;"
         )
 
-    #---reakcie na UI---
-
     def _on_change_color_clicked(self) -> None:
         """Otvorí dialóg na výber edge farby"""
         if self._controller is None:
@@ -108,7 +102,7 @@ class EdgeSettingsPanel(QWidget):
             return
 
         arr = self._controller.get_edge_color_rgba()
-        r, g, b, a = [int(x) for x in arr.tolist()]
+        r, g, b, a = [int(x) for x in arr[:4]]
         initial = QColor(r, g, b, a)
 
         color = QColorDialog.getColor(initial, self, "Vyberte barvu hran")
@@ -133,7 +127,7 @@ class EdgeSettingsPanel(QWidget):
             return
 
         arr = self._controller.get_current_color_rgba()
-        r, g, b, a = [int(x) for x in arr.tolist()]
+        r, g, b, a = [int(x) for x in arr[:4]]
 
         if hasattr(self._controller, "set_edge_color_rgba"):
             self._controller.set_edge_color_rgba((r, g, b, a))
@@ -148,7 +142,7 @@ class EdgeSettingsPanel(QWidget):
             return
 
         arr = self._controller.get_edge_color_rgba()
-        r, g, b, a = [int(x) for x in arr.tolist()]
+        r, g, b, a = [int(x) for x in arr[:4]]
 
         if hasattr(self._controller, "add_color_to_palette_rgba"):
             self._controller.add_color_to_palette_rgba((r, g, b, a), avoid_duplicates=True)
@@ -163,7 +157,7 @@ class EdgeSettingsPanel(QWidget):
 
     def _on_blend_width_editing_finished(self) -> None:
         """
-        po potvrdení hodnoty Enterom alebo stratou focus vrátime focus na canvas, aby zase fungovali klávesové skratky
+        Po potvrdení hodnoty Enterom alebo stratou focus vrátime focus na canvas, aby zase fungovali klávesové skratky
         """
         if self._controller is None:
             return

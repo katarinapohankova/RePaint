@@ -1,15 +1,10 @@
 from __future__ import annotations
-from typing import Optional
-
-import numpy as np
 from pathlib import Path
 from PySide6.QtCore import Qt, QTimer, QSize
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QCloseEvent
 from PySide6.QtWidgets import QApplication, QDialog, QHBoxLayout, QMainWindow, QSizePolicy, QSlider, QSpinBox, QStatusBar, QMessageBox, QDockWidget, QToolBar, QFileDialog, QLabel, QAbstractButton, QScrollArea, QWidget, QWidgetAction, QProgressBar
 
 from rp_restore.config.settings import AppSettings
-from rp_restore.core.layers import Layer, LayerMeta, LayerRole
-from rp_restore.core.project_model import Project
 from rp_restore.core.remote_restoration_config import has_remote_restoration_config
 from rp_restore.gui.remote_restoration_settings_dialog import RemoteRestorationSettingsDialog
 from rp_restore.gui.canvas.image_canvas_widget import ImageCanvasWidget
@@ -26,9 +21,8 @@ from rp_restore.report.report_dialog import ReportDialog
 
 class MainWindow(QMainWindow):
     """
-    hlavné okno aplikácie
-    - pri štarte zobrazuje StartScreenWidget
-    - po vytvorení/otvorení projektu zobrazuje canvas
+    Hlavné okno aplikácie
+    pri štarte zobrazuje úvodnú obrazovku a po otvorení projektu pracovnú plochu s canvasom a panelmi
     """
 
     def __init__(self, app_settings: AppSettings, parent=None) -> None:
@@ -40,24 +34,20 @@ class MainWindow(QMainWindow):
 
         self.app_settings = app_settings
 
-        #controller
+        #controller spravuje projekt, nástroje a prepojenie s panelmi
         self.controller = ProjectController(app_settings=self.app_settings)
         self.controller.set_undo_redo_changed_callback(self.update_undo_redo_actions)
 
-        #workspace canvas
-        # self.canvas = ImageCanvasWidget(self)
-        # self.controller.set_canvas(self.canvas)
-        # self.canvas.set_controller(self.controller)
-        self.canvas = None
+        self.canvas: ImageCanvasWidget | None = None
         self.controller.set_message_callback(self._show_tool_message)
         self.controller.set_brush_size_preview_callback(self._show_brush_size_preview)
         self.setDockNestingEnabled(True)
 
-        #autofill
+        #nastavenie limitu pre auto-fill malé oblasti
         self.auto_fill_slider: QSlider | None = None
         self.auto_fill_spinbox: QSpinBox | None = None
 
-        #layers panel
+        #ľavé panely
         self.layers_panel = LayersPanel(self)
         self.layers_dock = QDockWidget("Vrstvy", self)
         self.layers_dock.setObjectName("LayersDock")
@@ -72,14 +62,13 @@ class MainWindow(QMainWindow):
 
         self.splitDockWidget(self.layers_dock, self.palette_dock, Qt.Vertical)
 
-        #algorithm panel 
+        #pravé panely
         self.algorithm_panel = AlgorithmPanel(self)
-        self.algorithm_dock = QDockWidget("Externé algoritmy", self)
+        self.algorithm_dock = QDockWidget("Externí algoritmy", self)
         self.algorithm_dock.setObjectName("AlgorithmDock")
         self.algorithm_dock.setWidget(self.algorithm_panel)
         self.addDockWidget(Qt.RightDockWidgetArea, self.algorithm_dock)
 
-        #edge nastavenia panel
         self.edge_settings_panel = EdgeSettingsPanel(self)
         self.edge_settings_dock = QDockWidget("Hrany", self)
         self.edge_settings_dock.setObjectName("EdgeSettingsDock")
@@ -88,7 +77,7 @@ class MainWindow(QMainWindow):
 
         self.materials_panel = MaterialsPanel(self)
         self.materials_scroll = QScrollArea(self)
-        self.materials_scroll. setWidgetResizable(True)
+        self.materials_scroll.setWidgetResizable(True)
         self.materials_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.materials_scroll.setWidget(self.materials_panel)
         self.materials_dock = QDockWidget("Materiály", self)
@@ -96,36 +85,31 @@ class MainWindow(QMainWindow):
         self.materials_dock.setWidget(self.materials_scroll)
         self.addDockWidget(Qt.RightDockWidgetArea, self.materials_dock)
 
-        #prepojenie controller - layers_panel
+        #prepojenie controlleru s panelmi
         self.controller.set_layers_panel(self.layers_panel)
         self.controller.set_algorithm_panel(self.algorithm_panel)
         self.controller.set_edge_settings_panel(self.edge_settings_panel)
         self.controller.set_materials_panel(self.materials_panel)
         self.controller.set_palette_panel(self.palette_panel)
 
-        #na začiatku (start screen) dock schováme
+        #na úvodnej obrazovke sú pracovné panely skryté
         self.layers_dock.hide()
         self.algorithm_dock.hide()
         self.edge_settings_dock.hide()
         self.palette_dock.hide()
+        self.materials_dock.hide()
 
         self.layers_panel.visibility_changed.connect(self.controller.on_layer_visibility_changed)
         self.layers_panel.delete_layer_requested.connect(self._on_delete_layer_requested)
         self.layers_panel.opacity_changed.connect(self.controller.on_layer_opacity_changed)
 
-        #start screen
-        self.start_screen = None
-        # self.start_screen = StartScreenWidget(self)
-        # self.start_screen.set_recent_projects(self.app_settings.get_recent_projects())
-        # self.start_screen.new_project_requested.connect(self.on_new_project_from_image)
-        # self.start_screen.open_project_requested.connect(self.on_open_project_requested)
-        # self.start_screen.open_recent_requested.connect(self.on_open_recent_requested)
+        self.start_screen: StartScreenWidget | None = None
 
         self.current_tool_name: str | None = None
-        #začíname na start screene
+        #začíname na úvodnej obrazovke
         self.show_start_screen()
 
-        #menu, status bar
+        #menu, toolbar a status bar
         self._create_menus()
         self._create_toolbars()
         self.setStatusBar(QStatusBar(self))
@@ -145,7 +129,7 @@ class MainWindow(QMainWindow):
         self.controller.set_algorithm_progress_clear_callback(self._clear_algorithm_progress)
         self.controller.set_remote_settings_request_callback(self._request_remote_restoration_settings)
 
-        #overlay na krátke hlášky v strede okna
+        #krátke hlášky zobrazené nad pracovnou plochou
         self._toast_label = QLabel(self)
         self._toast_label.setVisible(False)
         self._toast_label.setAlignment(Qt.AlignCenter)
@@ -155,7 +139,7 @@ class MainWindow(QMainWindow):
         self._toast_timer.setSingleShot(True)
         self._toast_timer.timeout.connect(self._toast_label.hide)
 
-        #overlay kruh pre náhľad veľkosti štetca
+        #dočasný kruh pre náhľad veľkosti štetca
         self._brush_preview_label = QLabel(self)
         self._brush_preview_label.setVisible(False)
         self._brush_preview_label.setAlignment(Qt.AlignCenter)
@@ -164,17 +148,12 @@ class MainWindow(QMainWindow):
         self._brush_preview_timer.setSingleShot(True)
         self._brush_preview_timer.timeout.connect(self._brush_preview_label.hide)
 
-    #----------GUI setup-----------
+    #----------vytvorenie GUI-----------
 
     def _create_menus(self) -> None:
         menu_bar = self.menuBar()
 
         file_menu = menu_bar.addMenu("&Soubor")
-
-        new_beta_action = QAction("Nový projekt (beta)", self)
-        new_beta_action.setShortcut("Ctrl+Shift+N")
-        new_beta_action.triggered.connect(self.on_new_project_beta)
-        file_menu.addAction(new_beta_action)
 
         new_from_image_action = QAction("Nový projekt z obrázku...", self)
         new_from_image_action.setShortcut("Ctrl+N")
@@ -215,13 +194,12 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
-        #neskôr -Open/Save/Exit
         exit_action = QAction("Ukončit", self)
         exit_action.setShortcut("Ctrl+Q")
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
-        #undo/redo
+        #undo/redo akcie
         edit_menu = menu_bar.addMenu("&Úpravy")
 
         self.undo_action = QAction("Zpět", self)
@@ -258,15 +236,15 @@ class MainWindow(QMainWindow):
             action.setCheckable(True)
             action.setChecked(dock.isVisible())
 
-            #menu -> dock
+            #menu ovláda viditeľnosť docku
             action.toggled.connect(dock.setVisible)
-            #dock -> menu (keď user zavrie krížikom)
+            #ak používateľ zavrie dock krížikom, aktualizuje sa aj menu
             dock.visibilityChanged.connect(action.setChecked)
 
             view_menu.addAction(action)
             return action
         
-        self.toggle_damage_overlay_action = QAction("Zobrazit poškoděné oblasti", self)
+        self.toggle_damage_overlay_action = QAction("Zobrazit poškozené oblasti", self)
         self.toggle_damage_overlay_action.setCheckable(True)
         self.toggle_damage_overlay_action.setChecked(True)
         self.toggle_damage_overlay_action.triggered.connect(self.on_toggle_damage_overlay)
@@ -276,7 +254,7 @@ class MainWindow(QMainWindow):
         opacity_slider = QSlider(Qt.Horizontal)
         opacity_slider.setRange(0, 100)
 
-        #default 35%
+        #predvolená priehľadnosť overlayu je 35 %
         opacity_slider.setValue(35)
 
         opacity_slider.setToolTip("Průhlednost poškozených oblastí")
@@ -285,7 +263,7 @@ class MainWindow(QMainWindow):
         opacity_action.setDefaultWidget(opacity_slider)
         view_menu.addAction(opacity_action)
 
-        #slider aktívny len keď je overlay zapnutý
+        #slider je aktívny iba vtedy, keď je overlay zapnutý
         opacity_slider.setEnabled(self.toggle_damage_overlay_action.isChecked())
         self.toggle_damage_overlay_action.toggled.connect(opacity_slider.setEnabled)
 
@@ -324,7 +302,7 @@ class MainWindow(QMainWindow):
         self.tools_toolbar = QToolBar("Nástroje", self)
         self.addToolBar(Qt.LeftToolBarArea, self.tools_toolbar)
 
-        #skupina na exkluzívne checkovanie
+        #skupina zabezpečuje, že je zvolený iba jeden nástroj naraz
         self.tool_action_group = QActionGroup(self)
         self.tool_action_group.setExclusive(True)
         self.tool_action_group.triggered.connect(self._on_tool_action_triggered)
@@ -348,7 +326,7 @@ class MainWindow(QMainWindow):
         self.blend_action = QAction("Rozmazání", self)
         self.blend_action.setShortcut("D")
         self.blend_action.setCheckable(True)
-        self.blend_action.setToolTip("Rozmazává na aktivní paint vrstvě, nebo i na původním obrazu")
+        self.blend_action.setToolTip("Rozmazává na aktivní vrstvě malby, případně i na původním obrazu")
         self.tools_toolbar.addAction(self.blend_action)
         self.tool_action_group.addAction(self.blend_action)
         self.tool_actions[self.blend_action] = "blend"
@@ -376,7 +354,7 @@ class MainWindow(QMainWindow):
         self.tool_actions[self.lasso_action] = "lasso"
 
         self.edge_action = QAction("Hrana", self)
-        self.edge_action.setShortcut("G")  #G-graphics
+        self.edge_action.setShortcut("G")  #graphics
         self.edge_action.setCheckable(True)
         self.tools_toolbar.addAction(self.edge_action)
         self.tool_action_group.addAction(self.edge_action)
@@ -433,7 +411,7 @@ class MainWindow(QMainWindow):
 
     def _apply_right_dock_layout(self) -> None:
         """
-        aby sa pravé docky neskladali cez seba, ale boli pod sebou (vertikálny split)
+        Rozloží pravé docky pod seba, aby sa neprekrývali
         """
         if not (hasattr(self, "algorithm_dock") and hasattr(self, "edge_settings_dock") and hasattr(self, "materials_dock")):
             return
@@ -452,6 +430,7 @@ class MainWindow(QMainWindow):
         self.setCorner(Qt.BottomLeftCorner, Qt.BottomDockWidgetArea)
         
     def _show_algorithm_progress(self, message: str, current: int | None = None, total: int | None = None) -> None:
+        """Zobrazí priebeh externého algoritmu v status bare"""
         self._algorithm_progress_label.setText(message or "Probíhá realistické doplnění...")
         self._algorithm_progress_label.setVisible(True)
         self._algorithm_progress_bar.setVisible(True)
@@ -466,6 +445,7 @@ class MainWindow(QMainWindow):
         QApplication.processEvents()
 
     def _clear_algorithm_progress(self) -> None:
+        """Skryje informáciu o priebehu externého algoritmu"""
         self._algorithm_progress_label.clear()
         self._algorithm_progress_label.setVisible(False)
         self._algorithm_progress_bar.setVisible(False)
@@ -475,7 +455,7 @@ class MainWindow(QMainWindow):
 
     def _show_tool_message(self, text: str) -> None:
         """
-        Zobrazí krátke upozornenie v status bar
+        Zobrazí krátke upozornenie v status bare
         """
         self.statusBar().showMessage(text, 4000)
         self._show_toast_message(text, 2500)
@@ -515,7 +495,7 @@ class MainWindow(QMainWindow):
         zoom = float(getattr(self.canvas, "zoom_factor", 1.0))
         diameter = int(max(8, round(brush_size * 2 * zoom)))
 
-        #aby pri veľkom zoome nebol overlay cez celé okno
+        #pri veľkom zoome obmedzíme veľkosť náhľadu, aby nezakryl celé okno
         diameter = min(diameter, 500)
 
         self._brush_preview_label.setText(f"{brush_size}px")
@@ -553,11 +533,11 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Nastavení remote realistického doplnění bylo uloženo", 4000)
 
 
-    def _request_remote_restoration_settings(self, message: Optional[str] = None) -> bool:
+    def _request_remote_restoration_settings(self, message: str | None = None) -> bool:
         """
-        Vyžiada nastavenie remote služby pri prvom použití realistic fill.
+        Vyžiada nastavenie remote služby pri prvom použití realistického doplnenia
 
-        Vráti True iba vtedy, keď sú po zatvorení dialógu uložené kompletné údaje.
+        Vráti True iba vtedy, keď sú po zatvorení dialógu uložené kompletné údaje
         """
         dlg = RemoteRestorationSettingsDialog(
             parent=self,
@@ -572,7 +552,7 @@ class MainWindow(QMainWindow):
     #----------prepínanie obrazoviek-----------
 
     def show_start_screen(self) -> None:
-        """zobrazí úvodnú obrazovku"""
+        """Zobrazí úvodnú obrazovku"""
 
         start_screen = StartScreenWidget(self)
         start_screen.set_recent_projects(self.app_settings.get_recent_projects())
@@ -584,7 +564,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.start_screen)
         self._update_colorchecker_actions()
 
-        #schováme dock panely (kým nie je otvorený projekt)
+        #schováme pracovné panely, kým nie je otvorený projekt
         if hasattr(self, "layers_dock"):
             self.layers_dock.hide()
         if hasattr(self, "algorithm_dock"):
@@ -601,8 +581,8 @@ class MainWindow(QMainWindow):
             self.tools_toolbar.hide()
 
     def show_workspace(self) -> None:
-        """zobrazí pracovnú plochu (canvas, neskôr aj dock panely)"""
-        #vytvoríme nový canvas vždy, keď ideme do workspace
+        """Zobrazí pracovnú plochu s canvasom a pracovnými panelmi"""
+        #vytvoríme nový canvas vždy, keď prechádzame do pracovnej plochy
         canvas = ImageCanvasWidget(self)
         self.canvas = canvas
 
@@ -615,7 +595,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "algorithm_dock"):
             self.algorithm_dock.show()
         if hasattr(self, "brush_action"): 
-            self.brush_action.setChecked(True)  # spustí _on_tool_action_triggered
+            self.brush_action.setChecked(True)
         if hasattr(self, "edge_settings_dock"):
             self.edge_settings_dock.show()
         if hasattr(self, "materials_dock"):
@@ -628,11 +608,11 @@ class MainWindow(QMainWindow):
         self.update_undo_redo_actions()
         self._update_colorchecker_actions()
 
-    #----------akcie StartScreen-----------
+    #----------akcie a obsluha udalostí-----------
 
     def _on_tool_action_triggered(self, action: QAction) -> None:
         """
-        Reaguje na zmenu checknutého tool action v QActionGroup
+        Reaguje na zmenu aktívneho nástroja v QActionGroup
         """
         tool_name = self.tool_actions.get(action)
         if not tool_name:
@@ -640,7 +620,7 @@ class MainWindow(QMainWindow):
 
         self.current_tool_name = tool_name
         self.controller.set_current_tool(tool_name)
-        #QActionGroup sa postará o check/uncheck
+        #QActionGroup sa postará o ostatné check/uncheck stavy
 
     def _on_delete_layer_requested(self, layer_id: str) -> None:
         if self.controller.project is None:
@@ -661,8 +641,7 @@ class MainWindow(QMainWindow):
 
     def on_open_project_requested(self) -> None:
         """
-        Bude otvárať existujúci projekt (zo .zip)
-        Zatiaľ nič
+        Otvorí existujúci projekt zo ZIP súboru
         """
         zip_path, _ = QFileDialog.getOpenFileName(
             self,
@@ -685,13 +664,10 @@ class MainWindow(QMainWindow):
             self.show_start_screen()
             return
 
-        # aktualizujeme zoznam recent projektov na start screene
-        #self.start_screen.set_recent_projects(self.app_settings.get_recent_projects())
 
     def on_open_recent_requested(self, path: str) -> None:
         """
-        bude otvárať projekt zo zoznamu naposledy otvorené
-        zatiaľ len info
+        Otvorí projekt zo zoznamu naposledy otvorených projektov
         """
         self.show_workspace()
 
@@ -749,9 +725,7 @@ class MainWindow(QMainWindow):
 
         #nastavíme aktívnu vrstvu podľa akcie
         self.controller.set_active_layer(action.layer_id)
-        #refresh canvas a panel vrstiev
-
-        #prekreslíme len daný bbox
+        #prekreslíme iba dotknutý bbox a panel vrstiev
         bbox = action.bbox
         self.controller.refresh_canvas_region(bbox)
         self.controller.refresh_layers_panel()
@@ -786,7 +760,7 @@ class MainWindow(QMainWindow):
 
     def _update_colorchecker_actions(self) -> None:
         """
-        Zapne/vypne možnosti v menu podľa toho, či projekt má color correction
+        Zapne alebo vypne možnosti v menu podľa toho, či má projekt farebnú korekciu
         """
         proj = self.controller.project
         if proj is None:
@@ -816,10 +790,10 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "ColorChecker", "Korekce nebyla spočítána")
             return
 
-        #uložíme do projektu
+        #uložíme korekciu do projektu
         self.controller.set_color_correction_matrix(result.matrix)
 
-        #zapneme toggle vo view
+        #aktualizujeme prepínač v menu zobrazenia
         self._update_colorchecker_actions()
         self._show_toast_message(f"ColorChecker korekce spočtena (RMS {result.rms_error:.2f})", 2500)
 
@@ -840,7 +814,7 @@ class MainWindow(QMainWindow):
             self,
             "Vyberte masku poškození (volitelné)",
             "",
-            "Obrázky (*.png *.jpg *.jpeg *.tif *.tiff);;Všetky súbory (*.*)",
+            "Obrázky (*.png *.jpg *.jpeg *.tif *.tiff);;Všechny soubory (*.*)",
         )
         if not mask_path:
             mask_path = None
@@ -853,7 +827,7 @@ class MainWindow(QMainWindow):
                 self.texture_panel.refresh_from_controller()
             self.update_undo_redo_actions()
         except Exception as e:
-            QMessageBox.critical(self, "Chyba pri vytváření projektu", str(e))
+            QMessageBox.critical(self, "Chyba při vytváření projektu", str(e))
             self.controller.close_project()
             self.show_start_screen()
             return
@@ -868,11 +842,10 @@ class MainWindow(QMainWindow):
             return
 
         if not self.controller.save_project():
-            # nemáme current_project_path → Save As
+            #nemáme current_project_path, preto použijeme Save As
             self.on_save_project_as()
             return
 
-        #self.start_screen.set_recent_projects(self.app_settings.get_recent_projects())
         self.statusBar().showMessage("Projekt byl uložen", 3000)
 
     def on_save_project_as(self) -> None:
@@ -901,12 +874,11 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Chyba při ukládání projektu", str(e))
             return
 
-        #self.start_screen.set_recent_projects(self.app_settings.get_recent_projects())
         self.statusBar().showMessage("Projekt byl uložen", 3000)
 
     def ask_to_save_before_close(self) -> str:
         """
-        Vráti: "save" | "discard" | "cancel"
+        Vráti hodnotu "save", "discard" alebo "cancel"
         """
         msg: QMessageBox = QMessageBox(self)
         msg.setIcon(QMessageBox.Warning)
@@ -931,7 +903,7 @@ class MainWindow(QMainWindow):
         Exportuje PDF report o projekte
         """
         if self.controller.project is None:
-            QMessageBox.information(self, "Žádný projekt", "Není otevřený žádný projekt")
+            QMessageBox.information(self, "Žádný projekt", "Není otevřen žádný projekt")
             return
 
         dialog = ReportDialog(self)
@@ -960,7 +932,7 @@ class MainWindow(QMainWindow):
 
     def on_toggle_damage_overlay(self, checked: bool) -> None:
         """
-        zapne/vypne vizualizáciu damage masky na canvase
+        Zapne alebo vypne vizualizáciu damage masky na canvase
         """
         self.controller.set_show_damage_overlay(checked)
 
@@ -975,11 +947,11 @@ class MainWindow(QMainWindow):
         Zavrie aktuálny projekt a vráti sa na úvodnú obrazovku
         """
         if self.controller.project is None:
-            # nič nie je otvorené, tak len ukážeme start screen 
+            #ak nič nie je otvorené, iba zobrazíme úvodnú obrazovku
             self.show_start_screen()
             return
         
-        #ak dirty -opýtať sa
+        #pri neuložených zmenách sa opýtame na uloženie
         if self.controller.is_project_dirty():
             result = self.ask_to_save_before_close()
             if result == "cancel":
@@ -987,15 +959,14 @@ class MainWindow(QMainWindow):
             if result == "save":
                 if not self.controller.save_project_with_dialog_if_needed():
                     return
-            #discard -pokračujeme
+            #discard pokračuje bez uloženia
 
         self._update_colorchecker_actions()
-        # neskôr sa spýtame na uloženie (Save)
         self.controller.close_project()
         self.show_start_screen()
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        #ak nie je otvorený projekt alebo nie je dirty, môžeme zavrieť
+        #ak nie je otvorený projekt alebo nemá neuložené zmeny, môžeme zatvoriť
         if not self.controller.has_open_project() or not self.controller.is_project_dirty():
             event.accept()
             return
@@ -1010,7 +981,7 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
 
-        #discard alebo úspešný save
+        #discard alebo úspešné uloženie
         event.accept()
 
     def on_auto_fill_small_regions(self) -> None:
@@ -1060,53 +1031,5 @@ class MainWindow(QMainWindow):
         self.controller.set_auto_fill_threshold(self.auto_fill_spinbox.value())
             
     def _on_material_tab_changed(self, idx: int):
-        #0 = Barvy, 1 = Textury
+        #0 = barvy, 1 = textúry
         self.controller.texture_mode_enabled = (idx == 1)
-
-    #----------helper metódy-----------
-
-    def on_new_project_beta(self) -> None:
-        """Vytvorí jednoduchý beta projekt (na testovanie)"""
-        self.show_workspace()
-        project = self._create_beta_project()
-        self.controller.set_project(project)
-        self.controller.current_project_path = None
-
-    def _create_beta_project(self) -> Project:
-        """
-        vytvorí testovací Project s jednou background vrstvou –sivý obrázok 800x600
-        pridali sme 1 PAINT a 1 EDGE vrstvu
-        """
-        width, height = 800, 600
-
-        image = np.zeros((height, width, 4), dtype=np.uint8)
-        image[..., :3] = 200  #svetlo sivá
-        image[..., 3] = 255   #alfa = 255
-
-        meta = LayerMeta(
-            id="background",
-            name="Původní obraz",
-            role=LayerRole.BACKGROUND,
-        )
-        bg_layer = Layer(meta, image)
-
-        #paint vrstva -zatiaľ celá priehľadná
-        paint_image = np.zeros((height, width, 4), dtype=np.uint8)
-        paint_meta = LayerMeta(id="paint_1", name="Malba 1", role=LayerRole.PAINT)
-        paint_layer = Layer(paint_meta, paint_image)
-
-        edge_image = np.zeros((height, width, 4), dtype=np.uint8)
-        edge_meta = LayerMeta(id="edge_1", name="Hrany 1", role=LayerRole.EDGE)
-        edge_layer = Layer(edge_meta, edge_image)
-
-        project = Project("Beta projekt")
-        project.add_layer(bg_layer)
-        project.add_layer(paint_layer)
-        project.add_layer(edge_layer)
-
-        #na skúšku je demage maska celý obraz
-        damage_mask = np.ones((height, width), dtype=bool)
-        project.set_damage_masks(damage_mask)
-
-        return project
-

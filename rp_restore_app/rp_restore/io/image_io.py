@@ -60,11 +60,7 @@ def save_image(path: PathLike, arr: np.ndarray) -> None:
 
     a = np.asarray(arr)
 
-    if a.ndim == 2:
-        pass
-    elif a.ndim == 3 and a.shape[2] in (3, 4):
-        pass
-    else:
+    if not (a.ndim == 2 or (a.ndim == 3 and a.shape[2] in (3, 4))):
         raise ValueError("Unsupported image shape for save_image")
 
     #JPG musí byť uint8 a bez alpha kanála

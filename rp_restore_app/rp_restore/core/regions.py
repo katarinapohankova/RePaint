@@ -20,12 +20,12 @@ class RegionMap:
     """Rozdelenie damage masky na očíslované spojité oblasti"""
 
     label_image: np.ndarray
-    regions: dict [int, RegionInfo]
+    regions: dict[int, RegionInfo]
 
     def get_region_mask(self, region_id: int) -> np.ndarray:
         """Vráti 2D bool masku pre danú oblasť"""
         return self.label_image == region_id
-    
+
     def get_region_id_at(self, x: int, y: int) -> int:
         """
         Vráti ID oblasti na súradniciach (x, y) alebo 0 mimo regiónov
