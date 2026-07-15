@@ -40,20 +40,40 @@
 
 ## Inštalácia a spustenie
 
-Aplikácia zatiaľ nie je zabalená ako samostatný inštalačný súbor. Preto sa spúšťa zo zdrojového repozitára.
+Aplikáciu je možné používať dvoma spôsobmi.
 
-Repozitár si je treba naklonovať, nainštalovať závislosti a následne spustiť pomocou príkazov:
+### Inštalácia pomocou inštalátora
+
+Pre bežných používateľov je určený súbor:
+
+```text
+RePaint-Setup-1.0.1.exe
 ```
-git clone https://gitlab.mff.cuni.cz/teaching/nprg045/ikudov/pohankova-katarina.git
 
-cd pohankova-katarina
-python -m venv .venv
+Inštalátor je určený pre 64-bitový operačný systém Windows. Po jeho spustení postupujte podľa krokov sprievodcu. Aplikácia sa nainštaluje do používateľského priečinka, pridá sa do ponuky Štart a voliteľne je možné vytvoriť aj odkaz na pracovnej ploche.
+
+Nainštalovaná verzia už obsahuje Python, potrebné knižnice aj lokálny textúrový algoritmus. Používateľ preto nemusí nič ďalšie inštalovať.
+
+Pri prvom použití realistického dopĺňania aplikácia vyžiada endpoint URL a API kľúč vzdialenej služby. Údaje sa uložia do systémového úložiska prihlasovacích údajov. Neskôr ich je možné zmeniť cez **Nastavení → Remote realistické doplnění...**.
+
+### Spustenie zo zdrojového kódu
+
+Na spustenie zo zdrojov je potrebný Python 3.13 a Git.
+
+```powershell
+git clone https://gitlab.mff.cuni.cz/teaching/nprg045/ikudov/pohankova-katarina.git
+cd pohankova-katarina\rp_restore_app
+
+python3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
+
+python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 
-cd rp_restore_app
 python app.py
 ```
+
+Po aktivovaní virtuálneho prostredia sa používa príkaz `python`, ktorý odkazuje na interpreter z daného prostredia. Inštalácia zo zdrojov môže vyžadovať oprávnenie na prístup k repozitárom externých balíkov uvedených v súbore `requirements.txt`.
 
 ## 1. Vytvorenie nového projektu
 
@@ -190,7 +210,7 @@ Hodnota **Krytí** určuje maximálnu nepriehľadnosť stopy.
 
 Hodnota **Hustota** ovplyvňuje, ako rýchlo sa farba alebo mazanie v ťahu nanáša.
 
-Možnosť **Vrstvit v tahu** určuje, či sa jeden ťah môže počas ťahania myšou postupne zosilňovať (až do hosnoty krytí).
+Možnosť **Vrstvit v tahu** určuje, či sa jeden ťah môže počas ťahania myšou postupne zosilňovať (až do hodnoty krytí).
 
 ## 10. Textúry
 
@@ -207,8 +227,10 @@ Pri textúrach je možné nastaviť:
 
 Dostupné sú dva štýly textúry:
 
-* **Transparentní** – textúra sa správa ako priesvitný vzor zafarbený aktuálnou (jendou) farbou
-* **Barevná** – textúra používa vlastnú farebnosť (odvodenú od aktuálnej farby)
+* **Transparentní** – jas textúry určuje priehľadnosť vzoru, ktorý je zafarbený aktuálnou farbou
+* **Barevná** – jas textúry vytvára svetlejšie a tmavšie odtiene aktuálnej farby
+
+Textúry vytvorené externým textúrovým algoritmom si zachovávajú vlastnú vygenerovanú farebnosť. Pri nich sa štýl **Transparentní/Barevná** nepoužíva a ich farby sa upravujú samostatne tlačidlom **Upravit barvy…**.
 
 V časti **Deformace textury** je možné zmeniť šírku a výšku textúry. Deformácia sa prejaví v náhľade a pri ďalšom použití textúry.
 
@@ -345,46 +367,58 @@ Panel **Externé algoritmy** obsahuje nástroje na automatické dopĺňanie poš
 
 ### Realistické doplnění
 
-Realistické doplnenie slúži na automatické dogenerovanie poškodených miest v zvolenom okne.
+Realistické doplnenie slúži na automatické dogenerovanie poškodených miest v zvolenom obdĺžnikovom okne. Algoritmus sa vykonáva na vzdialenej službe, preto vyžaduje internetové pripojenie a platný API kľúč.
 
-Po stlačení tlačidla **Realistické doplnění** sa otvorí dialóg, v ktorom je možné zvoliť okno pre algoritmus. Okno môže vzniknúť dvoma spôsobmi:
+Pri prvom použití aplikácia vyžiada prístupové údaje. Neskôr ich je možné upraviť cez **Nastavení → Remote realistické doplnění...**.
 
-* použiť ohraničenie aktuálneho výberu
+Po stlačení tlačidla **Realistické doplnění** sa otvorí dialóg, v ktorom je možné zvoliť okno dvoma spôsobmi:
+
+* použiť spoločné ohraničenie aktuálneho výberu
 * vybrať okno ručne priamo v obraze
 
-Maximálna veľkosť okna je 1440 × 1440 pixelov. Okno musí obsahovať aspoň časť masky poškodenia.
+Maximálna veľkosť okna je 1440 × 1440 pixelov. Okno musí obsahovať aspoň časť zostávajúcej masky poškodenia.
 
-V dialógu je možné nastaviť:
+K dispozícii sú dva režimy:
 
-* **Míra dogenerování** – určuje, ako výrazne môže algoritmus prepracovať maskovanú oblasť vzhľadom na pôvodný obraz
-* **Použít seed** – umožňuje zadať číselnú hodnotu pre opakovateľnosť výsledku
-* **Použít obraz s dokreslenými částmi jako vstup** – algoritmus dostane obraz vrátane už viditeľne doplnených častí
+* **Základní** – používa výrez pôvodného obrazu a je určený na bežné dopĺňanie poškodení,
+* **Vedené podle náčrtu** – používa aktuálny zložený obraz vrátane prípadného ručného náčrtu. Vodiace čiary by mali byť tmavé a tenké, ideálne približne jeden pixel. Tento režim je výrazne pomalší.
 
-Ak je zaškrtnuté použitie obrazu s dokreslenými časťami, algoritmus berie do úvahy aj aktuálne viditeľné vrstvy malby. To je vhodné vtedy, keď má nové doplnenie nadväzovať na časti, ktoré už boli doplnené na vrstvách malby.
+V základnom režime je možné nastaviť hodnotu **Míra dogenerování**. Nižšia hodnota viac zachováva pôvodnú štruktúru pod maskou, zatiaľ čo hodnota 1 znamená úplné dogenerovanie. Ak pod maskou nie sú použiteľné pôvodné pixely, odporúča sa nastaviť hodnotu 1.
 
-Ak táto možnosť zaškrtnutá nie je, algoritmus vychádza z pôvodného obrazu.
+Voliteľná hodnota **seed** umožňuje zopakovať výpočet s rovnakým náhodným nastavením.
+
+Ak je aktívny výber regiónov, výsledok sa aplikuje iba v tomto výbere. Ak výber neexistuje, použije sa zostávajúca maska poškodenia vo zvolenom okne. Výsledok sa vloží do aktívnej vrstvy malby iba na miestach, ktoré na nej ešte nie sú vyplnené.
 
 Model realistického dopĺňania je primárne určený na reštaurovanie diel Albrechta Dürera.
 
-Výsledok sa vloží do aktívnej vrstvy malby, a to len do miest, ktoré sú podľa masky poškodené a na danej vrstve ešte nie sú vyplnené.
-
 ### Texturové doplnění
 
-Textúrové doplnenie používa externý algoritmus na vytvorenie textúry pre vybrané poškodené oblasti.
+Textúrové doplnenie používa lokálny algoritmus na vytvorenie textúrovaného obsahu. Dialóg ponúka dva režimy výstupu:
 
-Pred spustením treba vybrať poškodenú oblasť nástrojom **Vybrat** alebo **Laso**. Bez výberu nie je textúrové doplnenie dostupné.
+* **Doplnit vybranou oblast obrazu** – výsledok sa vloží priamo do vybraných poškodených regiónov,
+* **Vygenerovat samostatnou texturu a přidat ji do materiálů** – vytvorí samostatný textúrový obraz, ktorý sa pridá medzi textúry aktuálneho projektu.
 
-V dialógu sa nastavuje:
+Na priame doplnenie obrazu treba najskôr vybrať poškodenú oblasť nástrojom **Vybrat** alebo **Laso**. Bez aktívneho výberu je možné stále vytvoriť samostatnú textúru a pridať ju do panelu Materiály.
 
-* typ textúry
-* minimálne jedna farba textúry
-* global scale
-* rotácia
-* voliteľný seed
+V dialógu je možné nastaviť:
 
-Prvá farba je povinná. Ďalšie farby je možné pridať alebo odstrániť podľa potreby.
+* typ modelu textúry
+* jednu až tri farby
+* silu každej farebnej vrstvy
+* mierku v osiach X a Y
+* hustotu v osiach X a Y pri modeloch, ktoré ju podporujú
+* rotáciu
+* celkovú mierku
+* nepriehľadné alebo priehľadné pozadie
+* jas nepriehľadného pozadia
+* seed
+* šírku a výšku samostatne generovanej textúry
 
-Výsledok sa vloží do aktívnej vrstvy malby v miestach aktuálneho výberu.
+Pri každom modeli sa zobrazuje jeho vstupný náhľad. Tlačidlom **Vygenerovat náhled** je možné vytvoriť aj zmenšený náhľad výslednej textúry podľa aktuálnych parametrov.
+
+Pri dopĺňaní vybranej oblasti sa výsledok vloží do aktívnej vrstvy malby iba v miestach aktuálneho výberu, ktoré sú stále poškodené a na danej vrstve ešte neboli vyplnené.
+
+Samostatne vygenerovaná textúra sa pridá do panelu Materiály a zachová si vlastné vygenerované farby. Je možné ju používať pomocou textúrového štetca alebo výplne. Pri jej výbere sa zobrazia pôvodné farby a ich sily; tlačidlom **Upravit barvy…** je možné farby zmeniť a textúru znovu vygenerovať.
 
 ## 13. ColorChecker korekcia
 
@@ -467,7 +501,6 @@ Report obsahuje:
 ### Projekt
 
 * **Ctrl+N** – nový projekt z obrázku
-* **Ctrl+Shift+N** – nový beta projekt
 * **Ctrl+O** – otvoriť projekt
 * **Ctrl+S** – uložiť projekt
 * **Ctrl+Shift+S** – uložiť projekt ako
@@ -487,7 +520,7 @@ Report obsahuje:
 * **B** – Štětec
 * **E** – Guma
 * **D** – Rozmazání
-* **F** – Výplň,
+* **F** – Výplň
 * **S** – Vybrat
 * **L** – Laso
 * **G** – Hrana

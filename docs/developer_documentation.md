@@ -49,6 +49,7 @@ rp_restore_app/rp_restore/
 │   ├── mask_alignment.py
 │   ├── project_model.py
 │   ├── regions.py
+│   ├── remote_restoration_config.py
 │   ├── selection.py
 │   └── texture_brush.py
 ├── gui/
@@ -57,6 +58,7 @@ rp_restore_app/rp_restore/
 │   ├── mask_alignment_dialog.py
 │   ├── colorchecker_dialog.py
 │   ├── realistic_fill_dialog.py
+│   ├── remote_restoration_settings_dialog.py
 │   ├── texture_fill_dialog.py
 │   ├── start_screen_widget.py
 │   ├── canvas/
@@ -65,9 +67,11 @@ rp_restore_app/rp_restore/
 ├── io/
 │   ├── image_io.py
 │   └── project_storage.py
-└── report/
-    ├── pdf_report.py
-    └── report_dialog.py
+├── report/
+│   ├── pdf_report.py
+│   └── report_dialog.py
+├── resources/
+└── utils/
 ```
 
 Kód je rozdelený na niekoľko vrstiev:
@@ -79,18 +83,23 @@ Kód je rozdelený na niekoľko vrstiev:
 * `io` rieši načítanie a ukladanie obrázkov a projektov
 * `report` rieši generovanie PDF reportu
 * `config` obsahuje nastavenia aplikácie
+* `resources` obsahuje predvolené textúry, náhľady modelov a grafické zdroje aplikácie
+* `utils` je určený pre všeobecné pomocné moduly
 
 ## 2. Hlavné použité knižnice
 
-Aplikácia používa najmä tieto externé knižnice:
+Aplikácia používa najmä tieto externé knižnice a balíky:
 
-* `PySide6` – grafické rozhranie
+* `PySide6` – grafické používateľské rozhranie
 * `numpy` – reprezentácia a úprava obrazových dát
-* `Pillow` – načítanie a ukladanie obrázkov
+* `Pillow` – načítanie, prevod a ukladanie obrázkov
 * `opencv-python` / `cv2` – vybrané obrazové operácie
 * `reportlab` – generovanie PDF reportov
-* `painting_inpaint` – vzdialené realistické dopĺňanie
-* externý textúrový algoritmus sa musí nachádzať v priečinku `external_algorithms`
+* `keyring` – ukladanie endpointu a API kľúča vzdialenej služby do systémového úložiska prihlasovacích údajov
+* `painting_inpaint.remote` – klient vzdialeného realistického dopĺňania
+* `texture_infill` – lokálne spúšťaný textúrový algoritmus
+
+Textúrový algoritmus sa používa ako nainštalovaný Python balík. Nie je uložený v priečinku zdrojového kódu aplikácie. Jeho modelové súbory sú súčasťou balíka `texture_infill`.
 
 ## 3. Dátový model projektu
 
@@ -476,45 +485,84 @@ Nástroj upravuje len poškodené oblasti a zmeny zapisuje do aktívnej Paint vr
 
 ## 17. Externé algoritmy
 
-Spúšťanie externých algoritmov je v súbore:
+Spúšťanie externých algoritmov zabezpečuje súbor:
 
-```
+```text
 rp_restore/core/algorithm_runner.py
 ```
 
-Dôležité triedy:
+Dôležité triedy a dátové štruktúry:
 
-* `AlgorithmType`
-* `AlgorithmRequest`
-* `TextureAlgorithmParams`
-* `AlgorithmResult`
-* `AlgorithmRunner`
+* `AlgorithmType` – rozlišuje realistické a textúrové dopĺňanie
+* `RealisticFillMode` – rozlišuje základný a vedený režim realistického dopĺňania
+* `AlgorithmRequest` – obsahuje vstupné obrazy, masky a parametre algoritmu
+* `TextureAlgorithmParams` – obsahuje parametre textúrového algoritmu
+* `AlgorithmResult` – obsahuje výsledný RGBA výrez, jeho pozíciu a logovacie správy
+* `AlgorithmRunner` – pripravuje vstupy a spúšťa príslušný algoritmus
 
-Podporované typy algoritmov:
+### Realistické dopĺňanie
+
+Realistické dopĺňanie používa klienta:
 
 ```python
-AlgorithmType.REALISTIC
-AlgorithmType.TEXTURE
+painting_inpaint.remote
 ```
 
-Realistické dopĺňanie používa vzdialený klient `painting_inpaint`. Algoritmus dostáva výrez obrazu a masku výrezu. Výstupom je RGBA patch, ktorý sa aplikuje do aktívnej Paint vrstvy.
+Prístupové údaje spravuje modul:
 
-Textúrové dopĺňanie zatiaľ používa externý textúrový pipeline v priečinku:
-
-```
-external_algorithms/texture_generation_pipeline
+```text
+rp_restore/core/remote_restoration_config.py
 ```
 
-Pri spustení sa pripraví maska výberu, farby a parametre textúry. Výstup sa oreže podľa bounding boxu výberu a vloží sa do projektu.
+Endpoint URL a API kľúč sa ukladajú pomocou knižnice `keyring` do systémového úložiska používateľa. API kľúč sa neukladá do projektu ani do bežného konfiguračného súboru. Pred spustením klienta sa údaje nastavia ako premenné prostredia iba pre aktuálne bežiaci proces.
 
-Pri pridávaní nového algoritmu je vhodné:
+Používateľ vyberá obdĺžnikové okno s maximálnym rozmerom 1440 × 1440 pixelov. Ak existuje aktívny výber regiónov, maska algoritmu je obmedzená na tento výber. V opačnom prípade sa použije zostávajúca maska poškodenia vo zvolenom okne.
 
-1. Doplniť nový typ do `AlgorithmType`
-2. Rozšíriť `AlgorithmRequest` alebo vytvoriť nové parametre
-3. Pridať vetvu do `AlgorithmRunner.run()`
-4. Pripraviť dialóg alebo ovládanie v `gui`
-5. Výsledok vrátiť ako `AlgorithmResult`
-6. V `ProjectController` zabezpečiť vloženie výsledku do aktívnej Paint vrstvy a uloženie Undo akcie
+Podporované sú dva režimy:
+
+* **základný režim** používa výrez pôvodného obrazu a umožňuje nastaviť mieru dogenerovania,
+* **vedený režim** používa aktuálny zložený obraz, takže môže zohľadniť aj ručne nakreslené vodiace čiary. Je výrazne pomalší než základný režim.
+
+Výsledok sa vloží do aktívnej vrstvy typu `PAINT`, a to iba do vybraných poškodených pixelov, ktoré na danej vrstve ešte neboli vyplnené.
+
+### Textúrové dopĺňanie
+
+Textúrový algoritmus sa spúšťa prostredníctvom nainštalovaného balíka:
+
+```python
+texture_infill
+```
+
+Dostupné modely sa zisťujú z priečinka `models` nainštalovaného balíka pomocou `importlib.resources`. Samotné generovanie vykonáva verejná funkcia:
+
+```python
+texture_infill.texture_infill.generate_infill()
+```
+
+Textúrový algoritmus podporuje dva typy výstupu:
+
+1. doplnenie aktuálne vybraných poškodených oblastí,
+2. vygenerovanie samostatnej textúry, ktorá sa pridá medzi materiály projektu.
+
+Pri dopĺňaní oblasti aplikácia vypočíta ohraničujúci obdĺžnik výberu a algoritmu odovzdá iba príslušný výrez aktuálne zloženého obrazu a masku vybraných, ešte nevyplnených poškodených pixelov. Výsledný RGBA výrez sa vloží späť do aktívnej vrstvy malby.
+
+Nastavenia textúrového algoritmu zahŕňajú:
+
+* typ modelu textúry
+* jednu až tri farby a silu každej farebnej vrstvy
+* mierku v osiach X a Y
+* hustotu v osiach X a Y pri podporovaných modeloch
+* rotáciu a celkovú mierku
+* nepriehľadné alebo priehľadné pozadie
+* jas nepriehľadného pozadia
+* seed
+* rozmery samostatne generovanej textúry
+
+Dialóg umožňuje vygenerovať zmenšený náhľad výsledku ešte pred spustením finálneho výpočtu.
+
+Samostatne vygenerované textúry sa ukladajú do projektu spolu s parametrami algoritmu, pôvodnými farbami a silami farebných vrstiev. V paneli Materiály je možné ich farby neskôr upraviť a textúru opätovne vygenerovať.
+
+Knižnica `numba`, ktorú používa textúrový balík, zapisuje cache do zapisovateľného priečinka aplikácie v používateľskom profile, aby nebolo potrebné zapisovať do inštalačného priečinka.
 
 ## 18. ColorChecker korekcia
 
@@ -588,6 +636,8 @@ rp_restore/config/settings.py
 ```
 
 Trieda `AppSettings` aktuálne ukladá najmä zoznam naposledy otvorených projektov.
+
+Nastavenia prístupu k vzdialenému realistickému dopĺňaniu sa neukladajú prostredníctvom `AppSettings`. Endpoint URL a API kľúč spravuje modul `remote_restoration_config.py` a ukladá ich pomocou knižnice `keyring` do systémového úložiska prihlasovacích údajov.
 
 Nastavenia sa ukladajú do:
 

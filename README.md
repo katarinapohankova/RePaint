@@ -2,7 +2,7 @@
 
 RePaint je aplikácia určená na digitálne dopĺňanie poškodených častí obrazov. Umožňuje pracovať s pôvodným obrazom, maskou poškodenia, viacerými vrstvami, ručnými nástrojmi a externými algoritmami na dopĺňanie chýbajúcich miest.
 
-Aplikácia vzniká ako súčasť bakalárskej práce a je zameraná najmä na použitie pri príprave návrhov reštaurátorského zásahu.
+Aplikácia vznikla ako súčasť bakalárskej práce v spolupráci s Národnou galériou v Prahe a je určená najmä na prípravu a porovnávanie návrhov reštaurátorského zásahu.
 
 ## Funkcie aplikácie
 
@@ -36,13 +36,22 @@ Základná štruktúra repozitára:
 │   └── developer_documentation.md
 ├── rp_restore_app/
 │   ├── app.py
-│   ├── rp_restore/
+│   ├── RePaint.spec
+│   ├── requirements.txt
+│   ├── requirements-lock.txt
+│   ├── packaging/
+│   │   ├── RePaint.ico
+│   │   ├── RePaint.iss
+│   │   └── version_info.txt
+│   └── rp_restore/
 │       ├── config/
 │       ├── core/
 │       ├── gui/
 │       ├── io/
-│       └── report/
-│   └── requirements.txt
+│       ├── report/
+│       ├── resources/
+│       └── utils/
+├── COPYRIGHT.md
 └── README.md
 ```
 
@@ -55,34 +64,52 @@ Priečinok `docs` obsahuje dokumentáciu:
 
 ## Inštalácia a spustenie
 
-Aplikácia zatiaľ nie je zabalená ako samostatný inštalačný súbor. Spúšťa sa preto priamo zo zdrojového kódu.
+Aplikáciu je možné používať dvoma spôsobmi: nainštalovať ju pomocou pripraveného inštalátora alebo ju spustiť priamo zo zdrojového kódu.
 
-Najprv je potrebné naklonovať repozitár:
+### Inštalácia pomocou inštalátora
 
+Pre bežné používanie je určený súbor:
+
+```text
+RePaint-Setup-1.0.1.exe
 ```
+
+Inštalátor je určený pre 64-bitový operačný systém Windows. Po jeho spustení sa aplikácia nainštaluje do používateľského priečinka, vytvorí sa odkaz v ponuke Štart a voliteľne aj odkaz na pracovnej ploche.
+
+Táto verzia už obsahuje Python, potrebné knižnice aj lokálny textúrový algoritmus. Na cieľovom počítači preto nie je potrebné samostatne inštalovať Python, Git ani ďalšie závislosti.
+
+Realistické dopĺňanie používa vzdialenú službu. Vyžaduje internetové pripojenie a platný API kľúč, ktorý sa zadáva pri prvom použití a následne sa ukladá do systémového úložiska prihlasovacích údajov.
+
+### Spustenie zo zdrojového kódu
+
+Na spustenie zo zdrojov je potrebný Python 3.13 a Git. Repozitár sa naklonuje a následne sa prejde do priečinka aplikácie:
+
+```powershell
 git clone https://gitlab.mff.cuni.cz/teaching/nprg045/ikudov/pohankova-katarina.git
-cd pohankova-katarina
+cd pohankova-katarina\rp_restore_app
 ```
 
-Potom sa vytvorí a aktivuje virtuálne prostredie:
+Vytvorí a aktivuje sa virtuálne prostredie:
 
-```
-python -m venv .venv
+```powershell
+python3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 ```
 
-Následne sa nainštalujú závislosti:
+Po aktivovaní prostredia sa závislosti inštalujú prostredníctvom interpretra `python` z daného virtuálneho prostredia:
 
-```
+```powershell
+python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-Aplikácia sa spustí z priečinka `rp_restore_app`:
+Aplikácia sa spustí príkazom:
 
-```
-cd rp_restore_app
+```powershell
 python app.py
 ```
+
+Inštalácia zo zdrojového kódu môže vyžadovať oprávnenie na prístup k repozitárom externých balíkov uvedených v súbore `requirements.txt`.
 
 ## Použitie
 
@@ -120,11 +147,9 @@ Uložený projekt je možné neskôr znovu otvoriť v aplikácii a pokračovať 
 
 ## Externé algoritmy
 
-Aplikácia obsahuje podporu pre externé algoritmy:
+Aplikácia podporuje dva externé algoritmy:
 
-* realistické dopĺňanie
-* textúrové dopĺňanie
+* **realistické dopĺňanie** – používa klienta `painting_inpaint.remote` a vzdialenú službu; vyžaduje internetové pripojenie, endpoint URL a API kľúč
+* **textúrové dopĺňanie** – používa lokálne nainštalovaný balík `texture_infill`; umožňuje doplniť vybranú poškodenú oblasť alebo vytvoriť samostatnú textúru a pridať ju medzi materiály projektu
 
-## Poznámky
-
-Aplikácia je stále vo vývoji. Niektoré časti, najmä externé algoritmy a spôsob distribúcie aplikácie, sa budú ešte meniť
+Pri použití nainštalovanej verzie aplikácie sú potrebné balíky a modely už zahrnuté v inštalácii.
