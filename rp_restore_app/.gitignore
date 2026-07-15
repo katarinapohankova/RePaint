@@ -50,6 +50,8 @@ dist2/
 external_algorithms_bin/
 texture_inpaint.spec
 
+installer_output/
+
 user_readme.md
 user_readme2.md
 

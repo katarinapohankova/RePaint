@@ -1,6 +1,11 @@
-PySide6
-numpy
-Pillow
-reportlab
-opencv-python
-keyring
+PySide6==6.11.1
+shiboken6==6.11.1
+numpy==2.4.6
+Pillow==11.3.0
+reportlab==5.0.0
+opencv-python==5.0.0.93
+keyring==25.7.0
+
+texture-infill @ git+https://github.com/samueljanco/texture_infill.git@56f84be12d6372bb44c6729f2add236be66a49b1
+
+painting-inpaint-remote @ git+ssh://git@github.com/Danideos/painting-inpaint-remote-client.git@e4b703358596a50c6f8369843774f64f79e009e3

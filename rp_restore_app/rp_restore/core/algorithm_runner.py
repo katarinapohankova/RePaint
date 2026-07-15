@@ -346,7 +346,7 @@ class AlgorithmRunner:
             cache_dir = Path(cache_dir_env)
         else:
             base_dir = Path(os.environ.get("LOCALAPPDATA", Path.home()))
-            cache_dir = base_dir / "RP-Restore" / "numba_cache"
+            cache_dir = base_dir / "RePaint" / "numba_cache"
             os.environ["NUMBA_CACHE_DIR"] = str(cache_dir)
 
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -466,7 +466,7 @@ class AlgorithmRunner:
         except ImportError as e:
             raise RuntimeError("Balík painting-inpaint-remote není nainstalovaný") from e
 
-        base_tmp = Path(os.environ.get("LOCALAPPDATA", ".")) / "RP-Restore" / "tmp"
+        base_tmp = Path(os.environ.get("LOCALAPPDATA", ".")) / "RePaint" / "tmp"
         base_tmp.mkdir(parents=True, exist_ok=True)
 
         tmpdir_path = base_tmp / f"remote_realistic_{uuid.uuid4().hex}"

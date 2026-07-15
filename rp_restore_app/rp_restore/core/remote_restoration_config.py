@@ -4,7 +4,7 @@ import os
 from dataclasses import dataclass
 
 
-SERVICE_NAME = "RP-Restore"
+SERVICE_NAME = "RePaint"
 ENDPOINT_USERNAME = "modal_endpoint_url"
 API_KEY_USERNAME = "modal_restoration_api_key"
 

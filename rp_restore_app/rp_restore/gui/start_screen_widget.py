@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QPalette
+from PySide6.QtGui import QPalette, QPixmap
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QListWidget, QListWidgetItem
 
 
@@ -29,13 +31,29 @@ class StartScreenWidget(QWidget):
         self.setPalette(palette)
 
         #nadpis aplikácie
+        title_layout = QHBoxLayout()
+        title_layout.setSpacing(12)
+        title_layout.setAlignment(Qt.AlignCenter)
+
+        icon_path = Path(__file__).resolve().parents[1] / "resources" / "RePaint_icon.png"
+        icon_pixmap = QPixmap(str(icon_path))
+
+        if not icon_pixmap.isNull():
+            icon_label = QLabel()
+            icon_label.setFixedSize(48, 48)
+            icon_label.setAlignment(Qt.AlignCenter)
+            icon_label.setPixmap(icon_pixmap.scaled(48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            title_layout.addWidget(icon_label)
+
         title = QLabel("RePaint")
-        title.setAlignment(Qt.AlignCenter)
+        title.setAlignment(Qt.AlignVCenter)
         font = title.font()
         font.setPointSize(18)
         font.setBold(True)
         title.setFont(font)
-        main_layout.addWidget(title)
+        title_layout.addWidget(title)
+
+        main_layout.addLayout(title_layout)
 
         #tlačidlá pre vytvorenie alebo otvorenie projektu
         buttons_layout = QHBoxLayout()

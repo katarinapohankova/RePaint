@@ -13,7 +13,7 @@ class AppSettings:
     """
 
     #súbor s nastaveniami je uložený v domovskom priečinku používateľa
-    SETTINGS_DIR: ClassVar[Path] = Path.home() / ".rp_restore"
+    SETTINGS_DIR: ClassVar[Path] = Path.home() / ".repaint"
     SETTINGS_FILE: ClassVar[Path] = SETTINGS_DIR / "settings.json"
 
     recent_projects: list[str] = field(default_factory=list)
