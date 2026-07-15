@@ -55,4 +55,5 @@ installer_output/
 user_readme.md
 user_readme2.md
 
+tests/
 external_algorithms/texture_generation_pipeline/
