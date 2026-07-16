@@ -70,8 +70,7 @@ rp_restore_app/rp_restore/
 ├── report/
 │   ├── pdf_report.py
 │   └── report_dialog.py
-├── resources/
-└── utils/
+└── resources/
 ```
 
 Kód je rozdelený na niekoľko vrstiev:
@@ -84,7 +83,6 @@ Kód je rozdelený na niekoľko vrstiev:
 * `report` rieši generovanie PDF reportu
 * `config` obsahuje nastavenia aplikácie
 * `resources` obsahuje predvolené textúry, náhľady modelov a grafické zdroje aplikácie
-* `utils` je určený pre všeobecné pomocné moduly
 
 ## 2. Hlavné použité knižnice
 

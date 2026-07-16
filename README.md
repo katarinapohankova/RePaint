@@ -49,8 +49,7 @@ Základná štruktúra repozitára:
 │       ├── gui/
 │       ├── io/
 │       ├── report/
-│       ├── resources/
-│       └── utils/
+│       └── resources/
 ├── COPYRIGHT.md
 └── README.md
 ```
