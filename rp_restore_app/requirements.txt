@@ -6,6 +6,6 @@ reportlab==5.0.0
 opencv-python==5.0.0.93
 keyring==25.7.0
 
-texture-infill @ git+https://github.com/samueljanco/texture_infill.git@56f84be12d6372bb44c6729f2add236be66a49b1
+texture-infill @ git+https://github.com/samueljanco/texture_infill.git@aa055bc159396cb033a4324f5ac4706eed6d1a3f
 
 painting-inpaint-remote @ git+ssh://git@github.com/Danideos/painting-inpaint-remote-client.git@e4b703358596a50c6f8369843774f64f79e009e3
