@@ -1,5 +1,7 @@
 # RePaint – užívateľská dokumentácia
 
+**Language / Jazyk:** [English](user_documentation.en.md) | [Čeština](user_documentation.cs.md) | [Slovenčina](user_documentation.md)
+
 ## Obsah
 
 * [Inštalácia a spustenie](#inštalácia-a-spustenie)
@@ -9,6 +11,7 @@
 * [4. Pracovné prostredie](#4-pracovné-prostredie)
 * [5. Ovládanie obrazu](#5-ovládanie-obrazu)
 * [6. Vrstvy](#6-vrstvy)
+  * [Historická kópia](#historická-kópia)
 * [7. Maska poškodenia a zvýraznenie poškodených miest](#7-maska-poškodenia-a-zvýraznenie-poškodených-miest)
 * [8. Paleta farieb](#8-paleta-farieb)
 * [9. Materiály a nastavenia štetca](#9-materiály-a-nastavenia-štetca)
@@ -32,6 +35,7 @@
 * [13. ColorChecker korekcia](#13-colorchecker-korekcia)
 * [14. Undo a Redo](#14-undo-a-redo)
 * [15. Ukladanie projektu](#15-ukladanie-projektu)
+  * [Vytvorenie nového návrhu z existujúceho projektu](#vytvorenie-nového-návrhu-z-existujúceho-projektu)
 * [16. Export výsledného obrazu](#16-export-výsledného-obrazu)
 * [17. Export PDF reportu](#17-export-pdf-reportu)
 * [18. Klávesové skratky](#18-klávesové-skratky)
@@ -47,7 +51,7 @@ Aplikáciu je možné používať dvoma spôsobmi.
 Pre bežných používateľov je určený súbor:
 
 ```text
-RePaint-Setup-1.0.1.exe
+RePaint-Setup-1.1.0.exe
 ```
 
 Inštalátor je určený pre 64-bitový operačný systém Windows. Po jeho spustení postupujte podľa krokov sprievodcu. Aplikácia sa nainštaluje do používateľského priečinka, pridá sa do ponuky Štart a voliteľne je možné vytvoriť aj odkaz na pracovnej ploche.
@@ -61,8 +65,8 @@ Pri prvom použití realistického dopĺňania aplikácia vyžiada endpoint URL 
 Na spustenie zo zdrojov je potrebný Python 3.13 a Git.
 
 ```powershell
-git clone https://gitlab.mff.cuni.cz/teaching/nprg045/ikudov/pohankova-katarina.git
-cd pohankova-katarina\rp_restore_app
+git clone https://github.com/katarinapohankova/RePaint.git
+cd RePaint\rp_restore_app
 
 python3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -74,6 +78,7 @@ python app.py
 ```
 
 Po aktivovaní virtuálneho prostredia sa používa príkaz `python`, ktorý odkazuje na interpreter z daného prostredia. Inštalácia zo zdrojov môže vyžadovať oprávnenie na prístup k repozitárom externých balíkov uvedených v súbore `requirements.txt`.
+Klient realistického dopĺňania sa inštaluje zo súkromného GitHub repozitára, preto je na jeho získanie potrebný príslušný prístup. Bežným používateľom sa odporúča inštalácia pomocou pripraveného Windows inštalátora.
 
 ## 1. Vytvorenie nového projektu
 
@@ -98,7 +103,7 @@ Postup:
 5. Potvrďte výber bodu.
 6. Rovnakým spôsobom pridajte ďalšie body.
 
-Na zarovnanie treba vybrať aspoň štyri páry bodov. Je možné vybrať aj viac bodov, ale počet je obmedzený. Čím presnejšie sú body zvolené a čím viacej párove je zvolených, tým lepšie bude maska sedieť na pôvodný obraz.
+Na zarovnanie treba vybrať aspoň štyri páry bodov. Je možné vybrať aj viac bodov, ale počet je obmedzený. Čím presnejšie sú body zvolené a čím rovnomernejšie sú rozložené po obraze, tým spoľahlivejšie je možné vypočítať zarovnanie. Použitie väčšieho počtu správne zvolených bodov môže presnosť zarovnania zlepšiť.
 
 V dialógu je možné vymazať posledný bod alebo všetky body a začať znovu.
 
@@ -119,7 +124,7 @@ Hlavné časti prostredia sú:
 * ľavá lišta nástrojov,
 * panel **Vrstvy**
 * panel **Paleta**
-* panel **Externé algoritmy**
+* panel **Externí algoritmy**
 * panel **Hrany**
 * panel **Materiály**
 * horné menu aplikácie
@@ -144,6 +149,7 @@ Pri otvorení projektu sa obraz automaticky prispôsobí veľkosti okna. Priblí
 Aplikácia pracuje s viacerými typmi vrstiev:
 
 * **Původní obraz** – pôvodný načítaný obraz, nedá sa meniť
+* **Historická kopie** – voliteľná referenčná vrstva, ktorá umožňuje porovnávať súčasný obraz s jeho historickou podobou
 * **Malba** – pracovné vrstvy, do ktorých sa dopĺňajú poškodené miesta
 * **Hrany** – vrstva s hranami, ktoré rozdeľujú poškodenie na samostatné oblasti
 
@@ -160,6 +166,7 @@ V paneli **Vrstvy** je možné:
 * zobraziť náhľad aktívnej vrstvy
 
 Odstraňovať je možné iba vrstvy malby.
+Vrstva historickej kópie sa v paneli zobrazí až po načítaní referenčného obrázka. Nie je určená na kreslenie a môže sa nezávisle zapínať, vypínať a nastavovať jej krytie.
 
 ### Náhľad vrstvy
 
@@ -167,11 +174,49 @@ Panel **Vrstvy** obsahuje náhľad aktívnej vrstvy. Tento náhľad pomáha skon
 
 Kliknutím na náhľad vrstvy sa zobrazí zväčšený náhľad priamo v hlavnej ploche. Opätovným kliknutím na zmenšený náhľad sa náhľad skryje a aplikácia sa vráti k bežnému zobrazeniu obrazu.
 
+### Historická kópia
+
+Aplikácia umožňuje používať historickú kópiu obrazu ako referenciu pri plánovaní rekonštrukcie. Kópia sa načítava do už existujúceho projektu a zarovnáva sa s pôvodným obrazom.
+
+#### Načítanie a zarovnanie
+
+1. Otvorte projekt obsahujúci pôvodný obraz.
+2. V menu vyberte **Soubor → Načíst historickou kopii...**.
+3. Vyberte obrázok historickej kópie.
+4. V dialógu označte zodpovedajúce body na pôvodnom obraze a historickej kópii.
+5. Každú dvojicu bodov môžete presnejšie upraviť vo zväčšených výrezoch.
+6. Po označení aspoň štyroch párov bodov potvrďte zarovnanie.
+
+Aplikácia vypočíta homografiu a zarovná historickú kópiu do súradnicového systému pôvodného obrazu. Na presnejšie zarovnanie je možné použiť až 20 párov bodov.
+
+Po zarovnaní sa v paneli **Vrstvy** zobrazí vrstva **Historická kopie**. Ak už projekt historickú kópiu obsahuje, je možné ju nahradiť inou fotografiou.
+
+#### Zobrazovanie historickej kópie
+
+Zobrazenie závisí od viditeľnosti vrstiev **Původní obraz** a **Historická kopie**:
+
+* **Iba pôvodný obraz:** zobrazuje sa pôvodný obraz na celom plátne.
+* **Obe vrstvy:** mimo poškodených miest sa zobrazuje pôvodný obraz, v poškodených miestach historická kópia.
+* **Iba historická kópia:** kópia sa zobrazuje na celom plátne.
+* **Obe vrstvy skryté:** nezobrazuje sa žiadny podklad.
+
+Poškodené oblasti, v ktorých sa používa historická kópia, sa určujú podľa pôvodnej masky poškodenia, nie podľa zostávajúcich nevyplnených miest.
+
+Vrstva historickej kópie podporuje priehľadnosť. Jej krytie je možné nastaviť posuvníkom rovnako ako pri ostatných vrstvách. Pri zníženom krytí sa v poškodených oblastiach pod kópiou nezobrazuje pôvodný obraz.
+
+Zobrazovanie masky poškodenia a ostatných vrstiev funguje nezávisle od viditeľnosti historickej kópie.
+
+Historická kópia slúži iba ako referencia. Nie je súčasťou exportovaného výsledného obrazu.
+
 ## 7. Maska poškodenia a zvýraznenie poškodených miest
 
 Maska poškodenia určuje, ktoré pixely obrazu sa považujú za poškodené. Väčšina nástrojov je obmedzená tak, aby pracovala iba v týchto miestach.
+Pri príprave masky sa odporúča používať čiernobiely obraz, v ktorom biele pixely označujú poškodené miesta a čierne pixely nepoškodené oblasti.
 
-Poškodené miesta je možné zvýrazniť cez **Zobrazení → Zobrazit poškoděné oblasti**. V tom istom menu sa nachádza aj posuvník na nastavenie priehľadnosti zvýraznenia.
+Maska sa po načítaní prevedie na binárnu reprezentáciu,
+s ktorou aplikácia ďalej pracuje.
+
+Poškodené miesta je možné zvýrazniť cez **Zobrazení → Zobrazit poškozené oblasti**. V tom istom menu sa nachádza aj posuvník na nastavenie priehľadnosti zvýraznenia.
 
 Zvýraznenie zodpovedá aktuálne viditeľným vrstvám. Ak je nejaká vrstva malby skrytá, aplikácia ju pri zobrazení zostávajúceho poškodenia neberie do úvahy.
 
@@ -360,7 +405,7 @@ Toto tlačidlo treba stlačiť až na konci, pri vyplnení už vybraných oblast
 
 ## 12. Externé algoritmy
 
-Panel **Externé algoritmy** obsahuje nástroje na automatické dopĺňanie poškodených častí pomocou externých algoritmov.
+Panel **Externí algoritmy** obsahuje nástroje na automatické dopĺňanie poškodených častí pomocou externých algoritmov.
 
 * **Realistické doplnění**
 * **Texturové doplnění**
@@ -380,8 +425,22 @@ Maximálna veľkosť okna je 1440 × 1440 pixelov. Okno musí obsahovať aspoň 
 
 K dispozícii sú dva režimy:
 
-* **Základní** – používa výrez pôvodného obrazu a je určený na bežné dopĺňanie poškodení,
-* **Vedené podle náčrtu** – používa aktuálny zložený obraz vrátane prípadného ručného náčrtu. Vodiace čiary by mali byť tmavé a tenké, ideálne približne jeden pixel. Tento režim je výrazne pomalší.
+* **Základní** – je určený na bežné realistické dopĺňanie poškodených miest. Umožňuje nastaviť mieru dogenerovania.
+* **Vedené podle náčrtu** – umožňuje usmerniť dopĺňanie pomocou ručne nakreslených vodiacich čiar. Tie by mali byť tmavé a tenké, ideálne približne jeden pixel. Tento režim je výrazne pomalší.
+
+V oboch režimoch je možné nezávisle vybrať podklad, z ktorého má algoritmus vychádzať:
+
+* **Původní obraz** – použije sa pôvodný obraz.
+* **Historická kopie** – použije sa historická kópia v celej oblasti vstupného okna.
+* **Původní obraz + kopie v poškozených místech** – mimo poškodených miest sa použije pôvodný obraz, v poškodených miestach historická kópia.
+
+Posledné dve možnosti sú dostupné iba v projekte, ktorý obsahuje načítanú historickú kópiu.
+
+Ak historická kópia obsahuje priehľadné miesta, algoritmus namiesto nich automaticky použije zodpovedajúce pixely pôvodného obrazu. Pri čiastočnej priehľadnosti sa oba obrazy plynulo zmiešajú.
+
+Výber podkladu nezávisí od aktuálnej viditeľnosti vrstiev na plátne ani od nastaveného krytia historickej kópie.
+
+Voľba **Použít viditelné vrstvy malby a hran** umožňuje zahrnúť do vstupného obrazu aj existujúce viditeľné pracovné vrstvy. V základnom režime je predvolene vypnutá, vo vedenom režime zapnutá. Používateľ ju môže zmeniť.
 
 V základnom režime je možné nastaviť hodnotu **Míra dogenerování**. Nižšia hodnota viac zachováva pôvodnú štruktúru pod maskou, zatiaľ čo hodnota 1 znamená úplné dogenerovanie. Ak pod maskou nie sú použiteľné pôvodné pixely, odporúča sa nastaviť hodnotu 1.
 
@@ -461,11 +520,37 @@ Možnosti v menu:
 
 Ak projekt obsahuje neuložené zmeny, aplikácia sa pri zatváraní opýta, či sa majú zmeny uložiť.
 
+### Vytvorenie nového návrhu z existujúceho projektu
+
+Z aktuálne otvoreného projektu je možné vytvoriť ďalší nezávislý návrh rekonštrukcie bez opakovaného načítavania a zarovnávania vstupných obrazov.
+
+V menu vyberte **Soubor → Vytvořit nový návrh z aktuálního projektu...**.
+
+Aplikácia ponúkne dve možnosti:
+
+* **Ponechat malbu a hrany** – vytvorí kompletnú kópiu projektu vrátane existujúcich pracovných vrstiev.
+* **Začít s čistou malbou** – zachová pôvodný obraz, masku poškodenia, historickú kópiu, paletu a textúry, ale vytvorí prázdne vrstvy malby a hrán. Všetky pôvodne poškodené oblasti budú opäť nevyplnené.
+
+Následne zvoľte názov a umiestnenie nového projektu.
+
+Ak pôvodný projekt obsahuje neuložené zmeny, aplikácia ponúkne možnosť **Uložit**, **Neukládat** alebo **Zrušit**.
+
+Pri možnosti **Neukládat** sa pôvodný súbor nezmení, ale nový návrh bude obsahovať aj aktuálne neuložené úpravy.
+
+Po úspešnom vytvorení sa nový návrh automaticky otvorí a aplikácia zobrazí jeho názov.
+
+Každý návrh je samostatný ZIP projekt. Úpravy vykonané v novom návrhu neovplyvnia pôvodný projekt.
+
 ## 16. Export výsledného obrazu
 
 Výsledný obraz sa exportuje cez **Soubor → Exportovat obraz…**.
 
-Exportuje sa aktuálny výsledok podľa viditeľných vrstiev. Ak je niektorá vrstva skrytá, do exportovaného obrazu sa nezahrnie.
+Exportovaný obraz vždy obsahuje pôvodný obraz ako podklad a na ňom viditeľné vrstvy malby a hrán.
+
+Viditeľnosť pôvodného obrazu na plátne neovplyvňuje export.
+Historická kópia sa do výsledného obrazu nikdy nezahrnie, ani keď je práve viditeľná na plátne.
+
+Skryté pracovné vrstvy malby a hrán sa do exportu nezahrnú.
 
 Podporované formáty exportu sú:
 
@@ -495,6 +580,9 @@ Report obsahuje:
 * zostávajúcu masku poškodenia
 * štatistiku pokrytia poškodených miest
 * samostatné pracovné vrstvy
+* historickú kópiu ako samostatnú referenčnú vrstvu, ak je v projekte načítaná
+
+Výsledný obraz v reporte sa vytvára z pôvodného obrazu a viditeľných pracovných vrstiev. Historická kópia je dokumentovaná samostatne a nie je súčasťou výslednej rekonštrukcie.
 
 ## 18. Klávesové skratky
 
@@ -535,21 +623,24 @@ Odporúčaný postup práce je:
 2. Načítať a zarovnať masku poškodenia.
 3. Skontrolovať, či zvýraznenie poškodenia sedí s obrazom.  
     Prípadne použiť Colorchecker korekciu.
-4. Podľa potreby vytvoriť nové vrstvy malby.
-5. Väčšie alebo logicky oddelené poškodenia rozdeliť hranami.
-6. Menšie miesta doplniť auto-výplňou alebo ručne.
-7. Väčšie oblasti doplniť výplňou, textúrou alebo externým algoritmom.
-8. Ostré prechody upraviť nástrojmi Rozmazání alebo Zjemnit hranu.
-9. Priebežne ukladať projekt.
-10. Na konci exportovať výsledný obraz alebo PDF report.
+4. Ak je dostupná historická kópia, načítať ju, zarovnať s pôvodným obrazom a podľa potreby používať ako referenciu.
+5. Podľa potreby vytvoriť nové vrstvy malby.
+6. Väčšie alebo logicky oddelené poškodenia rozdeliť hranami.
+7. Menšie miesta doplniť auto-výplňou alebo ručne.
+8. Väčšie oblasti doplniť výplňou, textúrou alebo externým algoritmom.
+9. Ostré prechody upraviť nástrojmi Rozmazání alebo Zjemnit hranu.
+10. Priebežne ukladať projekt.
+11. Na konci exportovať výsledný obraz alebo PDF report.
 
 Odporúča sa používať viac vrstiev malby pre rôzne varianty doplnenia. Vrstvy je možné zobrazovať a skrývať a meniť ich priehľadnosť, čo uľahčuje porovnávanie rôznych návrhov.
+
+Pri porovnávaní viacerých variantov je možné vytvoriť samostatné návrhy z existujúceho projektu. Každý návrh môže obsahovať inú rekonštrukciu, pričom všetky používajú rovnaký pôvodný obraz, masku a zarovnanú historickú kópiu.
 
 ## 20. Časté problémy
 
 ### Nástroj nekreslí
 
-Skontrolujte, či je aktívna vrstva typu **Malba**. Väčšina nástrojov nemôže kresliť do pôvodného obrazu ani do vrstvy hrán.
+Skontrolujte, či je aktívna vrstva typu **Malba**. Väčšina nástrojov nemôže kresliť do pôvodného obrazu, historickej kópie ani do vrstvy hrán.
 
 Tiež skontrolujte, či klikáte do oblasti určenej maskou poškodenia. Nástroje sú obmedzené na poškodené miesta.
 
@@ -559,10 +650,24 @@ Oblasť už môže byť na aktívnej vrstve vyplnená. Skúste vybrať inú vrst
 
 ### Nie je vidieť poškodené miesta
 
-Skontrolujte, či je zapnuté **Zobrazení → Zobrazit poškoděné oblasti**. Priehľadnosť zvýraznenia je možné upraviť posuvníkom v menu **Zobrazení**.
+Skontrolujte, či je zapnuté **Zobrazení → Zobrazit poškozené oblasti**. Priehľadnosť zvýraznenia je možné upraviť posuvníkom v menu **Zobrazení**.
 
 Ak je doplnenie na vrstve malby skryté, poškodenie sa môže v zvýraznení znovu zobrazovať, pretože aplikácia počíta iba s aktuálne viditeľnými vrstvami.
 
 ### Aplikácia je pri veľkom obraze pomalšia
 
 Veľké TIFF obrazy alebo veľké masky môžu spomaliť výber oblastí, výplň alebo externé algoritmy. Pri rozsiahlejších úpravách je vhodné projekt priebežne ukladať.
+
+### Historická kópia sa nezobrazuje
+
+Skontrolujte, či bola historická kópia načítaná a či je jej vrstva v paneli **Vrstvy** viditeľná.
+
+Ak je viditeľný aj pôvodný obraz, historická kópia sa zobrazuje iba v miestach označených pôvodnou maskou poškodenia.
+
+Pre zobrazenie historickej kópie na celom plátne skryte vrstvu **Původní obraz**.
+
+### Historická kópia obsahuje prázdne miesta
+
+Prázdne oblasti vzniknuté pri zarovnaní alebo úprave kópie môžu zostať priehľadné. Pri realistickom dopĺňaní sa tieto miesta automaticky nahradia pôvodným obrazom.
+
+Ak potrebujete zachovať priehľadnosť aj vo vstupnom súbore historickej kópie, použite formát podporujúci alfa kanál, napríklad PNG.

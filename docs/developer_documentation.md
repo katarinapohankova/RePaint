@@ -1,5 +1,7 @@
 # RePaint – programátorská dokumentácia
 
+**Language / Jazyk:** [English](developer_documentation.en.md) | [Čeština](developer_documentation.cs.md) | [Slovenčina](developer_documentation.md)
+
 ## Obsah
 
 * [1. Základná štruktúra projektu](#1-základná-štruktúra-projektu)
@@ -20,7 +22,7 @@
 * [16. Rozmazanie](#16-rozmazanie)
 * [17. Externé algoritmy](#17-externé-algoritmy)
 * [18. ColorChecker korekcia](#18-colorchecker-korekcia)
-* [19. Zarovnanie masky](#19-zarovnanie-masky)
+* [19. Zarovnanie masky a historickej kópie](#19-zarovnanie-masky-a-historickej-kópie)
 * [20. PDF report](#20-pdf-report)
 * [21. Nastavenia aplikácie](#21-nastavenia-aplikácie)
 * [22. Typický tok práce v kóde](#22-typický-tok-práce-v-kóde)
@@ -115,6 +117,7 @@ Trieda `Project` reprezentuje jeden otvorený projekt. Obsahuje:
 * zoznam vrstiev
 * pôvodnú masku poškodenia
 * masky vyplnenia poškodenia
+* historickú kópiu obrazu
 * paletu farieb
 * nastavenia štetca
 * textúry
@@ -135,6 +138,17 @@ Dôležité metódy triedy `Project`:
 * `get_selection_from_click()` – výber regiónu kliknutím
 * `get_selections_from_polygon()` – výber regiónov pomocou lasa
 * `sync_layer_filled_mask_from_alpha()` – zosynchronizovanie masky vyplnenia podľa alfa kanála vrstvy
+* `get_reference_layer()` – získanie historickej kópie
+* `composited_view_image()` – zostavenie RGBA obrazu pre hlavné plátno
+* `composited_view_region()` – zostavenie RGBA výrezu plátna
+* `realistic_input_region()` – príprava RGB vstupu realistického algoritmu podľa zvoleného podkladu
+* `get_export_image()` – zostavenie finálneho obrazu s vynúteným pôvodným pozadím
+
+Skladanie obrazu je rozdelené podľa účelu. Metódy `composited_view_image()` a `composited_view_region()` pripravujú RGBA obraz pre vykresľovanie na plátne.
+
+Pôvodné metódy `composited_image()` a `composited_region()` pracujú s RGB kompozíciou pôvodného pozadia a pracovných vrstiev. Historická kópia sa do nich nezahrňuje.
+
+Metóda `get_export_image()` používa `composited_image()` s parametrom `force_original_background=True`, čím zabezpečuje export pôvodného obrazu nezávisle od jeho viditeľnosti na plátne.
 
 ## 4. Vrstvy
 
@@ -144,11 +158,12 @@ Vrstvy sú definované v súbore:
 rp_restore/core/layers.py
 ```
 
-Používajú sa tri typy vrstiev:
+Používajú sa štyri typy vrstiev:
 
 ```python
 class LayerRole(str, Enum):
     BACKGROUND = "background"
+    REFERENCE = "reference"
     EDGE = "edge"
     PAINT = "paint"
 ```
@@ -176,6 +191,12 @@ Vrstvy používajú obrazové dáta ako NumPy pole tvaru:
 
 Typ dát je `uint8` a kanály sú v poradí RGBA.
 
+Vrstva typu `REFERENCE` reprezentuje historickú kópiu obrazu. Ide o špeciálnu referenčnú vrstvu, ktorá nie je určená na kreslenie a neovplyvňuje masku vyplnených poškodených miest.
+
+Podporuje vlastnú viditeľnosť a krytie rovnako ako ostatné vrstvy. Jej obrazové dáta obsahujú aj alfa kanál, ktorý umožňuje reprezentovať skutočne chýbajúce časti kópie.
+
+Vrstva sa vytvorí pri načítaní historickej kópie. `LayersPanel.refresh_from_project()` zároveň nezobrazuje prázdne referenčné vrstvy zo starších projektov.
+
 ## 5. ProjectController
 
 Najdôležitejšia riadiaca trieda aplikácie je:
@@ -201,6 +222,20 @@ Controller zodpovedá napríklad za:
 * ColorChecker korekciu
 * Undo/Redo
 * zobrazenie hlášok používateľovi
+
+Controller ďalej zabezpečuje načítanie a zarovnanie historickej kópie a vytváranie nových nezávislých návrhov.
+
+Dôležité metódy:
+
+* `load_reference_image()` – načítanie obrázka, otvorenie zarovnávacieho dialógu a vloženie kópie do projektu.
+* `create_proposal_from_current_project()` – vytvorenie samostatného projektu s existujúcimi alebo prázdnymi pracovnými vrstvami.
+* `run_realistic_fill_window()` – príprava vstupného okna a spustenie realistického doplnenia podľa vybraného podkladu.
+
+Pri vytváraní nového návrhu sa aktuálny stav projektu najprv serializuje do dočasného ZIP súboru a následne sa načíta ako nový nezávislý objekt `Project`.
+
+Pri čistom návrhu sa odstránia existujúce vrstvy `PAINT` a `EDGE`, vytvoria sa nové prázdne vrstvy a pôvodná maska poškodenia sa nastaví ako nevyplnená. Pôvodný obraz, historická kópia, paleta a textúry sa zachovajú.
+
+Nový projekt sa uloží pod samostatným názvom a otvorí sa až po úspešnom uložení. Kontrola neuložených zmien pôvodného projektu sa vykonáva v `MainWindow.on_create_proposal_requested()`.
 
 Typický tok udalosti je:
 
@@ -236,6 +271,14 @@ Zvýraznenie výberu je implementované pomocou pomocnej funkcie v:
 ```
 rp_restore/gui/canvas/overlay_highlight.py
 ```
+
+Hlavné plátno používa RGBA obraz zostavený metódami `Project.composited_view_image()` a `Project.composited_view_region()`.
+
+Podklad závisí od viditeľnosti vrstiev `BACKGROUND` a `REFERENCE`. Ak sú obe viditeľné, historická kópia nahrádza pôvodný obraz iba v oblastiach určených `damage_original_mask`. Pri skrytom `BACKGROUND` sa viditeľná kópia používa na celom plátne.
+
+Krytie referenčnej vrstvy sa aplikuje na jej alfa kanál bez primiešavania pôvodného pozadia v nahradených oblastiach.
+
+Pri čiastočnom prekreslení plátna používa `ImageCanvasWidget.patch_region()` režim `QPainter.CompositionMode_Source`, aby nový RGBA výrez úplne nahradil predchádzajúce pixely.
 
 ## 7. Nástroje
 
@@ -333,6 +376,9 @@ Súbor `project.json` obsahuje metadata projektu, napríklad:
 * históriu pre report
 
 Obrázky vrstiev a masky sa ukladajú ako PNG. Pri načítaní sa znovu vytvoria objekty `Project`, `Layer`, `LayerMeta` a `Texture`.
+Historická kópia sa ukladá ako bežná RGBA vrstva s typom `REFERENCE`. Jej obrázok, viditeľnosť, krytie a poradie sú súčasťou projektu.
+
+Staršie projekty bez referenčnej vrstvy zostávajú kompatibilné. Historickú kópiu do nich možno dodatočne načítať.
 
 ## 10. Načítanie a ukladanie obrázkov
 
@@ -349,7 +395,7 @@ Tento modul rieši:
 * uloženie výsledného obrazu
 * uloženie masky
 
-Obrazové dáta sa v aplikácii väčšinou držia ako NumPy polia. Pri vrstvách sa používa RGBA, pri výslednom zloženom obraze RGB.
+Obrazové dáta sa v aplikácii reprezentujú ako NumPy polia. Jednotlivé vrstvy aj obraz určený na vykreslenie na plátne používajú RGBA. Vstupy realistického algoritmu a exportovaný výsledný obraz používajú RGB.
 
 ## 11. Maska poškodenia a regióny
 
@@ -518,8 +564,22 @@ Používateľ vyberá obdĺžnikové okno s maximálnym rozmerom 1440 × 1440 pi
 
 Podporované sú dva režimy:
 
-* **základný režim** používa výrez pôvodného obrazu a umožňuje nastaviť mieru dogenerovania,
-* **vedený režim** používa aktuálny zložený obraz, takže môže zohľadniť aj ručne nakreslené vodiace čiary. Je výrazne pomalší než základný režim.
+* **základný režim** umožňuje nastaviť mieru dogenerovania pomocou parametra `partial_noise`,
+* **vedený režim** umožňuje využiť ručne nakreslené vodiace čiary a je výrazne pomalší než základný režim.
+
+Výber vstupného podkladu je nezávislý od režimu algoritmu. Dialóg `RealisticFillDialog` ponúka tri možnosti:
+
+* `original` – pôvodný obraz,
+* `reference` – historická kópia,
+* `hybrid` – pôvodný obraz s historickou kópiou v oblastiach určených pôvodnou maskou poškodenia.
+
+Historická kópia je dostupná ako zdroj iba vtedy, ak projekt obsahuje neprázdnu referenčnú vrstvu.
+
+Prípravu vstupného RGB výrezu zabezpečuje `Project.realistic_input_region()`. Pri použití historickej kópie sa priehľadné pixely nahradia zodpovedajúcimi pixelmi pôvodného obrazu. Pri čiastočnej priehľadnosti sa oba obrazy zmiešajú podľa alfa kanála kópie.
+
+Do výpočtu sa nezahŕňa používateľom nastavené krytie referenčnej vrstvy ani jej viditeľnosť na plátne.
+
+Parameter `use_composited_layers` určuje, či sa k vybranému podkladu pridajú aj viditeľné vrstvy `PAINT` a `EDGE`. Predvolene je vypnutý v základnom režime a zapnutý vo vedenom režime.
 
 Výsledok sa vloží do aktívnej vrstvy typu `PAINT`, a to iba do vybraných poškodených pixelov, ktoré na danej vrstve ešte neboli vyplnené.
 
@@ -578,9 +638,9 @@ rp_restore/gui/colorchecker_dialog.py
 
 Korekcia sa počíta ako farebná transformačná matica. Táto matica sa uloží do projektu a môže sa zapínať alebo vypínať pre náhľad.
 
-Korekcia sa aplikuje pri skladaní výsledného obrazu, ale nemení priamo pixely jednotlivých vrstiev. Slúži teda ako zobrazovacia korekcia.
+Korekcia sa aplikuje pri skladaní obrazu pre zobrazenie na plátne aj pri vytváraní exportovaného výsledného obrazu a PDF reportu. Nemení však priamo pixely jednotlivých vrstiev, ktoré zostávajú uložené v pôvodnej podobe.
 
-## 19. Zarovnanie masky
+## 19. Zarovnanie masky a historickej kópie
 
 Logika zarovnania masky je v:
 
@@ -596,10 +656,19 @@ rp_restore/gui/mask_alignment_dialog.py
 
 Používateľ vyberie zodpovedajúce body medzi pôvodným obrazom a maskou. Z nich sa vypočíta homografia a maska sa transformuje na rozmery pôvodného obrazu.
 
+Rovnaký dialóg `MaskAlignmentDialog` sa používa aj pri zarovnávaní historickej kópie. Parameter `reference_mode=True` upravuje jeho popisky a spôsob prezentácie vstupných obrázkov.
+
+Kópia sa zarovnáva k už existujúcemu pôvodnému obrazu v pracovnom rozlíšení projektu.
+
+Homografia sa vypočíta pomocou `compute_homography()` zo zodpovedajúcich bodov historickej kópie a pôvodného obrazu. Na transformáciu kópie sa používa `warp_rgba_to_image()`, ktorá zachováva alfa kanál a priehľadnosť oblastí mimo transformovaného obrázka.
+
+Pri interpolácii sa používa prednásobený alfa kanál (premultiplied alpha), aby nevznikali tmavé okraje priehľadných oblastí.
+
 Dôležité funkcie:
 
 * `compute_homography()`
 * `warp_mask_to_image()`
+* `warp_rgba_to_image()` – transformácia historickej kópie so zachovaním priehľadnosti
 * `rgb_to_damage_mask()`
 
 ## 20. PDF report
@@ -621,7 +690,11 @@ Dôležité prvky:
 * `ReportMetadata`
 * `generate_report()`
 
-Report obsahuje pôvodný obraz, masku poškodenia, výsledný obraz, zostávajúcu masku, štatistiky a náhľady vrstiev
+Report obsahuje pôvodný obraz, masku poškodenia, výsledný obraz, zostávajúcu masku, štatistiky a náhľady vrstiev.
+
+Výsledný obraz v PDF reporte sa získava pomocou `Project.get_export_image()`. Vždy teda obsahuje pôvodné pozadie a viditeľné pracovné vrstvy, bez historickej kópie.
+
+Ak projekt obsahuje historickú kópiu, funkcia `_add_layers_section()` ju pridá do samostatnej časti **Referenční obraz**. Kópia sa tým dokumentuje, ale nezahrňuje sa do výslednej rekonštrukcie.
 
 Pri úprave obsahu reportu sa väčšina zmien robí v súbore `pdf_report.py`.
 
@@ -663,6 +736,23 @@ Príklad: používateľ použije štetec.
 ```
 
 Podobný princíp používajú aj ostatné nástroje.
+
+### Načítanie historickej kópie
+
+1. Používateľ vyberie možnosť **Načíst historickou kopii...**.
+2. `MainWindow` zavolá `ProjectController.load_reference_image()`.
+3. Otvorí sa `MaskAlignmentDialog` v referenčnom režime.
+4. Z vybraných dvojíc bodov sa vypočíta homografia.
+5. `warp_rgba_to_image()` vytvorí zarovnaný RGBA obraz.
+6. Obrázok sa uloží do vrstvy `REFERENCE` a obnoví sa plátno.
+
+### Vytvorenie nového návrhu
+
+1. Používateľ vyberie vytvorenie nového návrhu.
+2. `MainWindow` spracuje voľbu pracovných vrstiev a prípadné uloženie pôvodného projektu.
+3. `ProjectController.create_proposal_from_current_project()` vytvorí nezávislú kópiu projektu.
+4. Pri čistom návrhu sa inicializujú prázdne vrstvy `PAINT` a `EDGE` a obnoví pôvodná maska poškodenia.
+5. Nový projekt sa uloží do samostatného ZIP súboru a otvorí sa v aplikácii.
 
 ## 23. Zhrnutie
 

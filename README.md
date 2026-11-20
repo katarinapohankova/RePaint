@@ -1,39 +1,49 @@
 # RePaint
 
-RePaint je aplikácia určená na digitálne dopĺňanie poškodených častí obrazov. Umožňuje pracovať s pôvodným obrazom, maskou poškodenia, viacerými vrstvami, ručnými nástrojmi a externými algoritmami na dopĺňanie chýbajúcich miest.
+**Language / Jazyk:** [English](README.md) | [Čeština](README.cs.md) | [Slovenčina](README.sk.md)
 
-Aplikácia vznikla ako súčasť bakalárskej práce v spolupráci s Národnou galériou v Prahe a je určená najmä na prípravu a porovnávanie návrhov reštaurátorského zásahu.
+RePaint is an application for digitally reconstructing damaged areas of paintings. It lets users work with an original image, a damage mask, multiple layers, manual editing tools, and external algorithms for filling in missing areas.
 
-## Funkcie aplikácie
+The application was developed as part of a bachelor's thesis in cooperation with the National Gallery Prague. It is primarily intended for preparing and comparing proposed painting restoration treatments.
 
-Aplikácia podporuje najmä:
+## Features
 
-* vytvorenie projektu z obrazu a masky poškodenia
-* zarovnanie masky poškodenia pomocou zodpovedajúcich bodov
-* prácu s vrstvami
-* ručné dopĺňanie farbou alebo textúrou
-* výplň poškodených regiónov
-* výber poškodených oblastí kliknutím alebo lasom
-* kreslenie hrán na rozdelenie poškodenia na menšie regióny
-* zjemnenie prechodu medzi vyplnenými regiónmi
-* rozmazanie doplnených častí
-* automatickú výplň malých poškodených oblastí
-* ColorChecker korekciu
-* externé realistické a textúrové dopĺňanie
+The application supports:
+
+* creating a project from an image and a damage mask
+* aligning a damage mask using corresponding points
+* loading and aligning a historical copy of a painting
+* using a historical copy as a reference when planning a reconstruction
+* working with layers
+* manually filling damaged areas with color or texture
+* filling damaged regions
+* selecting damaged areas by clicking or using the lasso tool
+* drawing boundaries to divide damaged areas into smaller regions
+* smoothing transitions between filled regions
+* smudging reconstructed areas
+* automatically filling small damaged regions
+* ColorChecker color correction
+* external realistic and texture-based inpainting
+* using a historical copy as input for realistic inpainting
 * Undo/Redo
-* uloženie a otvorenie projektu vo formáte `.zip`
-* export výsledného obrazu
-* export PDF reportu
+* saving and opening projects in `.zip` format
+* creating independent reconstruction proposals from an existing project
+* exporting the resulting image
+* exporting a PDF report
 
-## Štruktúra projektu
+## Project structure
 
-Základná štruktúra repozitára:
+Basic repository structure:
 
 ```
 .
 ├── docs/
 │   ├── user_documentation.md
-│   └── developer_documentation.md
+│   ├── user_documentation.cs.md
+│   ├── user_documentation.en.md
+│   ├── developer_documentation.md
+│   ├── developer_documentation.cs.md
+│   └── developer_documentation.en.md
 ├── rp_restore_app/
 │   ├── app.py
 │   ├── RePaint.spec
@@ -51,104 +61,110 @@ Základná štruktúra repozitára:
 │       ├── report/
 │       └── resources/
 ├── COPYRIGHT.md
+├── README.cs.md
+├── README.sk.md
 └── README.md
 ```
 
-Priečinok `rp_restore_app` obsahuje samotnú aplikáciu. Hlavný balík aplikácie je `rp_restore`.
+The `rp_restore_app` directory contains the application itself. Its main Python package is `rp_restore`.
 
-Priečinok `docs` obsahuje dokumentáciu:
+The `docs` directory contains the documentation:
 
-* `user_documentation.md` – užívateľská dokumentácia
-* `developer_documentation.md` – programátorská dokumentácia
+* `user_documentation.md` – user documentation
+* `developer_documentation.md` – developer documentation
 
-## Inštalácia a spustenie
+## Installation and launch
 
-Aplikáciu je možné používať dvoma spôsobmi: nainštalovať ju pomocou pripraveného inštalátora alebo ju spustiť priamo zo zdrojového kódu.
+The application can be used in two ways: by installing it with the provided installer or by running it directly from source code.
 
-### Inštalácia pomocou inštalátora
+### Installation with the installer
 
-Pre bežné používanie je určený súbor:
+For regular use, download:
 
 ```text
-RePaint-Setup-1.0.1.exe
+RePaint-Setup-1.1.0.exe
 ```
 
-Inštalátor je určený pre 64-bitový operačný systém Windows. Po jeho spustení sa aplikácia nainštaluje do používateľského priečinka, vytvorí sa odkaz v ponuke Štart a voliteľne aj odkaz na pracovnej ploche.
+The latest version is available under
+[GitHub Releases](https://github.com/katarinapohankova/RePaint/releases/latest).
 
-Táto verzia už obsahuje Python, potrebné knižnice aj lokálny textúrový algoritmus. Na cieľovom počítači preto nie je potrebné samostatne inštalovať Python, Git ani ďalšie závislosti.
+The installer is intended for 64-bit Windows. Running it installs the application into the user's directory, creates a Start menu shortcut, and optionally creates a desktop shortcut.
 
-Realistické dopĺňanie používa vzdialenú službu. Vyžaduje internetové pripojenie a platný API kľúč, ktorý sa zadáva pri prvom použití a následne sa ukladá do systémového úložiska prihlasovacích údajov.
+The installed version already includes Python, the required libraries, and the local texture inpainting algorithm. You do not need to install Python, Git, or other dependencies separately on the target computer.
 
-### Spustenie zo zdrojového kódu
+Realistic inpainting uses a remote service. It requires an internet connection and a valid API key, which you enter on first use and which is subsequently stored in the operating system's credential store.
 
-Na spustenie zo zdrojov je potrebný Python 3.13 a Git. Repozitár sa naklonuje a následne sa prejde do priečinka aplikácie:
+### Running from source code
+
+Python 3.13 and Git are required. Clone the repository and navigate to the application directory:
 
 ```powershell
-git clone https://gitlab.mff.cuni.cz/teaching/nprg045/ikudov/pohankova-katarina.git
-cd pohankova-katarina\rp_restore_app
+git clone https://github.com/katarinapohankova/RePaint.git
+cd RePaint\rp_restore_app
 ```
 
-Vytvorí a aktivuje sa virtuálne prostredie:
+Create and activate a virtual environment:
 
 ```powershell
 python3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 ```
 
-Po aktivovaní prostredia sa závislosti inštalujú prostredníctvom interpretra `python` z daného virtuálneho prostredia:
+After activating the environment, install the dependencies using the `python` interpreter from that environment:
 
 ```powershell
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-Aplikácia sa spustí príkazom:
+Start the application:
 
 ```powershell
 python app.py
 ```
 
-Inštalácia zo zdrojového kódu môže vyžadovať oprávnenie na prístup k repozitárom externých balíkov uvedených v súbore `requirements.txt`.
+Installing from source may require access to the external package repositories specified in `requirements.txt`.
+The realistic inpainting client is installed from a private GitHub repository, so appropriate access permissions are required. Regular users are advised to use the prepared Windows installer.
 
-## Použitie
+## Usage
 
-Po spustení aplikácie je možné vytvoriť nový projekt alebo otvoriť už existujúci projekt.
+After launching the application, you can create a new project or open an existing one.
 
-Nový projekt sa vytvára z pôvodného obrazu. Voliteľne je možné pridať aj masku poškodenia, ktorá určuje oblasti určené na dopĺňanie. Ak je maska pridaná, aplikácia umožní jej zarovnanie s obrazom pomocou zodpovedajúcich bodov.
+A new project starts with the original image. You may also add a damage mask, which defines the areas to be reconstructed. When a mask is provided, the application allows it to be aligned with the image using corresponding points.
 
-Podrobnejší opis práce s aplikáciou je uvedený v užívateľskej dokumentácii:
+You can also load a historical copy of the painting into an existing project. It is aligned with the original image and can serve as a reference when reconstructing damaged areas, including when using the realistic inpainting algorithm.
 
-```
-docs/user_documentation.md
-```
+An independent reconstruction proposal can be created from an existing project. You can choose whether to keep the current painting and edge layers or start with empty working layers.
 
-## Vývojárska dokumentácia
+For more detailed instructions, see the [user documentation](docs/user_documentation.en.md).
 
-Stručný opis vnútornej štruktúry aplikácie, hlavných modulov, dátového modelu a nástrojov je uvedený v programátorskej dokumentácii:
+## Developer documentation
 
-```
-docs/developer_documentation.md
-```
+A summary of the application's internal structure, main modules, data model, and tools is available in the [developer documentation](docs/developer_documentation.en.md).
 
-## Ukladanie projektov
+## Saving projects
 
-Projekt sa ukladá ako `.zip` súbor. Tento súbor obsahuje najmä:
+Projects are saved as `.zip` files containing, in particular:
 
-* metadata projektu
-* pôvodný obraz
-* vrstvy
-* masky
-* paletu
-* textúry
-* nastavenia potrebné na pokračovanie práce
+* project metadata
+* the original image
+* layers
+* masks
+* the color palette
+* textures
+* settings needed to continue working
 
-Uložený projekt je možné neskôr znovu otvoriť v aplikácii a pokračovať v úpravách.
+If a project contains a historical copy, it is stored alongside the other layers, including its transparency and settings. Its alignment is preserved when creating another proposal. Each proposal is saved as a separate project.
 
-## Externé algoritmy
+An exported result always uses the original image together with the visible working layers. The historical copy is for reference only and is not included in the reconstructed result. It may be included separately in the PDF report.
 
-Aplikácia podporuje dva externé algoritmy:
+A saved project can be opened again later to continue editing.
 
-* **realistické dopĺňanie** – používa klienta `painting_inpaint.remote` a vzdialenú službu; vyžaduje internetové pripojenie, endpoint URL a API kľúč
-* **textúrové dopĺňanie** – používa lokálne nainštalovaný balík `texture_infill`; umožňuje doplniť vybranú poškodenú oblasť alebo vytvoriť samostatnú textúru a pridať ju medzi materiály projektu
+## External algorithms
 
-Pri použití nainštalovanej verzie aplikácie sú potrebné balíky a modely už zahrnuté v inštalácii.
+The application supports two external algorithms:
+
+* **Realistic inpainting** – uses the `painting_inpaint.remote` client and a remote service; the input can be the original image, the historical copy, or a combination based on the damage mask; requires an internet connection, an endpoint URL, and an API key
+* **Texture inpainting** – uses the locally installed `texture_infill` package; it can fill a selected damaged area or generate a separate texture and add it to the project's materials
+
+The required packages and models are already included when using the installed version of the application.
