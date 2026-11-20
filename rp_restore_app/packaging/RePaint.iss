@@ -1,5 +1,5 @@
 #define MyAppName "RePaint"
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.1.0"
 #define MyAppPublisher "Katarína Pohanková"
 #define MyAppExeName "RePaint.exe"
 
@@ -11,7 +11,7 @@ AppId={{A4E97E5D-3F13-49AA-91B7-4EC57D7A56C8}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-VersionInfoVersion=1.0.1.0
+VersionInfoVersion=1.1.0.0
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName} Setup
 VersionInfoProductName={#MyAppName}

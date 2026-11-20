@@ -30,6 +30,9 @@ build/
 dist/
 *.egg-info/
 
+rp_restore/resources/texture_previews/
+rp_restore/resources/textures/
+
 py_size.py
 damage_mask_example.png
 png_for_mask_damage_example.png
