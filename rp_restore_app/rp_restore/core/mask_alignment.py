@@ -52,6 +52,40 @@ def warp_mask_to_image(mask_rgb: np.ndarray, H: np.ndarray, target_size: tuple[i
     warped = np.clip(warped, 0, 255).astype(np.uint8)
     return warped
 
+def warp_rgba_to_image(image_rgba: np.ndarray, H: np.ndarray, target_size: tuple[int, int]) -> np.ndarray:
+    """Zarovná RGBA obrázok pomocou homografie so zachovaním priehľadnosti"""
+    if image_rgba.ndim != 3 or image_rgba.shape[2] != 4:
+        raise ValueError("image_rgba must have shape (H, W, 4)")
+
+    if image_rgba.dtype != np.uint8:
+        raise ValueError("image_rgba must have dtype uint8")
+
+    H = np.asarray(H, dtype=np.float64)
+    if H.shape != (3, 3):
+        raise ValueError("H must be a 3x3 homography matrix")
+
+    w, h = target_size
+    if w <= 0 or h <= 0:
+        raise ValueError("Invalid target size")
+
+    #premultiplied alpha zabraňuje tmavým okrajom pri transformácii priehľadných pixelov
+    alpha = image_rgba[..., 3].astype(np.float32) / 255.0
+    rgb = image_rgba[..., :3].astype(np.float32)
+    premultiplied_rgb = rgb * alpha[..., None]
+
+    warped_rgb = cv2.warpPerspective(premultiplied_rgb, H, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0))
+
+    warped_alpha = cv2.warpPerspective(alpha, H, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+
+    result = np.zeros((h, w, 4), dtype=np.uint8)
+
+    valid = warped_alpha > 1e-6
+    result[valid, :3] = np.clip(warped_rgb[valid] / warped_alpha[valid, None], 0, 255).astype(np.uint8)
+
+    result[..., 3] = np.rint(np.clip(warped_alpha, 0.0, 1.0) * 255).astype(np.uint8)
+
+    return result
+
 def rgb_to_damage_mask(mask_rgb: np.ndarray) -> np.ndarray:
     """Prevedie grayscale, RGB alebo RGBA masku na 2D damage masku"""
     #grayscale masku berieme ako poškodenie všade tam, kde má nenulovú hodnotu

@@ -18,8 +18,9 @@ def numpy_to_qimage(arr: np.ndarray) -> QImage:
         if c == 3:
             rgb = arr
         elif c == 4:
-            #zahodíme alfu, stačí nám RGB
-            rgb = arr[..., :3]
+            #priehľadné miesta sa zobrazujú na svetlosivom podklade
+            alpha = arr[..., 3:4].astype(np.float32) / 255.0
+            rgb = (arr[..., :3].astype(np.float32) * alpha + 230.0 * (1.0 - alpha)).clip(0, 255).astype(np.uint8)
         else:
             raise ValueError(f"Unsupported channel count: {c}")
     else:
@@ -180,8 +181,9 @@ class PairRefinementDialog(QDialog):
     užívateľ klikne presný bod v oboch a potvrdí OK
     """
 
-    def __init__(self, image_q: QImage, mask_q: QImage, approx_image_point: tuple[float, float], approx_mask_point: tuple[float, float], crop_half_size: int = 50, parent: QWidget | None = None) -> None:
+    def __init__(self, image_q: QImage, mask_q: QImage, approx_image_point: tuple[float, float], approx_mask_point: tuple[float, float], crop_half_size: int = 50, parent: QWidget | None = None, reference_mode: bool = False) -> None:
         super().__init__(parent)
+        self.reference_mode = reference_mode
         self.setWindowTitle("Upřesnit pár bodů")
 
         self._image_q = image_q
@@ -219,8 +221,10 @@ class PairRefinementDialog(QDialog):
         """Vytvorí obsah dialógu pre spresnenie páru bodov"""
         layout = QVBoxLayout(self)
 
+        right_name = "historická kopie" if self.reference_mode else "maska"
+
         info_label = QLabel(
-            "Klikněte na stejný detail v levém výřezu (obraz) a v pravém výřezu (maska)\n"
+            f"Klikněte na stejný detail v levém výřezu (obraz) a v pravém výřezu ({right_name}).\n"
             "Oba kliky musí být provedeny, než potvrdíte OK"
         )
         info_label.setWordWrap(True)
@@ -245,7 +249,11 @@ class PairRefinementDialog(QDialog):
         status_layout = QHBoxLayout()
         layout.addLayout(status_layout)
         self.img_status = QLabel("Bod na obraze: nevybrán")
-        self.mask_status = QLabel("Bod na masce: nevybrán")
+        self.mask_status = QLabel(
+            "Bod na kopii: nevybrán"
+            if self.reference_mode
+            else "Bod na masce: nevybrán"
+        )
         status_layout.addWidget(self.img_status)
         status_layout.addWidget(self.mask_status)
 
@@ -280,7 +288,7 @@ class PairRefinementDialog(QDialog):
     def _on_mask_click(self, local_x: float, local_y: float) -> None:
         """Uloží spresnený bod na maske"""
         self._refined_mask_point = (self._mask_x0 + local_x, self._mask_y0 + local_y)
-        self.mask_status.setText("Bod na masce: vybrán")
+        self.mask_status.setText("Bod na kopii: vybrán" if self.reference_mode else "Bod na masce: vybrán")
         self._update_ok_enabled()
 
     def _update_ok_enabled(self) -> None:
@@ -303,9 +311,10 @@ class MaskAlignmentDialog(QDialog):
     počet párov musí byť aspoň 4 a počet bodov na obraze aj maske musí byť rovnaký
     """
 
-    def __init__(self, image_arr: np.ndarray, mask_arr: np.ndarray, parent: QWidget | None = None) -> None:
+    def __init__(self, image_arr: np.ndarray, mask_arr: np.ndarray, parent: QWidget | None = None, reference_mode: bool = False) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Zarovnání masky k obrazu")
+        self.reference_mode = reference_mode
+        self.setWindowTitle("Zarovnání historické kopie k obrazu" if self.reference_mode else "Zarovnání masky k obrazu")
 
         self.image_q = numpy_to_qimage(image_arr)
         self.mask_q = numpy_to_qimage(mask_arr)
@@ -327,14 +336,27 @@ class MaskAlignmentDialog(QDialog):
         """Vytvorí hlavné rozhranie dialógu"""
         layout = QVBoxLayout(self)
 
-        info_label = QLabel(
-            "Vyberte 4-20 dobře rozpoznatelných bodů (detaily) na obraze a na masce.\n"
-            "Postup pro každý bod:\n"
-            "   1) Klikněte na detail na levém obrázku (obraz)\n"
-            "   2) Klikněte na stejný detail na pravém obrázku (maska)\n"
-            "   3) V otevřeném okně vyberte přesný bod v obou výřezech a potvrďte OK\n"
-            "Počet bodů musí být stejný na obraze i masce (minimálně 4 páry)"
-        )
+        if self.reference_mode:
+            info_text = (
+                "Vyberte 4-20 odpovídajících si bodů na současném obraze a historické kopii.\n"
+                "Postup pro každý bod:\n"
+                "   1) Klikněte na detail na levém obrázku (současný obraz)\n"
+                "   2) Klikněte na stejný detail na pravém obrázku (historická kopie)\n"
+                "   3) V otevřeném okně oba body přesně upřesněte\n"
+                "Počet bodů musí být stejný (minimálně 4 páry)."
+            )
+        else:
+            info_text = (
+                "Vyberte 4-20 dobře rozpoznatelných bodů (detaily) na obraze a na masce.\n"
+                "Postup pro každý bod:\n"
+                "   1) Klikněte na detail na levém obrázku (obraz)\n"
+                "   2) Klikněte na stejný detail na pravém obrázku (maska)\n"
+                "   3) V otevřeném okně vyberte přesný bod v obou výřezech a potvrďte OK\n"
+                "Počet bodů musí být stejný na obraze i masce (minimálně 4 páry)"
+            )
+
+        info_label = QLabel(info_text)
+
         info_label.setWordWrap(True)
         layout.addWidget(info_label)
 
@@ -420,8 +442,10 @@ class MaskAlignmentDialog(QDialog):
     def _on_mask_coarse_click(self, x: float, y: float) -> None:
         """Uloží hrubý bod na maske alebo upozorní na zlé poradie kliknutia"""
         if self.pending_image_point is None:
+            right_name = "historická kopie" if self.reference_mode else "maska"
             QMessageBox.information(self, "Info",
-                "Nejprve klikněte na stejný detail na levém obrázku (obraz), potom na pravém obrázku (maska)",
+                "Nejprve klikněte na stejný detail na levém obrázku "
+                f"(obraz), potom na pravém obrázku ({right_name})",
             )
             #hrubý klik na maske ignorujeme, dokým nemáme bod na obraze
             self._redraw_points()
@@ -436,7 +460,7 @@ class MaskAlignmentDialog(QDialog):
         if self.pending_image_point is None or self.pending_mask_point is None:
             return
 
-        dlg = PairRefinementDialog(image_q=self.image_q, mask_q=self.mask_q, approx_image_point=self.pending_image_point, approx_mask_point=self.pending_mask_point, crop_half_size=50, parent=self)
+        dlg = PairRefinementDialog(image_q=self.image_q, mask_q=self.mask_q, approx_image_point=self.pending_image_point, approx_mask_point=self.pending_mask_point, crop_half_size=50, parent=self, reference_mode=self.reference_mode)
         result = dlg.exec()
 
         if result == QDialog.Accepted:

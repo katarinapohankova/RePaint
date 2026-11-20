@@ -165,6 +165,10 @@ class MainWindow(QMainWindow):
         open_action.triggered.connect(self.on_open_project_requested)
         file_menu.addAction(open_action)
 
+        load_reference_action = QAction("Načíst historickou kopii...", self)
+        load_reference_action.triggered.connect(self.on_load_reference_image)
+        file_menu.addAction(load_reference_action)
+
         file_menu.addSeparator()
 
         save_action = QAction("Uložit projekt", self)
@@ -832,6 +836,46 @@ class MainWindow(QMainWindow):
             self.show_start_screen()
             return
 
+    def on_load_reference_image(self) -> None:
+        """Načíta a zarovná historickú kópiu v otvorenom projekte"""
+        if self.controller.project is None:
+            QMessageBox.information(self, "Žádný projekt", "Nejprve otevřete nebo vytvořte projekt")
+            return
+
+        #pri opätovnom načítaní upozorníme na nahradenie kópie
+        reference = self.controller.project.get_reference_layer()
+
+        if reference is not None and reference.image[..., 3].any():
+            reply = QMessageBox.question(
+                self,
+                "Nahradit historickou kopii",
+                "Projekt již obsahuje historickou kopii. "
+                "Chcete ji nahradit novým obrázkem?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                return
+
+        image_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Vyberte historickou kopii",
+            "",
+            "Obrázky (*.png *.tif *.tiff *.webp *.jpg *.jpeg);;"
+            "Všechny soubory (*.*)",
+        )
+
+        if not image_path:
+            return
+
+        try:
+            loaded = self.controller.load_reference_image(image_path)
+        except Exception as e:
+            QMessageBox.critical(self, "Chyba při načítání historické kopie", str(e))
+            return
+
+        if loaded:
+            self.statusBar().showMessage("Historická kopie byla načtena a zarovnána", 4000)
 
     def on_save_project(self) -> None:
         """

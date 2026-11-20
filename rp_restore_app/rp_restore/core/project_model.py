@@ -28,7 +28,7 @@ class Project:
         self.base_image_scale: float = 1.0  #working_size / original_size
         self.base_image_working: np.ndarray | None = None  #obraz, s ktorým aplikácia reálne pracuje
 
-        #všetky vrstvy v projekte (BACKGROUND, EDGE, PAINT)
+        #všetky vrstvy v projekte (BACKGROUND, REFERENCE, EDGE, PAINT)
         self.layers: list[Layer] = []
 
         #globálna maska poškodenia a z nej odvodená maska vyplnených pixelov
@@ -101,6 +101,13 @@ class Project:
                 return layer
         return None
 
+    def get_reference_layer(self) -> Layer | None:
+        """Vráti vrstvu historickej kópie alebo None"""
+        for layer in self.layers:
+            if layer.meta.role == LayerRole.REFERENCE:
+                return layer
+        return None
+
     def get_paint_layers(self) -> list[Layer]:
         """Vráti zoznam všetkých PAINT vrstiev"""
         return [l for l in self.layers if l.meta.role == LayerRole.PAINT]
@@ -145,7 +152,100 @@ class Project:
 
     #---------kompozícia obrazu---------
 
-    def composited_image(self) -> np.ndarray:
+    def composited_view_image(self) -> np.ndarray:
+        """Vráti RGBA obraz určený na zobrazenie na plátne"""
+        bg = self.get_background_layer()
+        if bg is None:
+            raise RuntimeError("Project has no BACKGROUND layer")
+
+        return self.composited_view_region((0, 0, bg.width, bg.height))
+
+
+    def composited_view_region(self, bbox: tuple[int, int, int, int]) -> np.ndarray:
+        """Vráti RGBA výrez plátna, bbox = (x, y, w, h)"""
+        bg = self.get_background_layer()
+        if bg is None:
+            raise RuntimeError("Project has no BACKGROUND layer")
+
+        x, y, w, h = bbox
+        if w <= 0 or h <= 0:
+            return np.zeros((1, 1, 4), dtype=np.uint8)
+
+        H, W = bg.image.shape[:2]
+
+        x0 = max(0, min(x, W))
+        y0 = max(0, min(y, H))
+        x1 = max(x0, min(x + w, W))
+        y1 = max(y0, min(y + h, H))
+
+        if x1 <= x0 or y1 <= y0:
+            return np.zeros((1, 1, 4), dtype=np.uint8)
+
+        ys, xs = slice(y0, y1), slice(x0, x1)
+        view = np.zeros((y1 - y0, x1 - x0, 4), dtype=np.uint8)
+
+        #pôvodné pozadie
+        if bg.meta.visible:
+            view[..., :3] = bg.image[ys, xs, :3]
+            view[..., 3] = 255
+
+        #historická kópia
+        ref = self.get_reference_layer()
+
+        if ref is not None and ref.meta.visible and ref.image.shape[:2] == (H, W):
+            ref_cut = ref.image[ys, xs]
+            ref_opacity = float(np.clip(ref.meta.opacity, 0.0, 1.0))
+
+            if not bg.meta.visible:
+                #iba kópia: zobrazuje sa na celom plátne
+                view[:] = ref_cut
+                view[..., 3] = np.rint(ref_cut[..., 3] * ref_opacity).astype(np.uint8)
+
+            elif self.damage_original_mask is not None and self.damage_original_mask.shape == (H, W):
+                #obe vrstvy viditeľné -kópia nahradí pozadie iba v poškodených miestach
+                damaged = self.damage_original_mask[ys, xs]
+
+                view[damaged] = ref_cut[damaged]
+                view[damaged, 3] = np.rint(ref_cut[damaged, 3] * ref_opacity).astype(np.uint8)
+
+        #Paint vrstvy a nakoniec Edge
+        layers = sorted(self.get_paint_layers(), key=lambda layer: layer.meta.order)
+
+        edge = self.get_edge_layer()
+        if edge is not None:
+            layers.append(edge)
+
+        for layer in layers:
+            if not layer.meta.visible:
+                continue
+
+            if layer.image.shape[:2] != (H, W):
+                continue
+
+            src = layer.image[ys, xs]
+
+            src_alpha = src[..., 3:4].astype(np.float32) / 255.0
+            src_alpha *= float(np.clip(layer.meta.opacity, 0.0, 1.0))
+
+            dst_alpha = view[..., 3:4].astype(np.float32) / 255.0
+            out_alpha = src_alpha + dst_alpha * (1.0 - src_alpha)
+
+            #RGBA skladanie aj nad priehľadným podkladom
+            rgb_premul = src[..., :3].astype(np.float32) * src_alpha + view[..., :3].astype(np.float32) * dst_alpha * (1.0 - src_alpha)
+
+            rgb = np.zeros_like(rgb_premul)
+            np.divide(rgb_premul, out_alpha, out=rgb, where=out_alpha > 0)
+
+            view[..., :3] = np.clip(rgb, 0, 255).astype(np.uint8)
+            view[..., 3] = np.rint(np.clip(out_alpha[..., 0], 0.0, 1.0) * 255).astype(np.uint8)
+
+        #existujúca farebná korekcia náhľadu
+        if self.color_correction_enabled and self.color_correction_matrix is not None:
+            view[..., :3] = apply_color_correction(view[..., :3], self.color_correction_matrix)
+
+        return view
+
+    def composited_image(self, *, force_original_background: bool = False) -> np.ndarray:
         """
         Zloží výsledný RGB obraz z viditeľných vrstiev
         BACKGROUND tvorí podklad, PAINT vrstvy a EDGE vrstva sa skladajú pomocou alfa kanálu a krytia vrstvy
@@ -156,8 +256,8 @@ class Project:
 
         h, w, _ = bg_layer.image.shape
 
-        #ak je background skrytý, podklad je čierny
-        if not bg_layer.meta.visible:
+        #pri exporte vždy použijeme pôvodný obraz, nezávisle od jeho viditeľnosti na plátne
+        if not bg_layer.meta.visible and not force_original_background:
             base = np.zeros((h, w, 3), dtype=np.float32)
         else:
             base = bg_layer.image[..., :3].astype(np.float32)
@@ -522,6 +622,74 @@ class Project:
 
     #---------metódy pre externé algoritmy---------
 
+    def realistic_input_region(self, bbox: tuple[int, int, int, int], input_source: str = "original", use_composited_layers: bool = False) -> np.ndarray:
+        """Pripraví RGB výrez pre realistické doplnenie"""
+        bg = self.get_background_layer()
+        if bg is None:
+            raise ValueError("Projekt nemá původní obraz")
+
+        x, y, w, h = bbox
+        H, W = bg.image.shape[:2]
+
+        if w <= 0 or h <= 0 or x < 0 or y < 0 or x + w > W or y + h > H:
+            raise ValueError("Neplatné hranice vstupního okna")
+
+        if input_source not in ("original", "reference", "hybrid"):
+            raise ValueError("Neznámý zdroj vstupního obrazu")
+
+        original = bg.image[y:y + h, x:x + w, :3]
+        result = original.copy()
+
+        #historická kópia alebo kombinácia s pôvodným obrazom
+        if input_source != "original":
+            ref = self.get_reference_layer()
+
+            if ref is None or ref.image.shape[:2] != (H, W) or not ref.image[..., 3].any():
+                raise ValueError("Projekt nemá načtenou historickou kopii")
+
+            ref_patch = ref.image[y:y + h, x:x + w]
+
+            #iba skutočný alfa kanál obrázka, nie opacity vrstvy
+            alpha = ref_patch[..., 3:4].astype(np.float32) / 255.0
+
+            if input_source == "hybrid":
+                if self.damage_original_mask is None or self.damage_original_mask.shape != (H, W):
+                    raise ValueError("Projekt nemá platnou původní masku poškození")
+
+                #kópiu použijeme iba tam, kde je pôvodná maska poškodenia
+                alpha *= self.damage_original_mask[y:y + h, x:x + w, None]
+
+            result = np.clip(np.rint(ref_patch[..., :3].astype(np.float32) * alpha + original.astype(np.float32) * (1.0 - alpha)), 0, 255).astype(np.uint8)
+
+        if not use_composited_layers:
+            return result
+
+        #voliteľné pridanie viditeľných vrstiev Paint a Edge
+        base = result.astype(np.float32)
+
+        layers = sorted(self.get_paint_layers(), key=lambda layer: layer.meta.order)
+
+        edge = self.get_edge_layer()
+        if edge is not None:
+            layers.append(edge)
+
+        for layer in layers:
+            if not layer.meta.visible or layer.image.shape[:2] != (H, W):
+                continue
+
+            patch = layer.image[y:y + h, x:x + w]
+
+            alpha = (patch[..., 3:4].astype(np.float32) / 255.0) * float(np.clip(layer.meta.opacity, 0, 1))
+
+            base = patch[..., :3].astype(np.float32) * alpha + base * (1.0 - alpha)
+
+        result = np.clip(base, 0, 255).astype(np.uint8)
+
+        if self.color_correction_enabled and self.color_correction_matrix is not None:
+            result = apply_color_correction(result, self.color_correction_matrix)
+
+        return result
+
     def get_original_image(self) -> np.ndarray | None:
         """Vráti pôvodný obraz alebo pracovnú kópiu, ak pôvodný súbor nie je dostupný"""
         if self.base_image_path is not None and self.base_image_scale == 1.0:
@@ -591,5 +759,5 @@ class Project:
     #---------export--------
 
     def get_export_image(self) -> np.ndarray:
-        """Vráti exportovateľný finálny obraz v pracovnom rozlíšení"""
-        return self.composited_image()
+        """Vráti finálnu rekonštrukciu vždy s pôvodným pozadím"""
+        return self.composited_image(force_original_background=True)

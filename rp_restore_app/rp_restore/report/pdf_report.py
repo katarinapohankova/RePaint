@@ -256,7 +256,7 @@ def _add_input_data_section(story: list, project: Project, styles: dict[str, Par
 
 def _add_result_section(story: list, project: Project, styles: dict[str, ParagraphStyle]) -> None:
     story.append(Paragraph("Výsledný stav", styles["h1"]))
-    story.append(Paragraph("Výsledný stav odpovídá aktuálně viditelným vrstvám v projektu.", styles["body"]))
+    story.append(Paragraph("Výsledný stav vychází vždy z původního obrazu a viditelných vrstev malby a hran. Historická kopie slouží pouze jako reference", styles["body"]))
 
     composited = _safe_composited_image(project)
     remaining_visible = _remaining_damage_mask(project, visible_only=True)
@@ -297,11 +297,24 @@ def _add_layers_section(story: list, project: Project, styles: dict[str, Paragra
 
     story.append(Paragraph("Samostatné vrstvy", styles["h1"]))
     if not layers:
-        story.append(Paragraph("Projekt neobsahuje žádné pracovní vrstvy.", styles["body"]))
-        return
+        story.append(Paragraph(
+            "Projekt neobsahuje žádné pracovní vrstvy.",
+            styles["body"],
+        ))
 
+    #existujúce Paint a Edge vrstvy
     for layer in layers:
         story.extend(_layer_block(layer, styles))
+
+    #historická kópia – samostatná referenčná vrstva
+    reference = project.get_reference_layer()
+
+    if reference is not None and np.any(reference.image[..., 3]):
+        story.append(Paragraph("Referenční obraz", styles["h1"]))
+
+        story.append(Paragraph("Historická kopie slouží jako podklad pro plánování rekonstrukce, ale není součástí výsledného obrazu", styles["body"]))
+
+        story.extend(_layer_block(reference, styles))
 
 
 #obrázky a masky
@@ -318,14 +331,8 @@ def _project_original_rgb(project: Project) -> np.ndarray | None:
 
 
 def _safe_composited_image(project: Project) -> np.ndarray | None:
-    try:
-        composited = project.get_current_composited_image()
-    except Exception:
-        try:
-            composited = project.composited_image()
-        except Exception:
-            return None
-    return _to_rgb(composited)
+    """Vráti finálnu rekonštrukciu pre PDF report"""
+    return _to_rgb(project.get_export_image())
 
 def _damage_original_mask(project: Project) -> np.ndarray | None:
     mask = getattr(project, "damage_original_mask", None)
@@ -546,6 +553,8 @@ def _layer_block(layer: Layer, styles: dict[str, ParagraphStyle]) -> list:
 def _layer_role_label(role: LayerRole) -> str:
     if role == LayerRole.BACKGROUND:
         return "Původní obraz"
+    if role == LayerRole.REFERENCE:
+        return "Historická kopie"
     if role == LayerRole.PAINT:
         return "Malba"
     if role == LayerRole.EDGE:

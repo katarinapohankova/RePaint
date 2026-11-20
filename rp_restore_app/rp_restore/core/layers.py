@@ -10,6 +10,7 @@ class LayerRole(str, Enum):
     """Typ vrstvy v projekte"""
 
     BACKGROUND = "background"
+    REFERENCE = "reference"
     EDGE = "edge"
     PAINT = "paint"
 

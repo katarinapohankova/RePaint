@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from PySide6.QtWidgets import QButtonGroup, QCheckBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QHBoxLayout, QLabel, QRadioButton, QSpinBox, QVBoxLayout
+from PySide6.QtWidgets import QButtonGroup, QCheckBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QHBoxLayout, QLabel, QRadioButton, QSpinBox, QVBoxLayout, QComboBox
 
 from rp_restore.core.algorithm_runner import RealisticFillMode
 
@@ -16,6 +16,8 @@ class RealisticFillDialogResult:
     partial_noise: float
     seed: int | None
     realistic_mode: RealisticFillMode
+    input_source: str
+    use_composited_layers: bool
 
 
 class RealisticFillDialog(QDialog):
@@ -72,6 +74,39 @@ class RealisticFillDialog(QDialog):
         self.basic_mode_radio = QRadioButton("Základní")
         self.guided_mode_radio = QRadioButton("Vedené podle náčrtu")
 
+        #výber zdrojového obrazu
+        layout.addWidget(QLabel("Podklad pro realistické doplnění:"))
+
+        self.input_source_combo = QComboBox()
+        self.input_source_combo.addItem("Původní obraz", userData="original")
+
+        #historická kópia nemusí byť v projekte načítaná
+        project = getattr(self._controller, "project", None)
+        reference = project.get_reference_layer() if project is not None else None
+
+        if reference is not None and reference.image[..., 3].any():
+            self.input_source_combo.addItem("Historická kopie", userData="reference")
+            self.input_source_combo.addItem("Původní obraz + kopie v poškozených místech", userData="hybrid")
+
+        self.input_source_combo.setToolTip(
+            "Zdroj obrazu nezávisí na viditelnosti vrstev.\n"
+            "Průhledná místa historické kopie se automaticky doplní původním obrazem.\n"
+            "Krytí vrstvy historické kopie nemá na tento vstup vliv."
+        )
+
+        layout.addWidget(self.input_source_combo)
+
+        #voliteľné pridanie Paint a Edge
+        self.use_composited_checkbox = QCheckBox("Použít viditelné vrstvy malby a hran")
+        self.use_composited_checkbox.setChecked(False)
+        self.use_composited_checkbox.setToolTip(
+            "Do vybraného podkladu se přidají viditelné "
+            "vrstvy Paint a Edge.\n"
+            "Vhodné zejména pro vedené doplnění podle náčrtu."
+        )
+
+        layout.addWidget(self.use_composited_checkbox)
+
         self.basic_mode_radio.setChecked(True)
 
         mode_row.addWidget(self.basic_mode_radio)
@@ -87,13 +122,14 @@ class RealisticFillDialog(QDialog):
             "Vedené doplnění je výrazně pomalejší a je určené hlavně pro případy, "
             "kdy restaurátor do maskované oblasti načrtl požadovanou strukturu. "
             "Vodicí čáry by měly být tmavé a tenké, ideálně přibližně 1 px. "
-            "Pro tento režim se jako vstup použije aktuální složený obraz."
+            "Pro zahrnutí náčrtu zapněte použití viditelných vrstev malby a hran."
         )
 
         self.guided_mode_radio.setToolTip(guided_help)
 
         self.guided_info = QLabel(
-            "Vedené doplnění je pomalejší a používá aktuální složený obraz s případným náčrtem."
+            "Vedené doplnění je pomalejší. "
+            "Pro použití ručního náčrtu zapněte viditelné vrstvy malby a hran."
         )
         self.guided_info.setWordWrap(True)
         self.guided_info.setVisible(False)
@@ -172,6 +208,8 @@ class RealisticFillDialog(QDialog):
             partial_noise=float(self.partial_noise_spin.value()),
             seed=seed,
             realistic_mode=realistic_mode,
+            input_source=self.input_source_combo.currentData(),
+            use_composited_layers=self.use_composited_checkbox.isChecked(),
         )
 
     def _update_ok_enabled(self) -> None:
@@ -186,6 +224,9 @@ class RealisticFillDialog(QDialog):
         #partial_noise patrí iba k základnému režimu restore_file()
         self.partial_noise_spin.setEnabled(not guided)
         self.guided_info.setVisible(guided)
+
+        #predvolené správanie pôvodných režimov -basic bez maliarskych vrstiev, Guided s nimi
+        self.use_composited_checkbox.setChecked(guided)
 
     def _set_bbox(self, bbox: tuple[int, int, int, int]) -> None:
         """Nastaví aktuálne vybrané okno a aktualizuje text v dialógu"""

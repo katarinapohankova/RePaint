@@ -91,7 +91,7 @@ class AlgorithmPanel(QWidget):
                 return
 
             if hasattr(self._controller, "run_realistic_fill_window"):
-                self._controller.run_realistic_fill_window(res.bbox, use_mock=res.use_mock, partial_noise=res.partial_noise, seed=res.seed, realistic_mode=res.realistic_mode)
+                self._controller.run_realistic_fill_window(res.bbox, use_mock=res.use_mock, partial_noise=res.partial_noise, seed=res.seed, realistic_mode=res.realistic_mode, input_source=res.input_source, use_composited_layers=res.use_composited_layers)
 
         dlg.accepted.connect(_on_accept)
         dlg.destroyed.connect(lambda _obj=None: setattr(self, "_realistic_dialog", None))

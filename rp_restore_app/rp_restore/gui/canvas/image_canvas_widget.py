@@ -87,6 +87,7 @@ class ImageCanvasWidget(QWidget):
 
         painter = QPainter(self.current_image)
         try:
+            painter.setCompositionMode(QPainter.CompositionMode_Source)
             painter.drawImage(x, y, patch)
         finally:
             painter.end()

@@ -109,6 +109,7 @@ class LayersPanel(QWidget):
 
         role_names = {
             "background": "původní",
+            "reference": "kopie",
             "edge": "hrany",
             "paint": "malba",
         }

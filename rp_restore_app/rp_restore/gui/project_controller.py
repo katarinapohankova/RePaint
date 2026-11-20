@@ -1049,7 +1049,7 @@ class ProjectController:
 
         self.canvas.start_window_pick(on_done=_done, max_size=max_size)
 
-    def run_realistic_fill_window(self, window_bbox: tuple[int,int,int,int], use_mock: bool = False, partial_noise: float = 0.7, seed: int | None = None, realistic_mode: RealisticFillMode = RealisticFillMode.BASIC) -> None:
+    def run_realistic_fill_window(self, window_bbox: tuple[int,int,int,int], use_mock: bool = False, partial_noise: float = 0.7, seed: int | None = None, realistic_mode: RealisticFillMode = RealisticFillMode.BASIC, input_source: str = "original", use_composited_layers: bool | None = None) -> None:
         """
         Spustí realistic fill pre zvolené okno
         - ak je selection: aplikuje len do selection
@@ -1128,16 +1128,17 @@ class ProjectController:
             self.show_tool_message("Ve zvoleném okně už na této vrstvě není nic k doplnění")
             return
 
-        #Základný režim používa výsek pôvodného obrazu.
-        #Vedený režim používa aktuálny zložený obraz, aby obsahoval aj prípadný ručný náčrt.
-        if realistic_mode == RealisticFillMode.GUIDED:
-            image_patch = project.composited_region((x0, y0, ww, wh))
-        else:
-            original = project.get_original_image()
-            if original is None:
-                self.show_tool_message("Nezdařilo se načíst původní obraz")
-                return
-            image_patch = original[y0:y1, x0:x1].copy()
+        # Pri starších volaniach zachováme predvolené správanie režimov
+        if use_composited_layers is None:
+            use_composited_layers = (
+                realistic_mode == RealisticFillMode.GUIDED
+            )
+
+        try:
+            image_patch = project.realistic_input_region(bbox=(x0, y0, ww, wh), input_source=input_source, use_composited_layers=use_composited_layers)
+        except (ValueError, RuntimeError) as e:
+            self.show_tool_message(str(e))
+            return
 
         #request pre runner
         request = AlgorithmRequest(
@@ -1356,32 +1357,45 @@ class ProjectController:
             if paint_id is not None:
                 self.set_active_layer(paint_id)
 
+    def _apply_damage_overlay_rgba(self, image_rgba: np.ndarray, remaining_mask: np.ndarray | None) -> None:
+        """Pridá biely overlay masky na RGBA obraz bez straty priehľadnosti"""
+        if remaining_mask is None:
+            return
+
+        if remaining_mask.shape != image_rgba.shape[:2]:
+            return
+
+        alpha = float(np.clip(self.damage_overlay_opacity, 0.0, 1.0))
+        if alpha <= 0:
+            return
+
+        pixels = image_rgba[remaining_mask].astype(np.float32)
+        if pixels.size == 0:
+            return
+
+        old_alpha = pixels[:, 3:4] / 255.0
+        new_alpha = alpha + old_alpha * (1.0 - alpha)
+
+        pixels[:, :3] = (255.0 * alpha + pixels[:, :3] * old_alpha * (1.0 - alpha)) / new_alpha
+
+        pixels[:, 3:4] = new_alpha * 255.0
+
+        image_rgba[remaining_mask] = np.clip(np.rint(pixels), 0, 255).astype(np.uint8)
+
     def refresh_canvas(self) -> None:
         if self.project is None or self.canvas is None:
             return
 
         #numpy (H, W, 3, uint8)
-        image_rgb = self.project.composited_image()
+        #RGBA obraz so zobrazením historickej kópie
+        image_rgba = self.project.composited_view_image()
 
         #overlay poškodených oblastí (damage_remaining_mask)
         if self.show_damage_overlay:
             remaining = self._get_damage_overlay_mask_for_view()
-            if remaining is not None:
-                h_img, w_img, _ = image_rgb.shape
-                h_mask, w_mask = remaining.shape
+            self._apply_damage_overlay_rgba(image_rgba, remaining)
 
-                #len ak sedí veľkosť – aby to nespadlo, keby maska bola zlá
-                if h_mask == h_img and w_mask == w_img:
-                    #vybielený náhľad poškodených oblastí
-                    overlay_color = np.array([255, 255, 255], dtype=np.float32)
-                    alpha = self.damage_overlay_opacity  #0 = nič, 1 = úplne biele
-
-                    region = remaining
-                    orig = image_rgb[region].astype(np.float32)
-                    blended = orig * (1.0 - alpha) + overlay_color * alpha
-                    image_rgb[region] = blended.clip(0, 255).astype(np.uint8)
-                #inak overlay ignorujeme -maska nesedí
-        qimage = self._numpy_rgb_to_qimage(image_rgb)
+        qimage = self._numpy_rgba_to_qimage(image_rgba)
         self.canvas.set_image(qimage)
         #selection overlay
         if self.active_selection is not None and not self.active_selection.is_empty():
@@ -1394,51 +1408,38 @@ class ProjectController:
         self.canvas.set_selection_mask(sel_mask)
 
     def refresh_canvas_region(self, bbox: tuple[int, int, int, int]) -> None:
-        """
-        Rýchla verzia refreshu iba v oblasti bbox = (x, y, w, h)
-        výsledný patch vloží do existujúceho QImage v canvase
-        """
+        """Obnoví iba zmenenú RGBA oblasť plátna"""
         if self.project is None or self.canvas is None:
+            return
+
+        bg = self.project.get_background_layer()
+        if bg is None:
             return
 
         x, y, w, h = bbox
         if w <= 0 or h <= 0:
             return
 
-        #composited patch z core
-        region_rgb = self.project.composited_region(bbox)
-        #damage overlay len pre túto oblasť
+        H, W = bg.image.shape[:2]
+
+        x0 = max(0, min(x, W))
+        y0 = max(0, min(y, H))
+        x1 = max(x0, min(x + w, W))
+        y1 = max(y0, min(y + h, H))
+
+        if x1 <= x0 or y1 <= y0:
+            return
+
+        region_rgba = self.project.composited_view_region((x0, y0, x1 - x0, y1 - y0))
+
         if self.show_damage_overlay:
             remaining = self._get_damage_overlay_mask_for_view()
-            if remaining is not None:
-                y0, x0 = y, x
-                y1, x1 = y + h, x + w
 
-                Hmask, Wmask = remaining.shape
-                #orezať do hraníc masky
-                y0c = max(0, min(y0, Hmask))
-                y1c = max(0, min(y1, Hmask))
-                x0c = max(0, min(x0, Wmask))
-                x1c = max(0, min(x1, Wmask))
+            if remaining is not None and remaining.shape == (H, W):
+                self._apply_damage_overlay_rgba(region_rgba, remaining[y0:y1, x0:x1])
 
-                if y1c > y0c and x1c > x0c:
-                    sub_mask = remaining[y0c:y1c, x0c:x1c]
-                    h_sub, w_sub = sub_mask.shape
-                    h_img, w_img, _ = region_rgb.shape
-
-                    if h_sub == h_img and w_sub == w_img:
-                        overlay_color = np.array([255, 255, 255], dtype=np.float32)
-                        alpha = self.damage_overlay_opacity
-
-                        region = sub_mask
-                        orig = region_rgb[region].astype(np.float32)
-                        blended = orig * (1.0 - alpha) + overlay_color * alpha
-                        region_rgb[region] = blended.clip(0, 255).astype(np.uint8)
-
-        #konverzia patchu na QImage
-        patch_qimage = self._numpy_rgb_to_qimage(region_rgb)
-        #patch do canvasu
-        self.canvas.patch_region(patch_qimage, x, y)
+        patch_qimage = self._numpy_rgba_to_qimage(region_rgba)
+        self.canvas.patch_region(patch_qimage, x0, y0)
 
     def set_active_layer(self, layer_id: str) -> None:
         """
@@ -1661,6 +1662,15 @@ class ProjectController:
         bytes_per_line = ch * w
         qimage = QImage(arr.data, w, h, bytes_per_line, QImage.Format_RGB888)
         return qimage.copy()
+
+    def _numpy_rgba_to_qimage(self, arr: np.ndarray) -> QImage:
+        """Konvertuje RGBA numpy obraz na QImage so zachovaním alfy"""
+        if arr.dtype != np.uint8 or arr.ndim != 3 or arr.shape[2] != 4:
+            raise ValueError("Expected RGBA uint8 image")
+
+        h, w, _ = arr.shape
+
+        return QImage(arr.data, w, h, 4 * w, QImage.Format_RGBA8888).copy()
     
     #load/save projektu
     def create_project_from_files(self, image_path: str, mask_path: Optional[str] = None) -> Project:
@@ -1672,6 +1682,11 @@ class ProjectController:
 
         bg_meta = LayerMeta(id="background", name="Původní obraz", role=LayerRole.BACKGROUND)
         bg_layer = Layer(bg_meta, working_arr.copy())
+
+        #historická kópia
+        reference_img = np.zeros_like(working_arr, dtype=np.uint8)
+        reference_meta = LayerMeta(id="reference", name="Historická kopie", role=LayerRole.REFERENCE, visible=False, opacity=1.0)
+        reference_layer = Layer(reference_meta, reference_img)
 
         paint_img = np.zeros_like(working_arr, dtype=np.uint8)
         paint_meta = LayerMeta(id="paint_1", name="Malba 1", role=LayerRole.PAINT)
@@ -1691,6 +1706,7 @@ class ProjectController:
         project.base_image_working = working_arr    
 
         project.add_layer(bg_layer)
+        project.add_layer(reference_layer)
         project.add_layer(paint_layer)
         project.add_layer(edge_layer)
 
@@ -1716,6 +1732,57 @@ class ProjectController:
         self.set_project(project)
         self.current_project_path = None
         return project
+
+    def load_reference_image(self, image_path: str) -> bool:
+        """
+        Načíta historickú kópiu, zarovná ju k pôvodnému obrazu
+        a vloží do REFERENCE vrstvy
+        """
+        if self.project is None:
+            raise RuntimeError("Není otevřen žádný projekt")
+
+        bg_layer = self.project.get_background_layer()
+        if bg_layer is None:
+            raise RuntimeError("Projekt nemá původní obraz")
+
+        #načítanie RGBA obrázka na pracovné rozlíšenie
+        reference_arr, _ = load_working_image(image_path, max_size=4000)
+
+        #zarovnanie k existujúcemu pôvodnému obrazu
+        dlg = MaskAlignmentDialog(bg_layer.image, reference_arr, parent=QApplication.activeWindow(), reference_mode=True)
+
+        if dlg.exec() != QDialog.Accepted:
+            return False
+
+        image_points, reference_points = dlg.get_points()
+
+        H = mask_alignment.compute_homography(src_points=reference_points, dst_points=image_points)
+
+        aligned_reference = mask_alignment.warp_rgba_to_image(image_rgba=reference_arr, H=H, target_size=bg_layer.size)
+
+        #nájdeme existujúcu historickú kópiu
+        reference_layer = self.project.get_reference_layer()
+
+        if reference_layer is None:
+            #starší projekt, ktorý ešte REFERENCE vrstvu nemá
+            reference_meta = LayerMeta(id="reference", name="Historická kopie", role=LayerRole.REFERENCE, visible=True, opacity=1.0)
+            reference_layer = Layer(reference_meta, aligned_reference)
+
+            #zaradíme ju hneď za pôvodné pozadie
+            bg_index = self.project.layers.index(bg_layer)
+            self.project.layers.insert(bg_index + 1, reference_layer)
+        else:
+            #existujúcu prázdnu alebo starú kópiu nahradíme
+            reference_layer.image = aligned_reference
+            reference_layer.meta.visible = True
+
+        self.active_layer_id = reference_layer.meta.id
+
+        self.project.mark_dirty()
+        self.refresh_layers_panel()
+        self.refresh_canvas()
+
+        return True
 
     def open_project(self, zip_path: str) -> Project:
         """
