@@ -116,6 +116,9 @@ class LayersPanel(QWidget):
 
         for layer in project.layers:
             meta = layer.meta
+            if meta.role.value == "reference":
+                if not layer.image[..., 3].any():
+                    continue
 
             #item slúži ako kontajner pre vlastný widget riadku
             item = QListWidgetItem()

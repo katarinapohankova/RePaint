@@ -8,6 +8,8 @@ from PySide6.QtGui import QBrush, QColor, QCursor, QImage, QPainter, QPen, QPixm
 from PySide6.QtWidgets import QApplication, QDialog, QFileDialog
 from PySide6.QtCore import Qt, QTimer
 
+from tempfile import TemporaryDirectory
+
 from rp_restore.core.layers import Layer, LayerMeta, LayerRole
 from rp_restore.core.project_model import Project
 from rp_restore.config.settings import AppSettings
@@ -1683,11 +1685,6 @@ class ProjectController:
         bg_meta = LayerMeta(id="background", name="Původní obraz", role=LayerRole.BACKGROUND)
         bg_layer = Layer(bg_meta, working_arr.copy())
 
-        #historická kópia
-        reference_img = np.zeros_like(working_arr, dtype=np.uint8)
-        reference_meta = LayerMeta(id="reference", name="Historická kopie", role=LayerRole.REFERENCE, visible=False, opacity=1.0)
-        reference_layer = Layer(reference_meta, reference_img)
-
         paint_img = np.zeros_like(working_arr, dtype=np.uint8)
         paint_meta = LayerMeta(id="paint_1", name="Malba 1", role=LayerRole.PAINT)
         paint_layer = Layer(paint_meta, paint_img)
@@ -1706,7 +1703,6 @@ class ProjectController:
         project.base_image_working = working_arr    
 
         project.add_layer(bg_layer)
-        project.add_layer(reference_layer)
         project.add_layer(paint_layer)
         project.add_layer(edge_layer)
 
@@ -1798,6 +1794,94 @@ class ProjectController:
         self.current_project_path = path_text
         self.app_settings.add_recent_project(path_text)
         return project
+
+    def create_proposal_from_current_project(self, zip_path: str, keep_work_layers: bool) -> Project:
+        """
+        Vytvorí samostatný návrh z aktuálne otvoreného projektu.
+            keep_work_layers=True  -> ponechá Paint a Edge vrátane ich obsahu
+            keep_work_layers=False -> vytvorí prázdnu Paint a Edge vrstvu
+        """
+        if self.project is None:
+            raise RuntimeError("Není otevřen žádný projekt")
+
+        destination = Path(zip_path).resolve()
+
+        if destination.suffix.lower() != ".zip":
+            raise ValueError("Nový projekt musí mít příponu .zip")
+
+        #nikdy sa neprepíše existujúci projekt
+        if destination.exists():
+            raise FileExistsError("Soubor již existuje. Zvolte jiný název nového návrhu.")
+
+        #využijeme existujúci formát ZIP, aby sa zachovali obrázky, masky, textúry aj všetky nastavenia
+        with TemporaryDirectory() as temp_dir:
+            snapshot_path = Path(temp_dir) / "snapshot.zip"
+
+            ProjectSerializer.save_to_zip(self.project, snapshot_path)
+
+            new_project = ProjectLoader.load_from_zip(snapshot_path)
+
+        if not keep_work_layers:
+            bg = new_project.get_background_layer()
+            if bg is None:
+                raise RuntimeError("Projekt nemá původní obraz")
+
+            h, w = bg.image.shape[:2]
+
+            #ponecháme pôvodný obraz a historickú kópiu
+            #odstránime všetky existujúce Paint a Edge vrstvy
+            new_project.layers = [
+                layer
+                for layer in new_project.layers
+                if layer.meta.role not in (
+                    LayerRole.PAINT,
+                    LayerRole.EDGE,
+                )
+            ]
+
+            #nová prázdna Paint vrstva
+            paint_layer = Layer(LayerMeta(id="paint_1", name="Malba 1", role=LayerRole.PAINT, visible=True, opacity=1.0), np.zeros((h, w, 4), dtype=np.uint8))
+
+            #nová prázdna Edge vrstva
+            edge_layer = Layer(LayerMeta(id="edge_1", name="Hrany 1", role=LayerRole.EDGE, visible=True, opacity=1.0), np.zeros((h, w, 4), dtype=np.uint8))
+
+            new_project.add_layer(paint_layer)
+            new_project.add_layer(edge_layer)
+
+            #aktualizujeme poradie vrstiev
+            for index, layer in enumerate(new_project.layers):
+                layer.meta.order = index
+
+            #ponecháme pôvodnú masku poškodenia, ale všetky oblasti budú znovu nevyplnené
+            if new_project.damage_original_mask is not None:
+                new_project.set_damage_masks(new_project.damage_original_mask.copy())
+
+            #nový čistý návrh nemá históriu úprav pre report.
+            new_project.history_for_report = []
+
+        new_project.project_name = destination.stem
+
+        #najprv bezpečne uložíme nový projekt
+        try:
+            ProjectSerializer.save_to_zip(new_project, destination)
+        except Exception:
+            #odstránime prípadný neúplný ZIP
+            destination.unlink(missing_ok=True)
+            raise
+
+        #až po úspešnom uložení otvoríme nový návrh
+        self.active_selection = None
+        self._pending_window_bbox = None
+
+        self.set_project(new_project)
+
+        path_text = destination.as_posix()
+        self.current_project_path = path_text
+        self.app_settings.add_recent_project(path_text)
+
+        new_project.mark_saved()
+
+        return new_project
 
     def save_project_as(self, zip_path: str) -> None:
         """

@@ -165,6 +165,10 @@ class MainWindow(QMainWindow):
         open_action.triggered.connect(self.on_open_project_requested)
         file_menu.addAction(open_action)
 
+        new_proposal_action = QAction("Vytvořit nový návrh z aktuálního projektu...", self)
+        new_proposal_action.triggered.connect(self.on_create_proposal_requested)
+        file_menu.addAction(new_proposal_action)
+
         load_reference_action = QAction("Načíst historickou kopii...", self)
         load_reference_action.triggered.connect(self.on_load_reference_image)
         file_menu.addAction(load_reference_action)
@@ -877,6 +881,83 @@ class MainWindow(QMainWindow):
         if loaded:
             self.statusBar().showMessage("Historická kopie byla načtena a zarovnána", 4000)
 
+    def on_create_proposal_requested(self) -> None:
+        """Vytvorí nový nezávislý návrh z otvoreného projektu"""
+        project = self.controller.project
+
+        if project is None:
+            QMessageBox.information( self, "Žádný projekt", "Nejprve otevřete nebo vytvořte projekt",)
+            return
+
+        #výber medzi kompletnou kópiou a čistým návrhom
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Nový návrh")
+        msg.setText("Jak chcete vytvořit nový návrh?")
+        msg.setInformativeText(
+            "Původní obraz, maska poškození, historická kopie, paleta a textury se zachovají v obou případech.\n\n"
+            "Nový návrh bude samostatný projekt. "
+            "Původní soubor zůstane beze změny."
+        )
+
+        copy_button = msg.addButton("Ponechat malbu a hrany", QMessageBox.AcceptRole)
+        clean_button = msg.addButton("Začít s čistou malbou", QMessageBox.ActionRole)
+        msg.addButton("Zrušit", QMessageBox.RejectRole)
+
+        msg.exec()
+
+        selected = msg.clickedButton()
+
+        if selected not in (copy_button, clean_button):
+            return
+
+        keep_work_layers = selected == copy_button
+
+        #názov a umiestnenie nového ZIP projektu
+        current_path = self.controller.current_project_path
+
+        if current_path:
+            source = Path(current_path)
+            suggested_path = str(source.with_name(f"{source.stem}_navrh_2.zip"))
+        else:
+            suggested_path = f"{project.project_name}_navrh_2.zip"
+
+        zip_path, _ = QFileDialog.getSaveFileName(self, "Uložit nový návrh", suggested_path, "RP projekty (*.zip);;Všechny soubory (*.*)")
+
+        if not zip_path:
+            return
+
+        if not zip_path.lower().endswith(".zip"):
+            zip_path += ".zip"
+
+        #pred vytvorením nového návrhu skontrolujeme pôvodný projekt
+        if (self.controller.is_project_dirty() or not self.controller.current_project_path):
+            result = self.ask_to_save_before_close(
+                "Aktuální projekt obsahuje neuložené změny nebo ještě nebyl uložen.\n"
+                "Chcete jej uložit před vytvořením nového návrhu?"
+            )
+
+            if result == "cancel":
+                return
+
+            if result == "save":
+                try:
+                    if not self.controller.save_project_with_dialog_if_needed():
+                        return
+                except Exception as e:
+                    QMessageBox.critical(self, "Chyba při ukládání projektu", str(e))
+                    return
+            
+        try:
+            new_project = self.controller.create_proposal_from_current_project(zip_path=zip_path, keep_work_layers=keep_work_layers)
+        except Exception as e:
+            QMessageBox.critical(self, "Chyba při vytváření návrhu", str(e))
+            return
+
+        self.update_undo_redo_actions()
+        self._update_colorchecker_actions()
+
+        QMessageBox.information(self, "Projekt otevřen", f"Byl otevřen projekt:\n{new_project.project_name}")
+
     def on_save_project(self) -> None:
         """
         Uloží projekt na existujúcu cestu, alebo spustí Uložiť ako...
@@ -920,14 +1001,14 @@ class MainWindow(QMainWindow):
 
         self.statusBar().showMessage("Projekt byl uložen", 3000)
 
-    def ask_to_save_before_close(self) -> str:
+    def ask_to_save_before_close(self, message: str | None = None) -> str:
         """
         Vráti hodnotu "save", "discard" alebo "cancel"
         """
         msg: QMessageBox = QMessageBox(self)
         msg.setIcon(QMessageBox.Warning)
         msg.setWindowTitle("Neuložené změny")
-        msg.setText("Projekt není uložen. Chcete uložit změny před zavřením?")
+        msg.setText(message or "Projekt není uložen. Chcete uložit změny před zavřením?")
         btn_save: QAbstractButton = msg.addButton("Uložit", QMessageBox.AcceptRole)
         btn_discard = msg.addButton("Neukládat", QMessageBox.DestructiveRole)
         btn_cancel = msg.addButton("Zrušit", QMessageBox.RejectRole)
